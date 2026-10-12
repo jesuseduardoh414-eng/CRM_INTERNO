@@ -1,0 +1,608 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Base de datos MySQL / MariaDB: XAMPP en local y la MySQL del cPanel en
+// produccion. Antes era PostgreSQL (Supabase); las migraciones de esa epoca
+// estan archivadas en `prisma/migrations_postgres/` y ya no se aplican.
+//
+// Diferencias con la version Postgres que conviene recordar:
+// - Los ids UUID los genera Prisma (`@default(uuid())`) y se guardan como
+//   VARCHAR(36); MySQL no tiene tipo UUID ni `gen_random_uuid()`.
+// - `String` en MySQL es VARCHAR(191) por defecto. Los campos de texto libre
+//   llevan `@db.Text` / `@db.LongText` para no truncar (la foto de perfil en
+//   base64 supera 1 MB).
+// - MySQL no admite listas (`Int[]`): `diasLaborales` es `Json`.
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Usuario {
+  id                       Int                   @id @default(autoincrement())
+  nombre                   String                @db.VarChar(255)
+  email                    String                @unique
+  password                 String
+  telefono                 String?
+  puesto                   String?               @db.VarChar(255)
+  biografia                String?               @db.Text
+  fotoPerfilUrl            String?               @map("foto_perfil_url") @db.LongText
+  // Clave de un area de configuracion.reglas.areas (editables en el panel).
+  area                     String                @db.VarChar(40)
+  rol                      Rol                   @default(MIEMBRO)
+  creadoEn                 DateTime              @default(now())
+  resetToken               String?
+  resetTokenExpires        DateTime?
+  verificado               Boolean               @default(false)
+  verificationToken        String?
+  verificationTokenExpires DateTime?
+  estado                   String?               @default("pendiente")
+  tokenInvitacion          String?               @unique @map("token_invitacion")
+  tokenExpiraEn            DateTime?             @map("token_expira_en")
+  passwordHash             String?               @map("password_hash")
+  googleCalendarEmail      String?               @map("google_calendar_email")
+  googleAccessToken        String?               @map("google_access_token") @db.Text
+  googleRefreshToken       String?               @map("google_refresh_token") @db.Text
+  googleTokenExpiresAt     DateTime?             @map("google_token_expires_at")
+  // ---- Seguridad de acceso (modulo auth) ----
+  // Bloqueo progresivo por cuenta: vive en la base y no en memoria para que
+  // valga igual en todas las instancias y sobreviva a reinicios.
+  intentosFallidos         Int                   @default(0) @map("intentos_fallidos")
+  bloqueadoHasta           DateTime?             @map("bloqueado_hasta")
+  ultimoLoginEn            DateTime?             @map("ultimo_login_en")
+  passwordCambiadoEn       DateTime?             @map("password_cambiado_en")
+  // Intentos fallidos contra el codigo de verificacion de correo vigente.
+  verificacionIntentos     Int                   @default(0) @map("verificacion_intentos")
+  // Doble factor (TOTP). Los secretos van cifrados con AES-256-GCM y los
+  // codigos de respaldo solo como hash SHA-256.
+  dosFactoresActivo        Boolean               @default(false) @map("dos_factores_activo")
+  dosFactoresSecreto       String?               @map("dos_factores_secreto") @db.Text
+  dosFactoresPendiente     String?               @map("dos_factores_pendiente") @db.Text
+  dosFactoresUltimoPaso    Int?                  @map("dos_factores_ultimo_paso")
+  codigosRespaldo          Json?                 @map("codigos_respaldo")
+  sesiones                 Sesion[]
+  eventosSeguridad         EventoSeguridad[]
+  contratosCreados         Contrato[]            @relation("CreadorContrato")
+  contratosResponsable     Contrato[]            @relation("ResponsableContrato")
+  empresasCreadas          Empresa[]             @relation("CreadorEmpresa")
+  diasEmpresaCreados       DiaEmpresa[]          @relation("CreadorDiaEmpresa")
+  archivosContratoSubidos  ContratoArchivo[]
+  adjuntos                 Adjunto[]             @relation("AutorAdjunto")
+  comentarios              Comentario[]          @relation("AutorComentario")
+  actividades              LogActividad[]        @relation("AutorActividad")
+  eventos                  Evento[]              @relation("UsuarioEvento")
+  eventosCreados           Evento[]              @relation("EventosCreados")
+  invitacionesEventos      EventoInvitado[]
+  configLaboral            ConfiguracionLaboral?
+  diasEspeciales           DiaEspecial[]
+  notificaciones           Notificacion[]        @relation("DestinatarioNotificacion")
+  proyectosCreados         Proyecto[]            @relation("CreadorProyecto")
+  plantillasCreadas        PlantillaProyecto[]   @relation("CreadorPlantillaProyecto")
+  tareasCreadas            Tarea[]               @relation("CreadorTarea")
+  tareasAsignadas          Tarea[]               @relation("AsignadoTarea")
+  tareasCompartidas        Tarea[]               @relation("AsignadosMultiplesTarea")
+  proyectosMiembro         Proyecto[]            @relation("ProyectoMiembro")
+  invitacionesEnviadas     Invitacion[]          @relation("CreadorInvitacion")
+  // Solo rol CLIENTE: la empresa del directorio cuyo portal ve.
+  empresaId                Int?                  @map("empresa_id")
+  empresa                  Empresa?              @relation("UsuariosPortal", fields: [empresaId], references: [id], onDelete: SetNull)
+  mensajesPortal           MensajePortal[]       @relation("AutorMensajePortal")
+
+  @@index([empresaId])
+  @@map("usuarios")
+}
+
+// Una fila por dispositivo con sesion abierta. El refresh token solo se guarda
+// como hash SHA-256 y rota en cada uso; si llega un token ya rotado (fuera del
+// margen de concurrencia) se asume robo y la sesion se revoca entera.
+model Sesion {
+  id                  String    @id @default(uuid()) @db.VarChar(36)
+  usuarioId           Int       @map("usuario_id")
+  refreshHash         String    @unique @map("refresh_hash") @db.VarChar(64)
+  refreshHashAnterior String?   @map("refresh_hash_anterior") @db.VarChar(64)
+  rotadoEn            DateTime? @map("rotado_en")
+  recordar            Boolean   @default(false)
+  ip                  String?   @db.VarChar(64)
+  userAgent           String?   @map("user_agent") @db.VarChar(512)
+  creadoEn            DateTime  @default(now()) @map("creado_en")
+  ultimoUso           DateTime  @default(now()) @map("ultimo_uso")
+  expiraEn            DateTime  @map("expira_en")
+  revocadaEn          DateTime? @map("revocada_en")
+  usuario             Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([usuarioId])
+  @@index([refreshHashAnterior])
+  @@map("sesiones")
+}
+
+// Bitacora de seguridad: inicios de sesion, fallos, bloqueos, cambios de
+// contraseña y de doble factor. La ve cada persona en su perfil.
+model EventoSeguridad {
+  id        Int      @id @default(autoincrement())
+  usuarioId Int?     @map("usuario_id")
+  email     String?  @db.VarChar(191)
+  tipo      String   @db.VarChar(64)
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @map("user_agent") @db.VarChar(512)
+  detalle   String?  @db.Text
+  creadoEn  DateTime @default(now()) @map("creado_en")
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([usuarioId, creadoEn])
+  @@map("eventos_seguridad")
+}
+
+// Contratos con clientes y proveedores. Solo los ven los administradores
+// (se exige en el backend, no solo en el menu).
+// - folio: CTR-AAAA-NNNN, se asigna al crear.
+// - estado guardado: BORRADOR | EN_REVISION | VIGENTE | TERMINADO | CANCELADO.
+//   "Vencido" y "por vencer" no se guardan: se calculan con fechaFin, para que
+//   nunca queden desactualizados.
+model Contrato {
+  id                   Int               @id @default(autoincrement())
+  folio                String            @unique @db.VarChar(40)
+  titulo               String            @db.VarChar(255)
+  tipo                 String            @db.VarChar(20)
+  categoria            String?           @db.VarChar(40)
+  estado               String            @default("BORRADOR") @db.VarChar(20)
+  contraparteNombre    String            @map("contraparte_nombre") @db.VarChar(255)
+  contraparteRfc       String?           @map("contraparte_rfc") @db.VarChar(13)
+  contraparteContacto  String?           @map("contraparte_contacto") @db.VarChar(255)
+  contraparteEmail     String?           @map("contraparte_email") @db.VarChar(191)
+  contraparteTelefono  String?           @map("contraparte_telefono") @db.VarChar(40)
+  descripcion          String?           @db.Text
+  monto                Decimal?          @db.Decimal(14, 2)
+  moneda               String            @default("MXN") @db.VarChar(3)
+  incluyeIva           Boolean           @default(false) @map("incluye_iva")
+  periodicidadPago     String?           @map("periodicidad_pago") @db.VarChar(20)
+  fechaFirma           DateTime?         @map("fecha_firma") @db.Date
+  fechaInicio          DateTime?         @map("fecha_inicio") @db.Date
+  fechaFin             DateTime?         @map("fecha_fin") @db.Date
+  renovacionAutomatica Boolean           @default(false) @map("renovacion_automatica")
+  diasAviso            Int               @default(30) @map("dias_aviso")
+  notas                String?           @db.Text
+  proyectoId           Int?              @map("proyecto_id")
+  // Ficha del directorio de clientes y proveedores. Los campos contraparte*
+  // se conservan como foto de los datos al firmar.
+  empresaId            Int?              @map("empresa_id")
+  responsableId        Int?              @map("responsable_id")
+  creadoPorId          Int?              @map("creado_por_id")
+  creadoEn             DateTime          @default(now()) @map("creado_en")
+  actualizadoEn        DateTime          @updatedAt @map("actualizado_en")
+  proyecto             Proyecto?         @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
+  empresa              Empresa?          @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  responsable          Usuario?          @relation("ResponsableContrato", fields: [responsableId], references: [id], onDelete: SetNull)
+  creadoPor            Usuario?          @relation("CreadorContrato", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  archivos             ContratoArchivo[]
+
+  @@index([tipo])
+  @@index([estado])
+  @@index([fechaFin])
+  @@index([empresaId])
+  @@map("contratos")
+}
+
+// Directorio de clientes y proveedores (solo administradores).
+model Empresa {
+  id              Int               @id @default(autoincrement())
+  nombre          String            @db.VarChar(255) // razón social o nombre
+  nombreComercial String?           @map("nombre_comercial") @db.VarChar(255)
+  tipo            String            @default("CLIENTE") @db.VarChar(20) // CLIENTE | PROVEEDOR | AMBOS
+  estado          String            @default("ACTIVO") @db.VarChar(20) // ACTIVO | INACTIVO
+  rfc             String?           @db.VarChar(13)
+  sector          String?           @db.VarChar(80)
+  sitioWeb        String?           @map("sitio_web") @db.VarChar(255)
+  email           String?           @db.VarChar(191)
+  telefono        String?           @db.VarChar(40)
+  direccion       String?           @db.VarChar(500)
+  ciudad          String?           @db.VarChar(120)
+  notas           String?           @db.Text
+  creadoPorId     Int?              @map("creado_por_id")
+  creadoEn        DateTime          @default(now()) @map("creado_en")
+  actualizadoEn   DateTime          @updatedAt @map("actualizado_en")
+  creadoPor       Usuario?          @relation("CreadorEmpresa", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  contactos       ContactoEmpresa[]
+  contratos       Contrato[]
+  proyectos       Proyecto[]
+  usuariosPortal  Usuario[]         @relation("UsuariosPortal")
+  invitaciones    Invitacion[]
+  reuniones       Evento[]
+
+  @@index([tipo])
+  @@index([nombre])
+  @@map("empresas")
+}
+
+model ContactoEmpresa {
+  id        Int      @id @default(autoincrement())
+  empresaId Int      @map("empresa_id")
+  nombre    String   @db.VarChar(255)
+  puesto    String?  @db.VarChar(120)
+  email     String?  @db.VarChar(191)
+  telefono  String?  @db.VarChar(40)
+  principal Boolean  @default(false)
+  notas     String?  @db.Text
+  creadoEn  DateTime @default(now()) @map("creado_en")
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId])
+  @@map("contactos_empresa")
+}
+
+// PDF escaneados de un contrato. El archivo vive en disco (CONTRATOS_DIR),
+// fuera de cualquier carpeta publica, y solo se sirve a un admin autenticado.
+// `archivo` es el nombre interno (uuid.pdf); `nombreOriginal` el que subio la persona.
+model ContratoArchivo {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  contratoId     Int      @map("contrato_id")
+  nombreOriginal String   @map("nombre_original") @db.VarChar(255)
+  archivo        String   @unique @db.VarChar(80)
+  tamano         Int
+  sha256         String   @db.VarChar(64)
+  tipoDocumento  String   @default("FIRMADO") @map("tipo_documento") @db.VarChar(20)
+  subidoPorId    Int?     @map("subido_por_id")
+  creadoEn       DateTime @default(now()) @map("creado_en")
+  contrato       Contrato @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  subidoPor      Usuario? @relation(fields: [subidoPorId], references: [id], onDelete: SetNull)
+
+  @@index([contratoId])
+  @@map("contrato_archivos")
+}
+
+// Configuracion de la instalacion (una sola fila, id = 1). `datos` es un JSON
+// validado y completado con valores por defecto en utils/configuracion.utils.js.
+model Configuracion {
+  id               Int      @id @default(1)
+  datos            Json
+  version          Int      @default(1)
+  actualizadoEn    DateTime @updatedAt @map("actualizado_en")
+  actualizadoPorId Int?     @map("actualizado_por_id")
+
+  @@map("configuracion")
+}
+
+// Imagenes de marca (logos, favicon, fondo del login). Son publicas (la
+// pantalla de login las muestra antes de iniciar sesion), por eso viven en la
+// base y se sirven con cabeceras estrictas desde /api/configuracion/archivos.
+model ConfiguracionArchivo {
+  clave         String   @id @db.VarChar(40)
+  mime          String   @db.VarChar(60)
+  contenido     Bytes    @db.MediumBlob
+  sha256        String   @db.VarChar(64)
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+
+  @@map("configuracion_archivos")
+}
+
+model Invitacion {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  email     String
+  nombre    String   @db.VarChar(255)
+  area      String
+  rol       String   @default("miembro")
+  token     String   @unique
+  estado    String   @default("pendiente")
+  creadoPor Int?     @map("creado_por")
+  creadoEn  DateTime @default(now()) @map("creado_en")
+  expiraEn  DateTime @map("expira_en")
+  creador   Usuario? @relation("CreadorInvitacion", fields: [creadoPor], references: [id])
+  // Invitaciones al portal de clientes (rol "cliente"): empresa que verá.
+  empresaId Int?     @map("empresa_id")
+  empresa   Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  @@index([empresaId])
+  @@map("invitaciones")
+}
+
+model Proyecto {
+  id             Int                 @id @default(autoincrement())
+  nombre         String              @db.VarChar(255)
+  descripcion    String?             @db.Text
+  estado         String              @default("ACTIVO")
+  creadoEn       DateTime            @default(now())
+  creadorId      Int
+  area           String              @default("DESARROLLO")
+  fechaFin       DateTime?
+  fechaInicio    DateTime            @default(now())
+  clienteId      Int?                @map("cliente_id")
+  cliente        Empresa?            @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  adjuntos       Adjunto[]
+  comentarios    Comentario[]
+  actividades    LogActividad[]
+  creador        Usuario             @relation("CreadorProyecto", fields: [creadorId], references: [id])
+  tareas         Tarea[]
+  notificaciones Notificacion[]
+  miembros       Usuario[]           @relation("ProyectoMiembro")
+  eventos        Evento[]
+  plantillasBase PlantillaProyecto[] @relation("ProyectoFuentePlantillas")
+  contratos      Contrato[]
+  mensajesPortal MensajePortal[]
+
+  @@index([clienteId])
+  @@map("proyectos")
+}
+
+model PlantillaProyecto {
+  id             Int              @id @default(autoincrement())
+  nombre         String           @db.VarChar(255)
+  descripcion    String?          @db.Text
+  area           String           @default("DESARROLLO")
+  creadoEn       DateTime         @default(now())
+  creadorId      Int
+  proyectoBaseId Int?
+  creador        Usuario          @relation("CreadorPlantillaProyecto", fields: [creadorId], references: [id])
+  proyectoBase   Proyecto?        @relation("ProyectoFuentePlantillas", fields: [proyectoBaseId], references: [id], onDelete: SetNull)
+  tareas         PlantillaTarea[]
+
+  @@map("plantillas_proyecto")
+}
+
+model PlantillaTarea {
+  id               Int               @id @default(autoincrement())
+  plantillaId      Int
+  clave            String
+  titulo           String            @db.VarChar(255)
+  descripcion      String?           @db.Text
+  prioridad        String            @default("MEDIA")
+  orden            Int               @default(0)
+  offsetInicioDias Int               @default(0)
+  offsetVenceDias  Int?
+  dependeDeClave   String?
+  plantilla        PlantillaProyecto @relation(fields: [plantillaId], references: [id], onDelete: Cascade)
+
+  @@unique([plantillaId, clave])
+  @@map("plantillas_tarea")
+}
+
+model Tarea {
+  id              Int            @id @default(autoincrement())
+  titulo          String         @db.VarChar(255)
+  descripcion     String?        @db.Text
+  numeroActividad Int?
+  estado          String         @default("PENDIENTE")
+  prioridad       String         @default("MEDIA")
+  creadoEn        DateTime       @default(now())
+  completadoEn    DateTime?
+  venceEn         DateTime?
+  proyectoId      Int
+  asignadoId      Int?
+  creadorId       Int?
+  dependeDeId     Int?
+  fechaInicio     DateTime       @default(now())
+  adjuntos        Adjunto[]
+  comentarios     Comentario[]
+  actividades     LogActividad[]
+  asignado        Usuario?       @relation("AsignadoTarea", fields: [asignadoId], references: [id])
+  asignados       Usuario[]      @relation("AsignadosMultiplesTarea")
+  creador         Usuario?       @relation("CreadorTarea", fields: [creadorId], references: [id])
+  dependeDe       Tarea?         @relation("Dependencia", fields: [dependeDeId], references: [id])
+  bloqueaA        Tarea[]        @relation("Dependencia")
+  proyecto        Proyecto       @relation(fields: [proyectoId], references: [id])
+  notificaciones  Notificacion[]
+
+  @@index([asignadoId])
+  @@index([creadorId])
+  @@index([estado])
+  @@index([proyectoId, numeroActividad])
+  @@map("tareas")
+}
+
+model Notificacion {
+  id          Int       @id @default(autoincrement())
+  mensaje     String    @db.Text
+  tipo        String
+  leida       Boolean   @default(false)
+  creadaEn    DateTime  @default(now())
+  usuarioId   Int
+  tareaId     Int?
+  proyectoId  Int?
+  eventoId    String?   @db.VarChar(36)
+  actorNombre String?   @db.VarChar(255)
+  usuario     Usuario   @relation("DestinatarioNotificacion", fields: [usuarioId], references: [id], onDelete: Cascade)
+  tarea       Tarea?    @relation(fields: [tareaId], references: [id], onDelete: SetNull)
+  proyecto    Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
+  evento      Evento?   @relation(fields: [eventoId], references: [id], onDelete: SetNull)
+
+  @@map("notificaciones")
+}
+
+model Comentario {
+  id         Int       @id @default(autoincrement())
+  contenido  String    @db.Text
+  creadoEn   DateTime  @default(now())
+  autorId    Int
+  tareaId    Int?
+  proyectoId Int?
+  autor      Usuario   @relation("AutorComentario", fields: [autorId], references: [id], onDelete: Cascade)
+  proyecto   Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  tarea      Tarea?    @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+
+  @@map("comentarios")
+}
+
+model LogActividad {
+  id          Int      @id @default(autoincrement())
+  accion      String
+  descripcion String   @db.Text
+  creadoEn    DateTime @default(now())
+  usuarioId   Int
+  proyectoId  Int
+  tareaId     Int?
+  proyecto    Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  tarea       Tarea?   @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  usuario     Usuario  @relation("AutorActividad", fields: [usuarioId], references: [id])
+
+  @@map("logs_actividad")
+}
+
+model Adjunto {
+  id             Int       @id @default(autoincrement())
+  nombre         String    @db.VarChar(255)
+  url            String    @db.Text
+  tipo           String?
+  tamano         Int?
+  creadoEn       DateTime  @default(now())
+  usuarioId      Int
+  tareaId        Int?
+  proyectoId     Int?
+  eventoId       String?   @db.VarChar(36)
+  // Lo ve el cliente en su portal (solo archivos del proyecto, no de tareas).
+  visibleCliente Boolean   @default(false) @map("visible_cliente")
+  proyecto       Proyecto? @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  tarea          Tarea?    @relation(fields: [tareaId], references: [id], onDelete: Cascade)
+  evento         Evento?   @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  usuario        Usuario   @relation("AutorAdjunto", fields: [usuarioId], references: [id])
+
+  @@map("adjuntos")
+}
+
+// Modelo de Agenda Personal y Compartida
+model Evento {
+  id                  String    @id @default(uuid()) @db.VarChar(36)
+  usuarioId           Int // Creador/Propietario original (Phase 8 logic)
+  usuario             Usuario   @relation("UsuarioEvento", fields: [usuarioId], references: [id], onDelete: Cascade)
+  titulo              String    @db.VarChar(255)
+  descripcion         String?   @db.Text
+  tipo                String // 'evento', 'recordatorio', 'dia_completo'
+  modalidad           String    @default("presencial")
+  ubicacion           String?   @db.VarChar(255)
+  urlReunion          String?   @map("url_reunion") @db.Text
+  instruccionesAcceso String?   @map("instrucciones_acceso") @db.Text
+  fechaInicio         DateTime  @map("fecha_inicio")
+  fechaFin            DateTime? @map("fecha_fin")
+  todoElDia           Boolean   @default(false) @map("todo_el_dia")
+  color               String    @default("#4a90d9")
+  alertaMinutos       Int?      @map("alerta_minutos")
+  creadoEn            DateTime  @default(now()) @map("creado_en")
+
+  // Phase 8.1 - Compartidos
+  esCompartido   Boolean          @default(false) @map("es_compartido")
+  esGlobal       Boolean          @default(false) @map("es_global")
+  proyectoId     Int?             @map("proyecto_id")
+  proyecto       Proyecto?        @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
+  creadoPorId    Int?             @map("creado_por_id")
+  creador        Usuario?         @relation("EventosCreados", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  invitados      EventoInvitado[]
+  adjuntos       Adjunto[]
+  notificaciones Notificacion[]
+
+  // Recurrencia
+  esRecurrente          Boolean   @default(false) @map("es_recurrente")
+  patronRecurrencia     String?   @map("patron_recurrencia") @db.Text // JSON: { tipo:'semanal', dias:[0,6], horaInicio:'09:00', horaFin:'18:00' }
+  fechaFinRecurr        DateTime? @map("fecha_fin_recurrencia")
+  googleCalendarEventId String?   @map("google_calendar_event_id") @db.VarChar(255)
+  // Reunión con un cliente: aparece en el portal de esa empresa.
+  empresaId             Int?      @map("empresa_id")
+  empresa               Empresa?  @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+
+  @@index([empresaId])
+  @@map("eventos")
+}
+
+model EventoInvitado {
+  id        String  @id @default(uuid()) @db.VarChar(36)
+  eventoId  String  @map("evento_id") @db.VarChar(36)
+  usuarioId Int     @map("usuario_id")
+  estado    String  @default("pendiente") // 'pendiente', 'aceptado', 'rechazado'
+  visto     Boolean @default(false)
+  evento    Evento  @relation(fields: [eventoId], references: [id], onDelete: Cascade)
+  usuario   Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([eventoId, usuarioId])
+  @@map("evento_invitados")
+}
+
+model ConfiguracionLaboral {
+  id               String   @id @default(uuid()) @db.VarChar(36)
+  usuarioId        Int      @unique @map("usuario_id")
+  // Lista de dias (1 = lunes ... 7 = domingo). MySQL no tiene listas, asi que
+  // va como JSON; el valor por defecto [1,2,3,4,5] lo pone el controlador.
+  diasLaborales    Json     @map("dias_laborales")
+  horaEntrada      String   @default("09:00") @map("hora_entrada")
+  horaSalida       String   @default("18:00") @map("hora_salida")
+  horaComidaInicio String   @default("14:00") @map("hora_comida_inicio")
+  horaComidaFin    String   @default("15:00") @map("hora_comida_fin")
+  // Dias con horario distinto al general (p. ej. sabado medio turno):
+  // { "6": { entrada, salida, comidaInicio, comidaFin } }. Ver utils/horarios.utils.js
+  horariosPorDia   Json?    @map("horarios_por_dia")
+  creadoEn         DateTime @default(now()) @map("creado_en")
+  actualizadoEn    DateTime @updatedAt @map("actualizado_en")
+  usuario          Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@map("calendario_laboral")
+}
+
+model DiaEspecial {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  usuarioId   Int      @map("usuario_id")
+  fecha       DateTime @db.Date
+  tipo        String // 'vacacion', 'permiso', 'descanso', 'incapacidad', 'homeoffice', 'cumpleanos'
+  descripcion String?  @db.Text
+  // Solo una parte del dia (p. ej. permiso de 10:00 a 12:00). null = todo el dia.
+  horaInicio  String?  @map("hora_inicio") @db.VarChar(5)
+  horaFin     String?  @map("hora_fin") @db.VarChar(5)
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, fecha])
+  @@map("dias_especiales")
+}
+
+// CONFIGURADOR: cuenta de quien instala/vende el CRM. Solo entra al panel de
+// configuracion (marca, colores, login, modulos); no ve datos de la empresa ni
+// aparece en las listas del equipo. Se crea con scripts/crear_configurador.js.
+enum Rol {
+  ADMIN
+  MIEMBRO
+  CONFIGURADOR
+  CLIENTE
+}
+
+// Conversación de un proyecto entre el cliente (portal) y el equipo. Va
+// aparte de los comentarios internos para que el cliente nunca los vea.
+model MensajePortal {
+  id         Int      @id @default(autoincrement())
+  proyectoId Int      @map("proyecto_id")
+  autorId    Int      @map("autor_id")
+  contenido  String   @db.Text
+  deCliente  Boolean  @default(false) @map("de_cliente")
+  creadoEn   DateTime @default(now()) @map("creado_en")
+  proyecto   Proyecto @relation(fields: [proyectoId], references: [id], onDelete: Cascade)
+  autor      Usuario  @relation("AutorMensajePortal", fields: [autorId], references: [id], onDelete: Cascade)
+
+  @@index([proyectoId, creadoEn])
+  @@index([autorId])
+  @@map("mensajes_portal")
+}
+
+// Calendario de la empresa: festivos, días no laborables, cierres, puentes y
+// días especiales que aplican a todos (area null) o a un área. Los marca un
+// administrador. repetirAnual: se repite cada año en las mismas fechas.
+model DiaEmpresa {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  fechaInicio  DateTime @map("fecha_inicio") @db.Date
+  fechaFin     DateTime @map("fecha_fin") @db.Date
+  tipo         String   @db.VarChar(20) // festivo | no_laboral | cierre | puente | especial
+  nombre       String   @db.VarChar(120)
+  descripcion  String?  @db.Text
+  repetirAnual Boolean  @default(false) @map("repetir_anual")
+  // Repeticion semanal dentro del periodo: [1..7] (1 = lunes). null = todos los dias.
+  // Sin fecha de fin ("todas las semanas") se guarda fechaFin = 2099-12-31.
+  diasSemana   Json?    @map("dias_semana")
+  area         String?  @db.VarChar(40)
+  creadoPorId  Int?     @map("creado_por_id")
+  creadoEn     DateTime @default(now()) @map("creado_en")
+  creadoPor    Usuario? @relation("CreadorDiaEmpresa", fields: [creadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([fechaInicio])
+  @@map("dias_empresa")
+}
+
+// Avisos por correo ya enviados (recordatorios de eventos, resumen diario...).
+// `clave` identifica el aviso para no mandarlo dos veces.
+model AvisoEnviado {
+  clave    String   @id @db.VarChar(191)
+  creadoEn DateTime @default(now()) @map("creado_en")
+
+  @@index([creadoEn])
+  @@map("avisos_enviados")
+}

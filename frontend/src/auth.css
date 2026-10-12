@@ -1,0 +1,380 @@
+/* ══ Módulo de autenticación ═════════════════════════════════════════════════
+   Pantallas públicas (login, registro, verificación, recuperación, invitación)
+   con layout dividido: panel de marca marino a la izquierda (siempre oscuro,
+   en los dos temas) y formulario a la derecha con los tokens del tema.
+   Se importa desde main.jsx después de index.css. */
+
+.auth-shell {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  background: var(--color-bg-base);
+}
+@media (min-width: 1024px) {
+  .auth-shell { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); }
+}
+
+/* ── Panel de marca ── */
+.auth-brand {
+  position: relative;
+  display: none;
+  overflow: hidden;
+  isolation: isolate;
+  color: #fffcf0;
+  /* Colores de la marca configurada (--marca-*, ver utils/temaMarca.js); los
+     valores de respaldo son los de fábrica (OMNIS). */
+  --marca-p: var(--marca-primario, #10233f);
+  --marca-a: var(--marca-acento, #c9a227);
+  background:
+    radial-gradient(60% 50% at 85% 8%, color-mix(in srgb, var(--marca-a) 22%, transparent), transparent 70%),
+    radial-gradient(70% 60% at 0% 100%, color-mix(in srgb, var(--marca-p) 85%, #ffffff 15%), transparent 70%),
+    linear-gradient(160deg, var(--marca-p) 0%, color-mix(in srgb, var(--marca-p) 62%, #000) 55%, color-mix(in srgb, var(--marca-p) 42%, #000) 100%);
+}
+/* Fijo a la altura de la ventana: en pantallas largas (registro) el formulario
+   se desplaza y la marca se queda quieta. */
+@media (min-width: 1024px) {
+  .auth-brand { display: flex; position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: start; }
+}
+.auth-brand::before {
+  /* Retícula fina que se desvanece hacia los bordes */
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgb(255 252 240 / 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 252 240 / 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: radial-gradient(ellipse 75% 65% at 55% 45%, #000 20%, transparent 75%);
+  mask-image: radial-gradient(ellipse 75% 65% at 55% 45%, #000 20%, transparent 75%);
+}
+.auth-ring {
+  position: absolute;
+  /* El centro queda justo pasado el borde derecho: solo se ve la mitad
+     izquierda del anillo y no cruza el texto. */
+  right: 0;
+  top: 50%;
+  width: min(84vh, 700px);
+  aspect-ratio: 1;
+  translate: 56% -50%;
+  z-index: -1;
+  pointer-events: none;
+}
+.auth-ring-arc { transform-origin: 50% 50%; animation: auth-spin 48s linear infinite; }
+.auth-ring-arc-slow { transform-origin: 50% 50%; animation: auth-spin 90s linear infinite reverse; }
+@keyframes auth-spin { to { transform: rotate(360deg); } }
+
+.auth-feature-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex-shrink: 0;
+  border-radius: 0.75rem;
+  color: color-mix(in srgb, var(--marca-a) 75%, #ffffff);
+  background: color-mix(in srgb, var(--marca-a) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--marca-a) 25%, transparent);
+}
+
+/* ── Columna del formulario ── */
+.auth-main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 1.25rem 1rem;
+}
+@media (min-width: 640px) { .auth-main { padding: 1.75rem 2.5rem; } }
+/* Zonas seguras del iPhone (viewport-fit=cover en index.html): notch en
+   horizontal y barra de inicio abajo. En escritorio valen 0. */
+.auth-main {
+  padding-top: max(1.25rem, env(safe-area-inset-top));
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+  padding-right: max(1rem, env(safe-area-inset-right));
+}
+@media (min-width: 640px) {
+  .auth-main {
+    padding-top: max(1.75rem, env(safe-area-inset-top));
+    padding-bottom: max(1.75rem, env(safe-area-inset-bottom));
+    padding-left: max(2.5rem, env(safe-area-inset-left));
+    padding-right: max(2.5rem, env(safe-area-inset-right));
+  }
+}
+.auth-main::before {
+  /* Brillo dorado muy suave en móvil, donde no hay panel de marca */
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 340px;
+  pointer-events: none;
+  background: radial-gradient(60% 100% at 50% 0%, var(--color-gold-10), transparent 70%);
+}
+@media (min-width: 1024px) { .auth-main::before { display: none; } }
+.auth-content {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin: auto;
+  padding: 2rem 0;
+}
+
+.auth-title {
+  font-size: 1.75rem;
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--color-text);
+}
+@media (min-width: 640px) { .auth-title { font-size: 2rem; } }
+/* overflow-wrap: los subtitulos citan el correo, que sin espacios desbordaba a 360px */
+.auth-subtitle { margin-top: 0.5rem; font-size: 0.95rem; line-height: 1.55; color: var(--color-text-muted); overflow-wrap: anywhere; }
+
+.auth-hero-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-bottom: 1.25rem;
+  border-radius: 1rem;
+  color: var(--color-gold-text);
+  background: var(--color-gold-10);
+  border: 1px solid var(--color-gold-20);
+}
+.auth-hero-icon[data-tono="exito"] { color: var(--badge-success-fg); background: var(--badge-success-bg); border-color: transparent; }
+.auth-hero-icon[data-tono="error"] { color: var(--badge-danger-fg); background: var(--badge-danger-bg); border-color: transparent; }
+
+/* ── Campos ── */
+.auth-label {
+  display: block;
+  margin-bottom: 0.4rem;
+  font-size: 0.8125rem;
+  font-weight: 550;
+  color: var(--color-text-dim);
+}
+.auth-field { position: relative; }
+.auth-field-icon {
+  position: absolute;
+  left: 0.95rem;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  transition: color 0.15s ease;
+}
+.auth-field:focus-within .auth-field-icon { color: var(--color-primary); }
+.auth-input {
+  width: 100%;
+  height: 3rem;
+  padding: 0 1rem;
+  border-radius: 0.875rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.auth-input::placeholder { color: var(--color-text-muted); opacity: 0.8; }
+.auth-input:hover { border-color: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-border)); }
+.auth-input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 4px var(--color-primary-20); }
+.auth-input[aria-invalid="true"] { border-color: var(--color-error); }
+.auth-input[aria-invalid="true"]:focus { box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-error) 18%, transparent); }
+.auth-input[readonly] { background: var(--color-surface-3); color: var(--color-text-dim); cursor: default; }
+.auth-input.con-icono { padding-left: 2.75rem; }
+.auth-input.con-accion { padding-right: 3rem; }
+/* Desplegable (SelectorSimple) dentro de un campo con icono: mismo alto,
+   radio y foco que .auth-input, con hueco a la izquierda para el icono */
+.auth-field .campo-select {
+  min-height: 0;
+  height: 3rem;
+  padding: 0 1rem 0 2.75rem;
+  border-radius: 0.875rem;
+  border-color: var(--color-border);
+  font-size: 0.95rem;
+}
+.auth-field .campo-select:hover { border-color: color-mix(in srgb, var(--color-text-muted) 55%, var(--color-border)); }
+.auth-field .campo-select:focus,
+.auth-field .campo-select[data-state="open"] { border-color: var(--color-primary); box-shadow: 0 0 0 4px var(--color-primary-20); }
+/* 40px de lado (antes 32px): es el unico boton dentro del campo y se pulsa
+   con el pulgar en el telefono. */
+.auth-field-action {
+  position: absolute;
+  right: 0.25rem;
+  top: 50%;
+  translate: 0 -50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.6rem;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.auth-field-action:hover { color: var(--color-text); background: var(--color-surface-3); }
+.auth-field-action:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; }
+
+/* ── Botones y enlaces ── */
+.auth-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  height: 3rem;
+  padding: 0 1.25rem;
+  border-radius: 0.875rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08) inset, 0 10px 24px -12px var(--color-primary-40);
+  transition: background-color 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.auth-btn:hover:not(:disabled) { background: var(--color-primary-light); }
+.auth-btn:active:not(:disabled) { transform: scale(0.99); }
+.auth-btn:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--color-primary-20); }
+.auth-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.auth-btn-secundario {
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}
+.auth-btn-secundario:hover:not(:disabled) { background: var(--color-surface-3); }
+.auth-link {
+  font-weight: 550;
+  color: var(--color-primary);
+  text-underline-offset: 3px;
+  border-radius: 4px;
+}
+.auth-link:hover { text-decoration: underline; }
+.auth-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.auth-link:disabled { opacity: 0.55; cursor: not-allowed; text-decoration: none; }
+/* Con el dedo los enlaces de texto ganan zona de toque (~40px) sin mover nada:
+   el relleno vertical se compensa con margen negativo. */
+@media (pointer: coarse) {
+  .auth-link { display: inline-block; padding-block: 0.6rem; margin-block: -0.6rem; }
+}
+
+/* ── Avisos ── */
+.auth-alert {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+  padding: 0.8rem 0.95rem;
+  border-radius: 0.875rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+.auth-alert svg { flex-shrink: 0; margin-top: 0.15rem; }
+.auth-alert[data-tono="error"] { color: var(--badge-danger-fg);  background: var(--badge-danger-bg); }
+.auth-alert[data-tono="exito"] { color: var(--badge-success-fg); background: var(--badge-success-bg); }
+.auth-alert[data-tono="aviso"] { color: var(--badge-warning-fg); background: var(--badge-warning-bg); }
+.auth-alert[data-tono="info"]  { color: var(--badge-info-fg);    background: var(--badge-info-bg); }
+
+/* ── Casilla ── */
+.auth-check { display: flex; gap: 0.7rem; align-items: flex-start; cursor: pointer; user-select: none; }
+.auth-check input {
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: 0.15rem;
+  flex-shrink: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* ── Código de 6 dígitos ── */
+.auth-otp { display: flex; gap: 0.5rem; }
+.auth-otp-cell {
+  width: 100%;
+  min-width: 0;
+  height: 3.5rem;
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  border-radius: 0.875rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-text);
+  caret-color: var(--color-primary);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.auth-otp-cell:focus { border-color: var(--color-primary); box-shadow: 0 0 0 4px var(--color-primary-20); }
+.auth-otp-cell[data-lleno="true"] { border-color: color-mix(in srgb, var(--color-primary) 55%, var(--color-border)); }
+.auth-otp[aria-invalid="true"] .auth-otp-cell { border-color: var(--color-error); }
+.auth-otp-sep { align-self: center; width: 0.6rem; height: 2px; flex-shrink: 0; border-radius: 2px; background: var(--color-border); }
+
+/* ── Requisitos de contraseña ── */
+.auth-meter { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem; }
+.auth-meter span { height: 0.3rem; border-radius: 999px; background: var(--color-border); transition: background-color 0.3s ease; }
+.auth-req { display: flex; align-items: flex-start; gap: 0.4rem; font-size: 0.78rem; color: var(--color-text-muted); transition: color 0.2s ease; }
+.auth-req svg { flex-shrink: 0; margin-top: 0.15rem; }
+.auth-req[data-ok="true"] { color: var(--color-success); }
+:root[data-theme="dark"] .auth-req[data-ok="true"] { color: var(--color-accent-green); }
+
+/* ── Pasos (registro → verificar → aprobación) ── */
+.auth-steps { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.75rem; }
+.auth-step { display: flex; align-items: center; gap: 0.45rem; font-size: 0.75rem; font-weight: 550; color: var(--color-text-muted); white-space: nowrap; }
+.auth-step-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+.auth-step[data-estado="actual"] { color: var(--color-text); }
+.auth-step[data-estado="actual"] .auth-step-dot { border-color: var(--color-primary); color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-20); }
+.auth-step[data-estado="hecho"] .auth-step-dot { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); }
+.auth-step-line { flex: 1; height: 1px; min-width: 0.75rem; background: var(--color-border); }
+@media (max-width: 380px) { .auth-step-texto { display: none; } }
+
+.auth-divider { display: flex; align-items: center; gap: 0.75rem; font-size: 0.8rem; color: var(--color-text-muted); }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--color-border); }
+
+/* ── Entrada suave de cada pantalla ── */
+.auth-enter { animation: auth-enter 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes auth-enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .auth-enter, .auth-ring-arc, .auth-ring-arc-slow { animation: none; }
+}
+
+.auth-brand-eyebrow { color: color-mix(in srgb, var(--marca-a) 75%, #ffffff); }
+/* Con imagen de fondo: la foto va debajo de un velo del color primario. */
+.auth-brand.con-fondo {
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--marca-p) 88%, transparent) 0%, color-mix(in srgb, var(--marca-p) 70%, #000 20%) 100%),
+    var(--auth-fondo) center / cover no-repeat;
+}
+
+/* ── Poca altura: teléfono en horizontal (844×390, 740×360) ──
+   Pasa de 640px de ancho y heredaba el relleno de tablet: el título quedaba
+   a media pantalla y el botón de entrar, fuera. Se aprieta lo vertical. */
+@media (max-height: 500px) {
+  .auth-main {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+  }
+  .auth-main::before { height: 180px; }
+  .auth-content { padding: 1rem 0; }
+  .auth-title { font-size: 1.5rem; }
+  .auth-steps { margin-bottom: 1rem; }
+}
+/* Panel de marca en una ventana ancha pero baja (portátil con la ventana
+   partida, tablet con teclado): sin esto los beneficios se cortaban abajo. */
+@media (min-width: 1024px) and (max-height: 720px) {
+  .auth-brand { padding-block: 2rem; }
+  .auth-brand-beneficios { display: none; }
+}

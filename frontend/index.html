@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Favicon OMNIS: el anillo marino/dorado en SVG (nítido a cualquier
+         tamaño) y el PNG como respaldo para navegadores sin SVG (Safari). -->
+    <link rel="icon" type="image/svg+xml" href="/brand/favicon.svg" />
+    <link rel="icon" type="image/png" href="/brand/omnis-circulo-azul.png" />
+    <link rel="apple-touch-icon" href="/brand/omnis-circulo-azul.png" />
+    <!-- Color de la barra del navegador movil: el script de tema de abajo lo
+         ajusta al tema activo (claro #ffffff / oscuro #122039). -->
+    <meta name="theme-color" content="#ffffff" />
+    <!-- viewport-fit=cover habilita env(safe-area-inset-*) en iPhone con notch
+         (las barras fijas ya reservan ese hueco); interactive-widget hace que en
+         Android el teclado encoja el viewport, y con él 100dvh: las ventanas
+         (Modal) se acortan en vez de quedar tapadas por el teclado. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="app-build" content="2026-10-05a" />
+    <meta name="description" content="OMNIS CRM: gestión interna de proyectos, equipo y ventas" />
+    <title>OMNIS CRM</title>
+    <!-- Tema antes de pintar nada: evita el destello claro al cargar en modo
+         oscuro. Lee la misma clave que PreferencesContext (crm_theme) y, si no
+         hay preferencia guardada, sigue la del sistema. -->
+    <script>
+      (function () {
+        try {
+          var tema = localStorage.getItem('crm_theme');
+          if (tema !== 'light' && tema !== 'dark') {
+            tema = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.setAttribute('data-theme', tema);
+          document.documentElement.style.colorScheme = tema;
+          // Barra del navegador movil con el color del encabezado (--color-surface
+          // de cada tema); PreferencesContext la mantiene al cambiar de tema.
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', tema === 'dark' ? '#122039' : '#ffffff');
+        } catch (e) { /* sin localStorage (modo privado estricto): queda el tema claro */ }
+      })();
+    </script>
+    <!-- Colores de la marca configurada (panel de configuración), guardados en
+         la visita anterior: se aplican antes de pintar para que no se vea un
+         instante la paleta de fábrica. ConfiguracionContext los actualiza. -->
+    <script>
+      (function () {
+        try {
+          var css = localStorage.getItem('crm_marca_css');
+          if (css) {
+            var estilo = document.createElement('style');
+            estilo.id = 'tema-marca';
+            estilo.textContent = css;
+            document.head.appendChild(estilo);
+          }
+          var config = JSON.parse(localStorage.getItem('crm_marca_config') || 'null');
+          if (config && config.marca && config.marca.nombreSistema) document.title = config.marca.nombreSistema;
+        } catch (e) { /* sin localStorage: se queda la marca de fábrica */ }
+      })();
+    </script>
+    <!-- Fuente Inter desde Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

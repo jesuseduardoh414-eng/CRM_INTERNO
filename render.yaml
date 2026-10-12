@@ -1,0 +1,50 @@
+# Blueprint de Render (https://render.com/docs/blueprint-spec): el backend como
+# servicio web de Node. El frontend va en Vercel (ver README). Para usarlo:
+# Render > New > Blueprint > este repositorio. Despues de crear el servicio,
+# rellena en el panel las variables marcadas con `sync: false`.
+services:
+  - type: web
+    name: crm-backend
+    runtime: node
+    rootDir: backend
+    plan: free
+    region: oregon
+    # `npm run build` genera el cliente de Prisma del proveedor de DATABASE_URL.
+    buildCommand: npm ci && npm run build
+    # Aplica las migraciones pendientes y arranca (prisma migrate deploy + node).
+    startCommand: npm run start:render
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Supabase: pooler en modo transaccion (puerto 6543) + pgbouncer=true.
+      #   postgresql://postgres.PROYECTO:CLAVE@aws-0-REGION.pooler.supabase.com:6543/postgres?pgbouncer=true
+      # Tambien puede ser una MySQL accesible por internet (mysql://...).
+      - key: DATABASE_URL
+        sync: false
+      # Supabase: el mismo pooler en modo sesion (puerto 5432), para migraciones.
+      #   postgresql://postgres.PROYECTO:CLAVE@aws-0-REGION.pooler.supabase.com:5432/postgres
+      - key: DIRECT_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: AUTH_ENCRYPTION_KEY
+        generateValue: true
+      # URL publica del frontend en Vercel (CORS y enlaces de los correos).
+      - key: FRONTEND_URL
+        sync: false
+      - key: REGISTRO_MODO
+        value: cerrado
+      # Archivos: en el plan gratuito el disco se borra en cada despliegue
+      # (adjuntos, fotos de perfil y PDF de contratos). Para conservarlos hace
+      # falta un disco persistente (de pago): descomenta `disk` y estas dos
+      # variables, y los archivos quedan en /var/data.
+      # - key: ADJUNTOS_DIR
+      #   value: /var/data/adjuntos
+      # - key: CONTRATOS_DIR
+      #   value: /var/data/contratos
+    # disk:
+    #   name: crm-archivos
+    #   mountPath: /var/data
+    #   sizeGB: 1

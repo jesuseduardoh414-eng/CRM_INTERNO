@@ -1,0 +1,207 @@
+/* ══ Perfil del usuario (PerfilPage y las tarjetas de SeguridadCuenta) ══ */
+.pf-panel {
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+}
+.pf-panel-cabecera {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  padding: 1.1rem 1.5rem;
+  border-bottom: 1px solid var(--color-border);
+}
+.pf-panel-icono {
+  display: flex;
+  height: 2.25rem;
+  width: 2.25rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--color-primary-10);
+  color: var(--color-primary);
+}
+.pf-panel-titulo { font-size: 15px; font-weight: 600; color: var(--color-text); }
+.pf-panel-ayuda { margin-top: 0.15rem; font-size: 13px; color: var(--color-text-muted); }
+.pf-panel-pie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.9rem 1.5rem;
+  border-top: 1px solid var(--color-border);
+  border-radius: 0 0 12px 12px;
+  background: var(--color-bg-base);
+}
+
+/* Portada: el color de marca con una trama suave, sin imágenes */
+.pf-portada {
+  position: relative;
+  height: 7.5rem;
+  background:
+    radial-gradient(circle at 85% -20%, color-mix(in srgb, var(--color-accent-warning) 35%, transparent), transparent 45%),
+    radial-gradient(circle at 10% 120%, rgb(255 255 255 / 0.14), transparent 40%),
+    linear-gradient(120deg, var(--color-primary-dark), var(--color-primary) 55%, var(--color-primary-light));
+}
+.pf-portada::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgb(255 255 255 / 0.12) 1px, transparent 1px);
+  background-size: 14px 14px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 70%);
+  mask-image: linear-gradient(90deg, transparent, #000 70%);
+}
+
+.pf-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 999px;
+  border: 4px solid var(--color-surface);
+  background: var(--color-surface-3);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-text-dim);
+  box-shadow: 0 6px 18px -8px rgb(15 23 42 / 0.35);
+}
+.pf-avatar-boton {
+  position: absolute;
+  right: 0.15rem;
+  bottom: 0.15rem;
+  display: flex;
+  height: 2.1rem;
+  width: 2.1rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 2px solid var(--color-surface);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color 0.12s ease;
+}
+.pf-avatar-boton:hover { background: var(--color-primary-light); transform: scale(1.06); }
+.pf-avatar-boton:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+.pf-cifras { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--color-border); }
+.pf-cifra { padding: 0.9rem 1.5rem; }
+.pf-cifra:nth-child(odd) { border-right: 1px solid var(--color-border); }
+.pf-cifra:nth-child(-n+2) { border-bottom: 1px solid var(--color-border); }
+@media (min-width: 768px) {
+  .pf-cifras { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pf-cifra { border-right: 1px solid var(--color-border); }
+  .pf-cifra:nth-child(-n+2) { border-bottom: 0; }
+  .pf-cifra:last-child { border-right: 0; }
+}
+
+/* Pestañas subrayadas */
+.pf-pestanas {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--color-border);
+}
+.pf-pestanas button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 2.6rem;
+  padding: 0 0.9rem;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  transition: color 0.12s ease;
+}
+.pf-pestanas button:hover { color: var(--color-text); }
+.pf-pestanas button::after {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+}
+.pf-pestanas button[aria-selected="true"] { color: var(--color-text); font-weight: 600; }
+.pf-pestanas button[aria-selected="true"]::after { background: var(--color-primary); }
+.pf-pestanas button[aria-selected="true"] svg { color: var(--color-primary); }
+.pf-pestanas button:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; border-radius: 6px; }
+
+/* Filas de formulario: etiqueta + ayuda a la izquierda, control a la derecha */
+.pf-fila { display: grid; gap: 0.6rem; padding: 1.15rem 1.5rem; }
+@media (min-width: 768px) {
+  .pf-fila { grid-template-columns: 200px minmax(0, 1fr); gap: 1.5rem; align-items: start; }
+}
+.pf-fila-etiqueta { display: block; padding-top: 0.55rem; font-size: 13.5px; font-weight: 600; color: var(--color-text); }
+.pf-fila-ayuda { margin-top: 0.2rem; font-size: 12.5px; line-height: 1.45; color: var(--color-text-muted); }
+
+.pf-campo {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 0.6rem 0.85rem 0.6rem 2.4rem;
+  font-size: 14px;
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.pf-campo::placeholder { color: var(--color-text-muted); }
+.pf-campo:hover { border-color: color-mix(in srgb, var(--color-text-muted) 45%, var(--color-border)); }
+.pf-campo:focus { border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-20); }
+.pf-campo-icono {
+  pointer-events: none;
+  position: absolute;
+  left: 0.8rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-muted);
+}
+
+.pf-boton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 2.25rem;
+  padding: 0 0.85rem;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.pf-boton:hover:not(:disabled) { background: var(--color-surface-3); color: var(--color-text); }
+.pf-boton:disabled { opacity: 0.5; }
+.pf-boton-peligro { color: var(--color-error); }
+.pf-boton-peligro:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--badge-danger-fg) 25%, transparent);
+  background: var(--badge-danger-bg);
+  color: var(--badge-danger-fg);
+}
+
+/* Móvil: menos relleno lateral (en 360px se comía casi 50px de cada fila) */
+@media (max-width: 639px) {
+  .pf-panel-cabecera { padding: 1rem; }
+  .pf-panel-pie { padding: 0.85rem 1rem; }
+  .pf-fila { padding: 1rem; }
+  .pf-cifra { padding: 0.8rem 1rem; }
+  .pf-panel-pie > div { width: 100%; }
+  .pf-panel-pie > div > button { flex: 1; justify-content: center; }
+}
+
+/* Con el dedo: botones de foto y de la cámara a 40-44px */
+@media (pointer: coarse) {
+  .pf-boton { height: 2.75rem; }
+  .pf-avatar-boton { height: 2.5rem; width: 2.5rem; }
+  .pf-pestanas button { height: 2.85rem; }
+}
