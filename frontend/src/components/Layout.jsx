@@ -6,11 +6,14 @@ import { useToast } from '../context/ToastContext';
 import NotificationCenter from './NotificationCenter';
 import GlobalSearch from './GlobalSearch';
 import MenuCuenta from './MenuCuenta';
+import MenuFinanzas from './MenuFinanzas';
 import LogoMarca from './LogoMarca';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { agendaService } from '../services/api';
 import { useMisTareas } from '../hooks/useMisTareas';
+import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
 import { getEstadoProyecto } from '../utils/estadosProyecto';
+import { RUTA_INFORME, categoriasVisibles, puedeVerFinanzas, rutaCategoria, tieneAccesoFinanzas } from '../utils/finanzas';
 import {
   BarChart3,
   Building2,
@@ -21,6 +24,9 @@ import {
   FolderKanban,
   LayoutDashboard,
   Menu,
+  PiggyBank,
+  Receipt,
+  ReceiptText,
   Search,
   ShieldCheck,
   UserRound,
@@ -66,8 +72,23 @@ const esMac =typeof navigator !== 'undefined' && /Mac|iPhone|iPad/i.test(navigat
 const Layout = ({ children }) => {
   const { usuario, logout } = useAuth();
   const { moduloActivo, marca, nombreArea } = useConfiguracion();
+  const tf = useTextoFinanzas();
   const agendaActiva = moduloActivo('agenda');
   const esMiembro = Boolean(usuario) && usuario.rol !== 'ADMIN';
+  // Finanzas: el grupo sale solo con lo que la persona puede ver (usuario.finanzas).
+  const finanzasActivas = moduloActivo('finanzas') && tieneAccesoFinanzas(usuario);
+  const categoriasGasto = finanzasActivas ? categoriasVisibles(usuario) : [];
+  const veInforme = finanzasActivas && puedeVerFinanzas(usuario, 'informe');
+  const subGastos = [
+    ...categoriasGasto.map((c) => ({ to: rutaCategoria(c), etiqueta: tf(`finCat${c}`), corta: tf(`finCat${c}Corta`) })),
+    ...(veInforme ? [{ to: RUTA_INFORME, etiqueta: tf('finInformeTitulo'), corta: tf('finInformeTitulo') }] : []),
+  ];
+  const enlacesFinanzas = [
+    finanzasActivas && puedeVerFinanzas(usuario, 'ventas') && { to: '/ventas', etiqueta: tf('finVentasTitulo'), Icono: Receipt },
+    finanzasActivas && puedeVerFinanzas(usuario, 'tesoreria') && { to: '/tesoreria', etiqueta: tf('finTesoreriaTitulo'), Icono: PiggyBank },
+    // /gastos lleva a la primera categoría visible (colapsado, el icono es un enlace directo).
+    subGastos.length > 0 && { to: '/gastos', etiqueta: tf('finGastosTitulo'), Icono: ReceiptText, sub: subGastos, raiz: '/gastos' },
+  ].filter(Boolean);
   // Accesos a sus proyectos. El Layout siempre está montado, así que es quien
   // recarga cuando otra pantalla cambia una tarea.
   const { proyectosAbiertos, abiertasPorProyecto } = useMisTareas({ escucharCambios: true });
@@ -93,6 +114,7 @@ const Layout = ({ children }) => {
   const [anchoIntermedio, setAnchoIntermedio] = useState(() => window.innerWidth >= 1024 && window.innerWidth < 1180);
   const [buscadorAbierto, setBuscadorAbierto] = useState(false);
   const [, setRecordatoriosCount] = useState(0);
+  const cerrarMenuMovil = () => setOpen(false);
   const contenidoRef = useRef(null);
   const lateralRef = useRef(null);
   const botonMenuRef = useRef(null);
@@ -364,6 +386,10 @@ const Layout = ({ children }) => {
               </div>
             );
           })}
+
+          {/* Finanzas: Ventas, Tesorería y Gastos (con submenú de categorías e
+              informe). Cada enlace sale solo si la persona tiene permiso. */}
+          <MenuFinanzas titulo={tf('finMenuGrupo')} enlaces={enlacesFinanzas} colapsado={colapsado} onNavegar={cerrarMenuMovil} />
 
           {/* Accesos directos a los proyectos del miembro, con lo que le queda
               pendiente en cada uno. Colapsado no cabe: para eso está Proyectos. */}

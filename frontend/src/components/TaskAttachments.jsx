@@ -171,7 +171,7 @@ const FilaAdjunto = ({ item, isPending = false, canDelete = false, onDelete, onC
         <span className="mt-0.5 flex items-center gap-1.5 text-[11.5px] text-[var(--color-text-muted)]">
           {isPending && <span className="det-adjunto-nuevo">{t('attachmentNew')}</span>}
           {formatSize(item.tamano || item.size)}{item.creadoEn ? ` · ${new Date(item.creadoEn).toLocaleDateString(locale)}` : ''}
-          {item.visibleCliente && <span className="ptl-chip-cliente" title={tp('ptlCompartido')}>{tp('ptlClienteBadge')}</span>}
+          {item.visibleCliente && onCompartir && <span className="ptl-chip-cliente" title={tp('ptlCompartido')}>{tp('ptlClienteBadge')}</span>}
         </span>
       </span>
       <span className="flex shrink-0 items-center">

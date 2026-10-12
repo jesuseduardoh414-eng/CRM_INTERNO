@@ -55,7 +55,7 @@ const AgendaHoy = () => {
     const fin = new Date();
     fin.setHours(23, 59, 59, 999);
     const respuesta = await agendaService.listar(inicio.toISOString(), fin.toISOString());
-    return (respuesta.eventos || []).filter((e) => e.tipo !== 'tarea' && e.tipo !== 'proyecto');
+    return (respuesta.eventos || []).filter((e) => e.tipo !== 'tarea' && e.tipo !== 'proyecto' && e.tipo !== 'gasto');
   });
 
   const eventos = data || [];

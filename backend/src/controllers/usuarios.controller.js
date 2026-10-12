@@ -7,6 +7,8 @@ const { rangoDiaMexico, rangoSemanaMexico } = require('../utils/fechas.utils');
 const { validarPasswordNueva, esAreaValida, esRolValido, esEmailValido } = require('../utils/security.utils');
 const { subirArchivo, borrarBlobs, esBlobVercel, esLocal } = require('../utils/blob.utils');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
+const { Prisma } = require('@prisma/client');
+const { normalizarPermisos } = require('../utils/finanzas.utils');
 const { generarInvitacion } = require('./auth.controller');
 const {
   enviarInvitacion,
@@ -262,12 +264,14 @@ const listar = async (req, res) => {
         area:   true,
         rol:    true,
         creadoEn: true,
-        estado: true
+        estado: true,
+        permisosFinanzas: true,
       },
     });
 
     if (!esAdmin(req.usuario)) {
-      return responder(usuarios);
+      // Los permisos de finanzas de los demás solo los ven los administradores.
+      return responder(usuarios.map(({ permisosFinanzas, ...u }) => u));
     }
 
     // OPTIMIZACIÓN: Obtener solo tareas relevantes (activas o terminadas hoy) en una sola consulta.
@@ -561,7 +565,7 @@ const editar = async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
 
-  const { nombre, email, password, area, rol } = req.body;
+  const { nombre, email, password, area, rol, permisosFinanzas } = req.body;
 
   try {
     const objetivo = await prisma.usuario.findUnique({
@@ -608,7 +612,19 @@ const editar = async (req, res) => {
       return res.status(400).json({ error: 'No puedes cambiar tu propio rol' });
     }
 
+    // Permisos de finanzas (ventas, tesorería, gastos por categoría e
+    // informe): solo los reparte el administrador global. Se guardan aunque
+    // el usuario sea ADMIN global (siempre puede todo) por si cambia de rol.
+    if (permisosFinanzas !== undefined && !esAdminGlobal(req.usuario)) {
+      return res.status(403).json({ error: 'Solo el administrador global puede asignar permisos de finanzas' });
+    }
+
     const data = {};
+
+    if (permisosFinanzas !== undefined) {
+      const normalizados = normalizarPermisos(permisosFinanzas);
+      data.permisosFinanzas = normalizados === null ? Prisma.DbNull : normalizados;
+    }
 
     if (nombre !== undefined) {
       const nombreLimpio = String(nombre).trim();
@@ -648,7 +664,7 @@ const editar = async (req, res) => {
     const usuario = await prisma.usuario.update({
       where: { id },
       data,
-      select: { id: true, nombre: true, email: true, area: true, rol: true }
+      select: { id: true, nombre: true, email: true, area: true, rol: true, permisosFinanzas: true }
     });
 
     // Si un admin le cambia la contraseña a alguien, sus sesiones abiertas

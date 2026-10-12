@@ -6,6 +6,9 @@ import {
   FolderKanban,
   LayoutDashboard,
   Loader2,
+  PiggyBank,
+  Receipt,
+  ReceiptText,
   ShieldCheck,
   UserCircle2,
 } from 'lucide-react';
@@ -25,6 +28,8 @@ import { useConfiguracion } from '../context/ConfiguracionContext';
 import { proyectosService, usuariosService } from '../services/api';
 import { useDebounce } from '../utils/useDebounce';
 import { getEstadoProyecto } from '../utils/estadosProyecto';
+import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
+import { puedeVerFinanzas, tieneAccesoGastos } from '../utils/finanzas';
 
 // Con una letra la busqueda devuelve medio catalogo; con dos ya discrimina.
 const MIN_CARACTERES = 2;
@@ -35,6 +40,10 @@ const ATAJOS = [
   { to: '/proyectos', labelKey: 'projects', Icon: FolderKanban },
   { to: '/agenda', labelKey: 'agenda', Icon: Calendar, modulo: 'agenda' },
   { to: '/usuarios', labelKey: 'users', Icon: ShieldCheck, soloAdmin: true },
+  // Finanzas: salen solo con permiso (usuario.finanzas) y el módulo activo.
+  { to: '/ventas', tfKey: 'finVentasTitulo', Icon: Receipt, modulo: 'finanzas', finanzas: 'ventas' },
+  { to: '/tesoreria', tfKey: 'finTesoreriaTitulo', Icon: PiggyBank, modulo: 'finanzas', finanzas: 'tesoreria' },
+  { to: '/gastos', tfKey: 'finGastosTitulo', Icon: ReceiptText, modulo: 'finanzas', finanzas: 'gastos' },
   { to: '/perfil', labelKey: 'goToProfile', Icon: UserCircle2 },
 ];
 
@@ -49,6 +58,7 @@ const ATAJOS = [
  */
 const GlobalSearch = ({ open, onClose }) => {
   const { t } = usePreferences();
+  const tf = useTextoFinanzas();
   const { usuario } = useAuth();
   const { moduloActivo } = useConfiguracion();
   const navigate = useNavigate();
@@ -112,10 +122,12 @@ const GlobalSearch = ({ open, onClose }) => {
         <CommandList className="max-h-[min(60dvh,420px)] overscroll-contain p-2">
           {!buscando && (
             <CommandGroup heading={t('searchGoTo')}>
-              {ATAJOS.filter((atajo) => (!atajo.soloAdmin || esAdmin) && (!atajo.modulo || moduloActivo(atajo.modulo))).map(({ to, labelKey, Icon }) => (
+              {ATAJOS.filter((atajo) => (!atajo.soloAdmin || esAdmin)
+                && (!atajo.modulo || moduloActivo(atajo.modulo))
+                && (!atajo.finanzas || (atajo.finanzas === 'gastos' ? tieneAccesoGastos(usuario) : puedeVerFinanzas(usuario, atajo.finanzas)))).map(({ to, labelKey, tfKey, Icon }) => (
                 <CommandItem key={to} value={`ir-${to}`} onSelect={() => ir(to)} className="cursor-pointer rounded-lg py-2.5">
                   <Icon size={16} className="text-[var(--color-text-muted)]" />
-                  <span>{t(labelKey)}</span>
+                  <span>{tfKey ? tf(tfKey) : t(labelKey)}</span>
                 </CommandItem>
               ))}
             </CommandGroup>

@@ -16,6 +16,7 @@ const { registrarEvento } = require('../services/seguridad.service');
 const { configEnCache } = require('../services/configuracion.service');
 const { zonaHoraria } = require('../utils/fechas.utils');
 const archivosContratos = require('../services/contratosArchivos.service');
+const archivosComprobantes = require('../services/comprobantes.service');
 const correo = require('../services/email.service');
 const almacenamiento = require('../services/almacenamiento.service');
 
@@ -279,9 +280,17 @@ const estadoSistema = async (_req, res) => {
     await fs.access(archivosContratos.directorio(), fs.constants?.W_OK ?? 2);
     contratosEscribible = true;
   } catch (_e) { /* sin permiso */ }
+  // Comprobantes de finanzas (COMPROBANTES_DIR): mismo chequeo que contratos.
+  let comprobantesEscribible = false;
+  try {
+    await fs.mkdir(archivosComprobantes.directorio(), { recursive: true });
+    await fs.access(archivosComprobantes.directorio(), fs.constants?.W_OK ?? 2);
+    comprobantesEscribible = true;
+  } catch (_e) { /* sin permiso */ }
   resultado.almacenamiento = {
     adjuntos: { ...(await almacenamiento.estado()), proveedor: 'disco' },
     contratos: { ok: contratosEscribible, ruta: archivosContratos.directorio() },
+    comprobantes: { ok: comprobantesEscribible, ruta: archivosComprobantes.directorio() },
     marca: { ok: true, proveedor: 'Base de datos' },
   };
 

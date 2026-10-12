@@ -20,6 +20,8 @@ import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useDebounce } from '../utils/useDebounce';
+import PermisosFinanzas from '../components/finanzas/PermisosFinanzas';
+import { permisosDesde } from '../utils/finanzas';
 import {
   Pencil,
   UserPlus,
@@ -770,7 +772,7 @@ const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
 
 const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
   const { t } = usePreferences();
-  const { areas, nombreArea } = useConfiguracion();
+  const { areas, nombreArea, moduloActivo } = useConfiguracion();
   const esAdminArea = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area !== AREA_GENERAL;
   const areasConfiguradas = areas.map((a) => a.clave);
   // Si el area del usuario ya no existe (la quito el configurador) se sigue
@@ -778,11 +780,18 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
   const areasDisponibles = esAdminArea
     ? [usuarioActual.area]
     : (usuario?.area && !areasConfiguradas.includes(usuario.area) ? [...areasConfiguradas, usuario.area] : areasConfiguradas);
+  // Permisos de finanzas (ventas, tesorería, gastos, informe): los reparte
+  // solo el administrador global, y no tienen sentido para otro
+  // administrador global (siempre puede todo).
+  const esAdminGlobal = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area === AREA_GENERAL;
+  const objetivoEsAdminGlobal = usuario?.rol === 'ADMIN' && usuario?.area === AREA_GENERAL;
+  const editaFinanzas = moduloActivo('finanzas') && esAdminGlobal && !objetivoEsAdminGlobal;
   const [form, setForm] = useState({
     nombre: usuario?.nombre || '',
     email: usuario?.email || '',
     area: usuario?.area || areasDisponibles[0] || AREA_GENERAL,
-    rol: usuario?.rol || 'MIEMBRO'
+    rol: usuario?.rol || 'MIEMBRO',
+    ...(editaFinanzas ? { permisosFinanzas: permisosDesde(usuario?.permisosFinanzas) } : {}),
   });
   const [cargando, setCargando] = useState(false);
   const { showToast } = useToast();
@@ -805,7 +814,7 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
     <Modal
       open
       onClose={onClose}
-      maxWidth="448px"
+      maxWidth={editaFinanzas ? '600px' : '448px'}
       title={t('usersEditTitle')}
       subtitle={t('usersEditSubtitle')}
     >
@@ -856,6 +865,10 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
               />
             </div>
           </div>
+
+          {editaFinanzas && (
+            <PermisosFinanzas valor={form.permisosFinanzas} onCambio={(permisosFinanzas) => setForm({ ...form, permisosFinanzas })} />
+          )}
 
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="flex-1 px-6 py-3 rounded-xl font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-all">{t('cancel')}</button>

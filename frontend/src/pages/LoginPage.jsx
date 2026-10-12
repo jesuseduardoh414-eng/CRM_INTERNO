@@ -17,6 +17,7 @@ const TONO_POR_CODIGO = {
   CUENTA_BLOQUEADA: 'aviso',
   PENDIENTE_APROBACION: 'info',
   CUENTA_INACTIVA: 'aviso',
+  PORTAL_DESACTIVADO: 'aviso',
 };
 
 

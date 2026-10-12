@@ -125,7 +125,7 @@ mantener; el orden de carga respeta las llaves foraneas (los ciclos, como
 usuarios ↔ empresas, se rellenan en una segunda pasada); en Postgres ajusta las
 secuencias al terminar; y acaba comparando los conteos de las dos bases.
 Tambien sirve con la Supabase antigua como origen (las columnas que ya no
-existen se ignoran).
+existen se ignoran, y las tablas que el origen aun no tiene se copian vacias).
 
 ### Cambios en el modelo (hay que migrar las dos bases)
 
@@ -162,9 +162,10 @@ A tener en cuenta:
 
 - **Plan gratuito:** el servicio se duerme tras unos minutos sin trafico (la
   primera peticion tarda ~30 s) y **el disco se borra en cada despliegue**:
-  adjuntos, fotos de perfil y PDF de contratos se pierden. Para conservarlos
-  hace falta un disco persistente (de pago) montado p. ej. en `/var/data` y
-  `ADJUNTOS_DIR=/var/data/adjuntos`, `CONTRATOS_DIR=/var/data/contratos`
+  adjuntos, fotos de perfil, PDF de contratos y comprobantes de finanzas se
+  pierden. Para conservarlos hace falta un disco persistente (de pago) montado
+  p. ej. en `/var/data` y `ADJUNTOS_DIR=/var/data/adjuntos`,
+  `CONTRATOS_DIR=/var/data/contratos`, `COMPROBANTES_DIR=/var/data/comprobantes`
   (ya va comentado en `render.yaml`).
 - Los avisos por correo programados (recordatorios, resumen diario) corren
   mientras el servicio esta despierto.
@@ -190,8 +191,8 @@ A tener en cuenta:
 `vercel-build` genera el cliente de Prisma del proveedor de `DATABASE_URL`. En
 serverless conviene `DATABASE_URL` con `?pgbouncer=true&connection_limit=1`
 (Supabase). Limitaciones: Vercel no aplica migraciones (`npm run db:migrate`
-desde tu maquina), el disco es de solo lectura (no se pueden subir adjuntos ni
-contratos) y no corren los avisos programados por correo.
+desde tu maquina), el disco es de solo lectura (no se pueden subir adjuntos,
+contratos ni comprobantes de finanzas) y no corren los avisos programados por correo.
 
 ### Produccion en cPanel (MySQL)
 
@@ -227,14 +228,42 @@ contratos) y no corren los avisos programados por correo.
 
 ## Archivos adjuntos y fotos de perfil
 
-Los adjuntos (tareas, proyectos, eventos), las fotos de perfil y los PDF de
-contratos se guardan en el **disco del servidor** (`ADJUNTOS_DIR` y
-`CONTRATOS_DIR`, por defecto `backend/storage/`), asi que necesitan un servidor
-con disco propio: cPanel, o Render con disco persistente. Los archivos
-antiguos que quedaron en Vercel Blob se siguen sirviendo por su URL y se
-borran con `BLOB_READ_WRITE_TOKEN` si se elimina el adjunto.
+Los adjuntos (tareas, proyectos, eventos), las fotos de perfil, los PDF de
+contratos y los comprobantes de finanzas se guardan en el **disco del
+servidor** (`ADJUNTOS_DIR`, `CONTRATOS_DIR` y `COMPROBANTES_DIR`, por defecto
+`backend/storage/`), asi que necesitan un servidor con disco propio: cPanel, o
+Render con disco persistente. Los archivos antiguos que quedaron en Vercel
+Blob se siguen sirviendo por su URL y se borran con `BLOB_READ_WRITE_TOKEN` si
+se elimina el adjunto.
 
 - Limite por archivo configurable en el panel (4 MB si el backend esta en
   Vercel, que corta las peticiones en 4.5 MB). Foto de perfil: 2 MB.
+  Comprobantes de pagos y gastos: 10 MB por defecto (`subidas.comprobantesMaxMB`).
 - Solo se aceptan tipos conocidos (PDF, imagenes, Office, texto, CSV, JSON,
-  ZIP); HTML/SVG/JS quedan fuera a proposito.
+  ZIP); HTML/SVG/JS quedan fuera a proposito. Los comprobantes solo admiten
+  PDF, JPG, PNG y WEBP, y el tipo se comprueba por el contenido del archivo.
+
+## Finanzas (Ventas, Tesoreria y Gastos)
+
+Modulo agregado el 2026-10-12 a partir de la "Carta a Santa Claus":
+
+- **Ventas**: pagos recibidos (cliente, cuenta destino, metodo, comprobante).
+- **Tesoreria**: la bolsa de ingresos (pagos registrados en MXN) se reparte en
+  partidas creadas libremente (Marketing, Caja chica, Ahorro…). Cada partida
+  muestra asignado, gastado, comprometido (gastos pendientes) y disponible.
+- **Gastos**: seis categorias (Presupuesto General, Presupuesto Oficina,
+  Nomina, Gastos fijos, Gastos variables, Otros) con partida, fecha limite
+  (sale en la Agenda mientras este pendiente), comprobantes y "duplicar al
+  mes siguiente"; mas el **Informe** meses × partidas (o × categorias) con
+  Excel.
+- **Permisos por persona**: en Usuarios, el administrador global da a cada
+  cuenta un nivel (sin acceso / ver / editar) en Ventas, Tesoreria, cada
+  categoria de gastos y el Informe. Se guarda en `usuarios.permisos_finanzas`
+  y lo comprueba el servidor en cada peticion (`/api/finanzas`).
+- El **portal de clientes se retiro** (el CRM es solo de uso interno): el
+  modulo `portalClientes` queda apagado siempre, desaparece de Configuracion
+  y las cuentas CLIENTE ya no pueden entrar. Sus tablas y pantallas se
+  conservan en el codigo por si vuelve.
+
+Migraciones: `20261012160000_finanzas` (MySQL y Postgres). Solo agregan tablas
+y una columna.

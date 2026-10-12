@@ -37,13 +37,15 @@ services:
       - key: REGISTRO_MODO
         value: cerrado
       # Archivos: en el plan gratuito el disco se borra en cada despliegue
-      # (adjuntos, fotos de perfil y PDF de contratos). Para conservarlos hace
-      # falta un disco persistente (de pago): descomenta `disk` y estas dos
-      # variables, y los archivos quedan en /var/data.
+      # (adjuntos, fotos de perfil, PDF de contratos y comprobantes de
+      # finanzas). Para conservarlos hace falta un disco persistente (de pago):
+      # descomenta `disk` y estas tres variables, y los archivos quedan en /var/data.
       # - key: ADJUNTOS_DIR
       #   value: /var/data/adjuntos
       # - key: CONTRATOS_DIR
       #   value: /var/data/contratos
+      # - key: COMPROBANTES_DIR
+      #   value: /var/data/comprobantes
     # disk:
     #   name: crm-archivos
     #   mountPath: /var/data

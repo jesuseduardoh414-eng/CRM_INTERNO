@@ -37,7 +37,8 @@ const InvitationPage = () => {
     let cancelado = false;
     authService.verificarInvitacion(token)
       .then((data) => { if (!cancelado) setInvitacion(data); })
-      .catch(() => { if (!cancelado) setInvalida(true); })
+      // El motivo del servidor (caducada, ya usada, portal retirado) se muestra tal cual.
+      .catch((err) => { if (!cancelado) setInvalida(err?.message || true); })
       .finally(() => { if (!cancelado) setLoading(false); });
     return () => { cancelado = true; };
   }, [token]);
@@ -73,7 +74,7 @@ const InvitationPage = () => {
   if (invalida) {
     return (
       <AuthLayout>
-        <AuthHeader icono={LinkIcon} tono="error" titulo={t('authInviteInvalidTitle')} subtitulo={t('authInviteInvalidText')} />
+        <AuthHeader icono={LinkIcon} tono="error" titulo={t('authInviteInvalidTitle')} subtitulo={typeof invalida === 'string' ? invalida : t('authInviteInvalidText')} />
         <Link to="/login" className="auth-btn">{t('authGoToLogin')}</Link>
       </AuthLayout>
     );

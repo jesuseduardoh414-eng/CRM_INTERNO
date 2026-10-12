@@ -100,6 +100,7 @@ app.use('/api/configuracion',               configuracionRoutes);
 app.use('/api/empresas',                    require('./routes/empresas.routes'));
 app.use('/api/reportes',                    require('./routes/reportes.routes'));
 app.use('/api/portal',                      require('./routes/portal.routes'));
+app.use('/api/finanzas',                    require('./routes/finanzas.routes'));
 app.get('/api/archivos/:carpeta/:nombre',   require('./controllers/archivos.controller').ver);
 
 // Ruta de salud para verificar que el servidor está corriendo

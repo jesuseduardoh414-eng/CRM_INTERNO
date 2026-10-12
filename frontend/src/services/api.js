@@ -810,6 +810,86 @@ export const contratosService = {
   descargarArchivo: (archivoId, nombre) => descargarArchivo(`${API_URL}/contratos/archivos/${archivoId}?descargar=1`, nombre),
 };
 
+// ── Finanzas: Ventas (pagos), Tesorería (partidas) y Gastos ────────────────
+// El acceso es por usuario y recurso (usuario.finanzas); el servidor manda
+// 403 SIN_PERMISO si no alcanza el nivel.
+const pedirFinanzas = async (ruta, { metodo = 'GET', cuerpo, formData } = {}) => {
+  const res = await apiFetch(`${API_URL}/finanzas${ruta}`, {
+    method: metodo,
+    headers: getHeaders(Boolean(formData)),
+    body: formData || (cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined),
+  });
+  return handleResponse(res);
+};
+const formularioComprobante = (archivo) => {
+  const fd = new FormData();
+  fd.append('archivo', archivo);
+  return fd;
+};
+
+export const finanzasService = {
+  catalogos: () => pedirFinanzas('/catalogos'),
+  bitacora: (params = {}) => pedirFinanzas(`/bitacora${construirQuery(params)}`),
+  cuentas: {
+    listar: () => pedirFinanzas('/cuentas'),
+    crear: (datos) => pedirFinanzas('/cuentas', { metodo: 'POST', cuerpo: datos }),
+    editar: (id, datos) => pedirFinanzas(`/cuentas/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    eliminar: (id) => pedirFinanzas(`/cuentas/${id}`, { metodo: 'DELETE' }),
+  },
+  partidas: {
+    listar: () => pedirFinanzas('/partidas'),
+    crear: (datos) => pedirFinanzas('/partidas', { metodo: 'POST', cuerpo: datos }),
+    editar: (id, datos) => pedirFinanzas(`/partidas/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    eliminar: (id) => pedirFinanzas(`/partidas/${id}`, { metodo: 'DELETE' }),
+  },
+  pagos: {
+    listar: (params = {}) => pedirFinanzas(`/pagos${construirQuery(params)}`),
+    resumen: (params = {}) => pedirFinanzas(`/pagos/resumen${construirQuery(params)}`),
+    obtener: (id) => pedirFinanzas(`/pagos/${id}`),
+    crear: (datos) => pedirFinanzas('/pagos', { metodo: 'POST', cuerpo: datos }),
+    editar: (id, datos) => pedirFinanzas(`/pagos/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    anular: (id, motivo) => pedirFinanzas(`/pagos/${id}/anular`, { metodo: 'POST', cuerpo: { motivo } }),
+    eliminar: (id) => pedirFinanzas(`/pagos/${id}`, { metodo: 'DELETE' }),
+    subirComprobante: (id, archivo) => pedirFinanzas(`/pagos/${id}/comprobantes`, { metodo: 'POST', formData: formularioComprobante(archivo) }),
+  },
+  gastos: {
+    listar: (params = {}) => pedirFinanzas(`/gastos${construirQuery(params)}`),
+    resumen: (params = {}) => pedirFinanzas(`/gastos/resumen${construirQuery(params)}`),
+    obtener: (id) => pedirFinanzas(`/gastos/${id}`),
+    crear: (datos) => pedirFinanzas('/gastos', { metodo: 'POST', cuerpo: datos }),
+    editar: (id, datos) => pedirFinanzas(`/gastos/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    pagar: (id, datos = {}) => pedirFinanzas(`/gastos/${id}/pagar`, { metodo: 'POST', cuerpo: datos }),
+    reabrir: (id) => pedirFinanzas(`/gastos/${id}/reabrir`, { metodo: 'POST', cuerpo: {} }),
+    anular: (id, motivo) => pedirFinanzas(`/gastos/${id}/anular`, { metodo: 'POST', cuerpo: { motivo } }),
+    duplicar: (id, meses = 1) => pedirFinanzas(`/gastos/${id}/duplicar`, { metodo: 'POST', cuerpo: { meses } }),
+    eliminar: (id) => pedirFinanzas(`/gastos/${id}`, { metodo: 'DELETE' }),
+    subirComprobante: (id, archivo) => pedirFinanzas(`/gastos/${id}/comprobantes`, { metodo: 'POST', formData: formularioComprobante(archivo) }),
+  },
+  tesoreria: {
+    resumen: (params = {}) => pedirFinanzas(`/tesoreria${construirQuery(params)}`),
+    asignaciones: (params = {}) => pedirFinanzas(`/tesoreria/asignaciones${construirQuery(params)}`),
+    crearAsignacion: (datos) => pedirFinanzas('/tesoreria/asignaciones', { metodo: 'POST', cuerpo: datos }),
+    editarAsignacion: (id, datos) => pedirFinanzas(`/tesoreria/asignaciones/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    eliminarAsignacion: (id) => pedirFinanzas(`/tesoreria/asignaciones/${id}`, { metodo: 'DELETE' }),
+  },
+  informe: (params = {}) => pedirFinanzas(`/informe${construirQuery(params)}`),
+  descargarInforme: (params = {}) => descargarArchivo(
+    `${API_URL}/finanzas/informe${construirQuery({ ...params, formato: 'excel' })}`,
+    `informe_gastos_${params.anio || ''}.xlsx`,
+  ),
+  comprobantes: {
+    // Sin URL pública: se pide con la sesión y se muestra desde memoria (blob).
+    // Quien llama debe liberar la URL con URL.revokeObjectURL.
+    urlParaVer: async (id) => {
+      const res = await apiFetch(`${API_URL}/finanzas/comprobantes/${id}`, { headers: getHeaders(true) });
+      if (!res.ok) await handleResponse(res);
+      return URL.createObjectURL(await res.blob());
+    },
+    descargar: (id, nombre) => descargarArchivo(`${API_URL}/finanzas/comprobantes/${id}?descargar=1`, nombre),
+    eliminar: (id) => pedirFinanzas(`/comprobantes/${id}`, { metodo: 'DELETE' }),
+  },
+};
+
 // ── Configuración de la instalación ────────────────────────────────────────
 // Directorio de clientes y proveedores (solo administradores).
 export const empresasService = {

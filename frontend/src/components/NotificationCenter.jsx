@@ -6,21 +6,21 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
 import { usePreferences } from '../context/PreferencesContext';
+import { useConfiguracion } from '../context/ConfiguracionContext';
 import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
-const getNotificationDestination = (notificacion, usuario) => {
+const getNotificationDestination = (notificacion, usuario, portalActivo = false) => {
   const proyectoId = notificacion.tarea?.proyectoId
     || notificacion.proyecto?.id
     || notificacion.proyectoId
     || notificacion.evento?.proyecto?.id
     || notificacion.evento?.proyectoId;
 
-  // Conversación del portal de clientes: el cliente va a su portal y el
-  // equipo a la pestaña "Cliente" del proyecto.
+  // Conversación del portal de clientes (avisos anteriores a su retiro): el
+  // equipo va al proyecto; la pestaña "Cliente" solo si el portal sigue activo.
   if (notificacion.tipo === 'MENSAJE_PORTAL' && proyectoId) {
-    return usuario?.rol === 'CLIENTE'
-      ? `/portal/proyectos/${proyectoId}?vista=mensajes`
-      : `/proyectos/${proyectoId}?vista=cliente`;
+    if (usuario?.rol === 'CLIENTE') return `/portal/proyectos/${proyectoId}?vista=mensajes`;
+    return portalActivo ? `/proyectos/${proyectoId}?vista=cliente` : `/proyectos/${proyectoId}`;
   }
 
   if (proyectoId && notificacion.tarea?.id) {
@@ -106,6 +106,8 @@ const pedirPermisoAvisos = () => {
 const NotificationCenter = ({ enSidebar = false, colapsado = false }) => {
   const { t, locale } = usePreferences();
   const { usuario } = useAuth();
+  const { moduloActivo } = useConfiguracion();
+  const portalActivo = moduloActivo('clientes') && moduloActivo('portalClientes');
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const usuarioId = usuario?.id;
@@ -188,7 +190,7 @@ const NotificationCenter = ({ enSidebar = false, colapsado = false }) => {
         await handleMarcarLeida(notificacion.id);
       }
     } finally {
-      const destino = getNotificationDestination(notificacion, usuario);
+      const destino = getNotificationDestination(notificacion, usuario, portalActivo);
       setOpen(false);
       if (destino) {
         navigate(destino);
@@ -348,7 +350,7 @@ const NotificationCenter = ({ enSidebar = false, colapsado = false }) => {
               </div>
               ) : (
                 notificaciones.map((n) => {
-                  const destino = getNotificationDestination(n, usuario);
+                  const destino = getNotificationDestination(n, usuario, portalActivo);
                   const { proyectoNombre, actorNombre } = getNotificationMeta(n);
                   const accent = getNotificationAccent(n);
                   const AccentIcon = accent.icon;

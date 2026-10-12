@@ -13,6 +13,15 @@
  * --password "..." se usa esa (debe cumplir la política de contraseñas).
  */
 require('dotenv').config();
+
+// El portal de clientes se retiro el 2026-10-12: una cuenta de cliente ya no
+// puede entrar, asi que crearla solo confundiria.
+// eslint-disable-next-line global-require
+if (require('../src/utils/configuracion.utils').MODULOS_RETIRADOS.includes('portalClientes')) {
+  console.error('El portal de clientes está retirado: las cuentas de cliente ya no pueden entrar. No se creó nada.');
+  process.exit(1);
+}
+
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const prisma = require('../src/lib/prisma');

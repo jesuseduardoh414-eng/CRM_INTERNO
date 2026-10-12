@@ -678,6 +678,7 @@ const translations = {
     // ── Agenda: correcciones (ventanas, movimientos, ajustes) ─────────
     agendaTypeTask: 'Tarea',
     agendaTypeProject: 'Proyecto',
+    agendaTypeExpense: 'Gasto',
     agendaLoadError: 'No se pudo cargar la agenda',
     agendaConfigLoadError: 'No se pudo cargar la configuración de la agenda',
     agendaInvitationAccepted: 'Invitación aceptada',
@@ -1633,6 +1634,7 @@ const translations = {
     // ── Agenda: fixes (dialogs, moves, settings) ──────────────────────
     agendaTypeTask: 'Task',
     agendaTypeProject: 'Project',
+    agendaTypeExpense: 'Expense',
     agendaLoadError: 'The agenda could not be loaded',
     agendaConfigLoadError: 'The agenda settings could not be loaded',
     agendaInvitationAccepted: 'Invitation accepted',

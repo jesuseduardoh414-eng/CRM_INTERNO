@@ -16,6 +16,7 @@ import {
   Globe,
   House,
   MapPin,
+  Receipt,
   Repeat,
   Stethoscope,
   TreePalm,
@@ -43,6 +44,7 @@ export const IconoTipo = ({ item, size = 13, color }) => {
   const estilo = { color: color || colorTipo(item), flexShrink: 0 };
   if (tipo === 'tarea') return <CheckSquare size={size} style={estilo} aria-hidden="true" />;
   if (tipo === 'proyecto') return <FolderKanban size={size} style={estilo} aria-hidden="true" />;
+  if (tipo === 'gasto') return <Receipt size={size} style={estilo} aria-hidden="true" />;
   if (tipo === 'reunion') {
     return item?.modalidad === 'virtual' || item?.urlReunion
       ? <Video size={size} style={estilo} aria-hidden="true" />

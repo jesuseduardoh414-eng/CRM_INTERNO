@@ -271,10 +271,23 @@ const ajustarSecuencias = async ({ destino, citar }) => {
 
 // ── Copia ───────────────────────────────────────────────────────────────────
 
+// Una tabla que el origen todavia no tiene (le falta una migracion, p. ej. las
+// de finanzas) se copia como vacia en vez de cortar la copia a medias.
+const tablaNoExiste = (error) => error?.code === 'ER_NO_SUCH_TABLE' || error?.code === '42P01';
+const consultarSiExiste = async (origen, sql, tabla) => {
+  try {
+    return await origen.consultar(sql);
+  } catch (error) {
+    if (!tablaNoExiste(error)) throw error;
+    console.log(`  ${tabla.padEnd(24)} no existe en el origen: se copia vacia`);
+    return [];
+  }
+};
+
 const copiarModelo = async ({ origen, destino, modelo, diferidas, idsPorModelo, omitidas, segundaPasada }) => {
   const tabla = tablaDe(modelo);
   const pk = campoId(modelo);
-  const filas = await origen.consultar(`SELECT * FROM ${origen.citar(tabla)} ORDER BY ${origen.citar(columnaDe(pk))}`);
+  const filas = await consultarSiExiste(origen, `SELECT * FROM ${origen.citar(tabla)} ORDER BY ${origen.citar(columnaDe(pk))}`, tabla);
   let datos = filas.map((fila) => convertirFila(modelo, fila, origen.proveedor));
 
   for (const rel of relacionesConFk(modelo)) {
@@ -327,7 +340,7 @@ const rellenarDiferidas = async ({ destino, segundaPasada, idsPorModelo, omitida
 };
 
 const copiarM2M = async ({ origen, destino, citar, def, idsPorModelo, omitidas }) => {
-  const filas = await origen.consultar(`SELECT ${origen.citar('A')} AS "A", ${origen.citar('B')} AS "B" FROM ${origen.citar(def.tabla)} ORDER BY 1, 2`);
+  const filas = await consultarSiExiste(origen, `SELECT ${origen.citar('A')} AS "A", ${origen.citar('B')} AS "B" FROM ${origen.citar(def.tabla)} ORDER BY 1, 2`, def.tabla);
   const idsA = idsPorModelo.get(def.modeloA);
   const idsB = idsPorModelo.get(def.modeloB);
   const validas = filas.filter((r) => {
@@ -366,7 +379,7 @@ const main = async () => {
   const m2m = tablasM2M();
   const tablas = [...orden.map(({ modelo }) => tablaDe(modelo)), ...m2m.map((t) => t.tabla)];
   const contarDestino = (tabla) => contar((sql) => destino.$queryRawUnsafe(sql), citar, tabla);
-  const contarOrigen = (tabla) => contar(origen.consultar, origen.citar, tabla);
+  const contarOrigen = (tabla) => contar((sql) => consultarSiExiste(origen, sql, tabla).then((f) => (f.length ? f : [{ n: 0 }])), origen.citar, tabla);
 
   try {
     let totalDestino;

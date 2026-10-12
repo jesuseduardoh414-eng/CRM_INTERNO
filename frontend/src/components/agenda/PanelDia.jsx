@@ -69,7 +69,8 @@ const PanelDia = ({
         </Tooltip>
       );
     }
-    const movible = tipo === 'tarea' || !esEventoRecurrente(item);
+    // Los bloques de solo lectura (gastos) ni se mueven ni se editan: se abren.
+    const movible = tipo === 'tarea' || (!esEventoRecurrente(item) && !item.esLectura);
     const editable = tipo !== 'tarea' && !item.esLectura;
     return (
       <ActionMenu

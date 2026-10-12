@@ -19,74 +19,84 @@ datasource db {
 }
 
 model Usuario {
-  id                       Int                   @id @default(autoincrement())
-  nombre                   String                @db.VarChar(255)
-  email                    String                @unique
+  id                       Int                     @id @default(autoincrement())
+  nombre                   String                  @db.VarChar(255)
+  email                    String                  @unique
   password                 String
   telefono                 String?
-  puesto                   String?               @db.VarChar(255)
-  biografia                String?               @db.Text
-  fotoPerfilUrl            String?               @map("foto_perfil_url") @db.LongText
+  puesto                   String?                 @db.VarChar(255)
+  biografia                String?                 @db.Text
+  fotoPerfilUrl            String?                 @map("foto_perfil_url") @db.LongText
   // Clave de un area de configuracion.reglas.areas (editables en el panel).
-  area                     String                @db.VarChar(40)
-  rol                      Rol                   @default(MIEMBRO)
-  creadoEn                 DateTime              @default(now())
+  area                     String                  @db.VarChar(40)
+  rol                      Rol                     @default(MIEMBRO)
+  creadoEn                 DateTime                @default(now())
   resetToken               String?
   resetTokenExpires        DateTime?
-  verificado               Boolean               @default(false)
+  verificado               Boolean                 @default(false)
   verificationToken        String?
   verificationTokenExpires DateTime?
-  estado                   String?               @default("pendiente")
-  tokenInvitacion          String?               @unique @map("token_invitacion")
-  tokenExpiraEn            DateTime?             @map("token_expira_en")
-  passwordHash             String?               @map("password_hash")
-  googleCalendarEmail      String?               @map("google_calendar_email")
-  googleAccessToken        String?               @map("google_access_token") @db.Text
-  googleRefreshToken       String?               @map("google_refresh_token") @db.Text
-  googleTokenExpiresAt     DateTime?             @map("google_token_expires_at")
+  estado                   String?                 @default("pendiente")
+  tokenInvitacion          String?                 @unique @map("token_invitacion")
+  tokenExpiraEn            DateTime?               @map("token_expira_en")
+  passwordHash             String?                 @map("password_hash")
+  googleCalendarEmail      String?                 @map("google_calendar_email")
+  googleAccessToken        String?                 @map("google_access_token") @db.Text
+  googleRefreshToken       String?                 @map("google_refresh_token") @db.Text
+  googleTokenExpiresAt     DateTime?               @map("google_token_expires_at")
   // ---- Seguridad de acceso (modulo auth) ----
   // Bloqueo progresivo por cuenta: vive en la base y no en memoria para que
   // valga igual en todas las instancias y sobreviva a reinicios.
-  intentosFallidos         Int                   @default(0) @map("intentos_fallidos")
-  bloqueadoHasta           DateTime?             @map("bloqueado_hasta")
-  ultimoLoginEn            DateTime?             @map("ultimo_login_en")
-  passwordCambiadoEn       DateTime?             @map("password_cambiado_en")
+  intentosFallidos         Int                     @default(0) @map("intentos_fallidos")
+  bloqueadoHasta           DateTime?               @map("bloqueado_hasta")
+  ultimoLoginEn            DateTime?               @map("ultimo_login_en")
+  passwordCambiadoEn       DateTime?               @map("password_cambiado_en")
   // Intentos fallidos contra el codigo de verificacion de correo vigente.
-  verificacionIntentos     Int                   @default(0) @map("verificacion_intentos")
+  verificacionIntentos     Int                     @default(0) @map("verificacion_intentos")
   // Doble factor (TOTP). Los secretos van cifrados con AES-256-GCM y los
   // codigos de respaldo solo como hash SHA-256.
-  dosFactoresActivo        Boolean               @default(false) @map("dos_factores_activo")
-  dosFactoresSecreto       String?               @map("dos_factores_secreto") @db.Text
-  dosFactoresPendiente     String?               @map("dos_factores_pendiente") @db.Text
-  dosFactoresUltimoPaso    Int?                  @map("dos_factores_ultimo_paso")
-  codigosRespaldo          Json?                 @map("codigos_respaldo")
+  dosFactoresActivo        Boolean                 @default(false) @map("dos_factores_activo")
+  dosFactoresSecreto       String?                 @map("dos_factores_secreto") @db.Text
+  dosFactoresPendiente     String?                 @map("dos_factores_pendiente") @db.Text
+  dosFactoresUltimoPaso    Int?                    @map("dos_factores_ultimo_paso")
+  codigosRespaldo          Json?                   @map("codigos_respaldo")
   sesiones                 Sesion[]
   eventosSeguridad         EventoSeguridad[]
-  contratosCreados         Contrato[]            @relation("CreadorContrato")
-  contratosResponsable     Contrato[]            @relation("ResponsableContrato")
-  empresasCreadas          Empresa[]             @relation("CreadorEmpresa")
-  diasEmpresaCreados       DiaEmpresa[]          @relation("CreadorDiaEmpresa")
+  contratosCreados         Contrato[]              @relation("CreadorContrato")
+  contratosResponsable     Contrato[]              @relation("ResponsableContrato")
+  empresasCreadas          Empresa[]               @relation("CreadorEmpresa")
+  diasEmpresaCreados       DiaEmpresa[]            @relation("CreadorDiaEmpresa")
   archivosContratoSubidos  ContratoArchivo[]
-  adjuntos                 Adjunto[]             @relation("AutorAdjunto")
-  comentarios              Comentario[]          @relation("AutorComentario")
-  actividades              LogActividad[]        @relation("AutorActividad")
-  eventos                  Evento[]              @relation("UsuarioEvento")
-  eventosCreados           Evento[]              @relation("EventosCreados")
+  adjuntos                 Adjunto[]               @relation("AutorAdjunto")
+  comentarios              Comentario[]            @relation("AutorComentario")
+  actividades              LogActividad[]          @relation("AutorActividad")
+  eventos                  Evento[]                @relation("UsuarioEvento")
+  eventosCreados           Evento[]                @relation("EventosCreados")
   invitacionesEventos      EventoInvitado[]
   configLaboral            ConfiguracionLaboral?
   diasEspeciales           DiaEspecial[]
-  notificaciones           Notificacion[]        @relation("DestinatarioNotificacion")
-  proyectosCreados         Proyecto[]            @relation("CreadorProyecto")
-  plantillasCreadas        PlantillaProyecto[]   @relation("CreadorPlantillaProyecto")
-  tareasCreadas            Tarea[]               @relation("CreadorTarea")
-  tareasAsignadas          Tarea[]               @relation("AsignadoTarea")
-  tareasCompartidas        Tarea[]               @relation("AsignadosMultiplesTarea")
-  proyectosMiembro         Proyecto[]            @relation("ProyectoMiembro")
-  invitacionesEnviadas     Invitacion[]          @relation("CreadorInvitacion")
+  notificaciones           Notificacion[]          @relation("DestinatarioNotificacion")
+  proyectosCreados         Proyecto[]              @relation("CreadorProyecto")
+  plantillasCreadas        PlantillaProyecto[]     @relation("CreadorPlantillaProyecto")
+  tareasCreadas            Tarea[]                 @relation("CreadorTarea")
+  tareasAsignadas          Tarea[]                 @relation("AsignadoTarea")
+  tareasCompartidas        Tarea[]                 @relation("AsignadosMultiplesTarea")
+  proyectosMiembro         Proyecto[]              @relation("ProyectoMiembro")
+  invitacionesEnviadas     Invitacion[]            @relation("CreadorInvitacion")
   // Solo rol CLIENTE: la empresa del directorio cuyo portal ve.
-  empresaId                Int?                  @map("empresa_id")
-  empresa                  Empresa?              @relation("UsuariosPortal", fields: [empresaId], references: [id], onDelete: SetNull)
-  mensajesPortal           MensajePortal[]       @relation("AutorMensajePortal")
+  empresaId                Int?                    @map("empresa_id")
+  empresa                  Empresa?                @relation("UsuariosPortal", fields: [empresaId], references: [id], onDelete: SetNull)
+  mensajesPortal           MensajePortal[]         @relation("AutorMensajePortal")
+  // ---- Finanzas ----
+  // Que puede ver o editar en Ventas, Tesoreria, cada categoria de gastos y
+  // el informe: { ventas: 'ver', gastos: { FIJOS: 'editar' }, ... }. null =
+  // sin acceso. El administrador global siempre puede todo (no se consulta).
+  // Validado en utils/finanzas.utils.js.
+  permisosFinanzas         Json?                   @map("permisos_finanzas")
+  pagosRegistrados         Pago[]                  @relation("CreadorPago")
+  gastosRegistrados        Gasto[]                 @relation("CreadorGasto")
+  asignacionesHechas       AsignacionPartida[]     @relation("CreadorAsignacion")
+  comprobantesSubidos      ComprobanteFinanciero[] @relation("SubeComprobante")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -174,6 +184,7 @@ model Contrato {
   responsable          Usuario?          @relation("ResponsableContrato", fields: [responsableId], references: [id], onDelete: SetNull)
   creadoPor            Usuario?          @relation("CreadorContrato", fields: [creadoPorId], references: [id], onDelete: SetNull)
   archivos             ContratoArchivo[]
+  pagos                Pago[]
 
   @@index([tipo])
   @@index([estado])
@@ -207,6 +218,8 @@ model Empresa {
   usuariosPortal  Usuario[]         @relation("UsuariosPortal")
   invitaciones    Invitacion[]
   reuniones       Evento[]
+  pagos           Pago[] // como cliente que paga
+  gastos          Gasto[] // como proveedor al que se le paga
 
   @@index([tipo])
   @@index([nombre])
@@ -317,6 +330,7 @@ model Proyecto {
   plantillasBase PlantillaProyecto[] @relation("ProyectoFuentePlantillas")
   contratos      Contrato[]
   mensajesPortal MensajePortal[]
+  pagos          Pago[]
 
   @@index([clienteId])
   @@map("proyectos")
@@ -605,4 +619,181 @@ model AvisoEnviado {
 
   @@index([creadoEn])
   @@map("avisos_enviados")
+}
+
+// ---------------------------------------------------------------------------
+// Finanzas: Ventas (pagos recibidos), Tesoreria (partidas) y Gastos.
+// Los montos son Decimal(14,2); los importes se suman en la base o con
+// Prisma.Decimal, nunca con float. Los valores cerrados (estado, metodo,
+// categoria) son VarChar validados en utils/finanzas.utils.js.
+// ---------------------------------------------------------------------------
+
+// Cuenta a la que entra el dinero (o de la que sale): banco, caja, pasarela.
+// Catalogo editable desde Ventas / Tesoreria.
+model CuentaFinanciera {
+  id         Int      @id @default(autoincrement())
+  nombre     String   @db.VarChar(120)
+  tipo       String   @default("BANCO") @db.VarChar(20) // BANCO | EFECTIVO | PASARELA | OTRA
+  banco      String?  @db.VarChar(80)
+  referencia String?  @db.VarChar(40) // alias, ultimos digitos
+  activa     Boolean  @default(true)
+  orden      Int      @default(0)
+  creadoEn   DateTime @default(now()) @map("creado_en")
+  pagos      Pago[]
+  gastos     Gasto[]
+
+  @@map("cuentas_financieras")
+}
+
+// Partida de tesoreria: "sobre" al que se aparta dinero de la bolsa de
+// ingresos (Marketing, Caja chica, Ahorro, Inversion...). Se crean libremente.
+model Partida {
+  id           Int                 @id @default(autoincrement())
+  nombre       String              @db.VarChar(80)
+  color        String?             @db.VarChar(9)
+  descripcion  String?             @db.VarChar(255)
+  activa       Boolean             @default(true)
+  orden        Int                 @default(0)
+  creadoEn     DateTime            @default(now()) @map("creado_en")
+  asignaciones AsignacionPartida[]
+  gastos       Gasto[]
+
+  @@map("partidas")
+}
+
+// Dinero de la bolsa de ingresos apartado para una partida. El saldo de la
+// partida = asignado - gastado (gastos no anulados con esa partida).
+model AsignacionPartida {
+  id          Int      @id @default(autoincrement())
+  partidaId   Int      @map("partida_id")
+  monto       Decimal  @db.Decimal(14, 2)
+  fecha       DateTime @db.Date
+  nota        String?  @db.VarChar(255)
+  creadoPorId Int?     @map("creado_por_id")
+  creadoEn    DateTime @default(now()) @map("creado_en")
+  partida     Partida  @relation(fields: [partidaId], references: [id], onDelete: Cascade)
+  creadoPor   Usuario? @relation("CreadorAsignacion", fields: [creadoPorId], references: [id], onDelete: SetNull)
+
+  @@index([partidaId])
+  @@index([fecha])
+  @@map("asignaciones_partida")
+}
+
+// Pago recibido de un cliente (ingreso). `clienteNombre` guarda el nombre tal
+// como estaba al registrar, por si la ficha cambia o no existe en el directorio.
+model Pago {
+  id              Int                     @id @default(autoincrement())
+  folio           String                  @unique @db.VarChar(40) // PAG-2026-0001
+  concepto        String                  @db.VarChar(255)
+  monto           Decimal                 @db.Decimal(14, 2)
+  moneda          String                  @default("MXN") @db.VarChar(3)
+  fecha           DateTime                @db.Date
+  metodo          String                  @default("TRANSFERENCIA") @db.VarChar(20) // TRANSFERENCIA | EFECTIVO | TARJETA | CHEQUE | DEPOSITO | OTRO
+  referencia      String?                 @db.VarChar(80)
+  origen          String                  @default("MANUAL") @db.VarChar(20)
+  estado          String                  @default("REGISTRADO") @db.VarChar(20) // REGISTRADO | ANULADO
+  motivoAnulacion String?                 @map("motivo_anulacion") @db.VarChar(255)
+  notas           String?                 @db.Text
+  empresaId       Int?                    @map("empresa_id")
+  clienteNombre   String?                 @map("cliente_nombre") @db.VarChar(255)
+  cuentaId        Int?                    @map("cuenta_id")
+  contratoId      Int?                    @map("contrato_id")
+  proyectoId      Int?                    @map("proyecto_id")
+  creadoPorId     Int?                    @map("creado_por_id")
+  creadoEn        DateTime                @default(now()) @map("creado_en")
+  actualizadoEn   DateTime                @updatedAt @map("actualizado_en")
+  empresa         Empresa?                @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  cuenta          CuentaFinanciera?       @relation(fields: [cuentaId], references: [id], onDelete: SetNull)
+  contrato        Contrato?               @relation(fields: [contratoId], references: [id], onDelete: SetNull)
+  proyecto        Proyecto?               @relation(fields: [proyectoId], references: [id], onDelete: SetNull)
+  creadoPor       Usuario?                @relation("CreadorPago", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  comprobantes    ComprobanteFinanciero[]
+
+  @@index([fecha])
+  @@index([estado])
+  @@index([empresaId])
+  @@index([cuentaId])
+  @@map("pagos")
+}
+
+// Gasto registrado en una categoria (PRESUPUESTO_GENERAL, PRESUPUESTO_OFICINA,
+// NOMINA, FIJOS, VARIABLES, OTROS). `fechaLimite` es la fecha tope para
+// pagarlo (sale en la agenda mientras este PENDIENTE); `pagadoEn`, cuando se
+// pago. `fecha` es la fecha contable que agrupa el informe por mes.
+model Gasto {
+  id              Int                     @id @default(autoincrement())
+  folio           String                  @unique @db.VarChar(40) // GAS-2026-0001
+  categoria       String                  @db.VarChar(30)
+  concepto        String                  @db.VarChar(255)
+  descripcion     String?                 @db.Text
+  monto           Decimal                 @db.Decimal(14, 2)
+  moneda          String                  @default("MXN") @db.VarChar(3)
+  fecha           DateTime                @db.Date
+  fechaLimite     DateTime?               @map("fecha_limite") @db.Date
+  pagadoEn        DateTime?               @map("pagado_en") @db.Date
+  estado          String                  @default("PENDIENTE") @db.VarChar(20) // PENDIENTE | PAGADO | ANULADO
+  metodo          String?                 @db.VarChar(20)
+  referencia      String?                 @db.VarChar(80)
+  motivoAnulacion String?                 @map("motivo_anulacion") @db.VarChar(255)
+  notas           String?                 @db.Text
+  partidaId       Int?                    @map("partida_id")
+  empresaId       Int?                    @map("empresa_id") // proveedor
+  proveedorNombre String?                 @map("proveedor_nombre") @db.VarChar(255)
+  cuentaId        Int?                    @map("cuenta_id")
+  creadoPorId     Int?                    @map("creado_por_id")
+  creadoEn        DateTime                @default(now()) @map("creado_en")
+  actualizadoEn   DateTime                @updatedAt @map("actualizado_en")
+  partida         Partida?                @relation(fields: [partidaId], references: [id], onDelete: SetNull)
+  empresa         Empresa?                @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  cuenta          CuentaFinanciera?       @relation(fields: [cuentaId], references: [id], onDelete: SetNull)
+  creadoPor       Usuario?                @relation("CreadorGasto", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  comprobantes    ComprobanteFinanciero[]
+
+  @@index([categoria])
+  @@index([fecha])
+  @@index([fechaLimite])
+  @@index([estado])
+  @@index([partidaId])
+  @@map("gastos")
+}
+
+// Comprobante de un pago (transferencia) o de un gasto (factura, ticket).
+// Vive en disco fuera de cualquier carpeta publica (COMPROBANTES_DIR) y solo
+// se sirve a quien puede ver ese pago o gasto. `archivo` es el nombre interno.
+model ComprobanteFinanciero {
+  id             String   @id @default(uuid()) @db.VarChar(36)
+  pagoId         Int?     @map("pago_id")
+  gastoId        Int?     @map("gasto_id")
+  nombreOriginal String   @map("nombre_original") @db.VarChar(255)
+  archivo        String   @unique @db.VarChar(80)
+  mime           String   @db.VarChar(60)
+  tamano         Int
+  sha256         String   @db.VarChar(64)
+  subidoPorId    Int?     @map("subido_por_id")
+  creadoEn       DateTime @default(now()) @map("creado_en")
+  pago           Pago?    @relation(fields: [pagoId], references: [id], onDelete: Cascade)
+  gasto          Gasto?   @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  subidoPor      Usuario? @relation("SubeComprobante", fields: [subidoPorId], references: [id], onDelete: SetNull)
+
+  @@index([pagoId])
+  @@index([gastoId])
+  @@map("comprobantes_financieros")
+}
+
+// Bitacora de finanzas. Sin llave foranea a la entidad para que sobreviva a
+// los borrados (quien borro que, cuando). `usuarioNombre` es una foto del
+// nombre por si la cuenta se desactiva o cambia.
+model LogFinanzas {
+  id            Int      @id @default(autoincrement())
+  entidad       String   @db.VarChar(20) // pago | gasto | partida | asignacion | cuenta (los comprobantes se anotan en su pago o gasto)
+  entidadId     Int      @map("entidad_id")
+  accion        String   @db.VarChar(30)
+  descripcion   String   @db.Text
+  usuarioId     Int?     @map("usuario_id")
+  usuarioNombre String?  @map("usuario_nombre") @db.VarChar(255)
+  creadoEn      DateTime @default(now()) @map("creado_en")
+
+  @@index([entidad, entidadId])
+  @@index([creadoEn])
+  @@map("logs_finanzas")
 }

@@ -11,7 +11,11 @@ import { usePreferences } from './PreferencesContext';
 import { aplicarCssDeMarca, cssDeMarca } from '../utils/temaMarca';
 import { fijarPasswordMin } from '../utils/politicaPassword';
 import { fijarPdfMaxMb } from '../utils/contratos';
+import { fijarComprobanteMaxMb } from '../utils/finanzas';
 import { AREAS_FABRICA, CLAVE_TRADUCCION_AREA, nombreDesdeClave } from '../utils/areas';
+
+// Módulos retirados: siempre apagados (espejo de MODULOS_RETIRADOS del backend).
+const MODULOS_RETIRADOS = ['portalClientes'];
 
 // Valores de fábrica mientras llega la configuración (iguales a los del backend).
 const PERMISOS_FABRICA = {
@@ -100,6 +104,7 @@ export const ConfiguracionProvider = ({ children }) => {
     setTextosMarca(textosDesdeConfig(nueva));
     fijarPasswordMin(nueva.seguridad?.passwordMin);
     fijarPdfMaxMb(nueva.subidas?.contratosMaxMB);
+    fijarComprobanteMaxMb(nueva.subidas?.comprobantesMaxMB);
     const favicon = nueva.archivos?.favicon || nueva.archivos?.isotipo;
     ponerFavicon(favicon ? getPublicAssetUrl(favicon) : IMAGENES_FABRICA.favicon);
     const meta = document.querySelector('meta[name="theme-color"]');
@@ -170,7 +175,9 @@ export const ConfiguracionProvider = ({ children }) => {
       marca: config?.marca || { nombreSistema: 'OMNIS CRM', nombreCorto: 'OMNIS', nombreEmpresa: 'OMNIS Proyectos Globales' },
       login: config?.login || null,
       modulos: config?.modulos || { contratos: true, agenda: true },
-      moduloActivo: (modulo) => config?.modulos?.[modulo] !== false,
+      // Los retirados (portal de clientes) salen apagados aunque la configuración
+      // guardada en el navegador sea anterior a su retiro.
+      moduloActivo: (modulo) => !MODULOS_RETIRADOS.includes(modulo) && config?.modulos?.[modulo] !== false,
       imagen,
       recargar,
       aplicar,

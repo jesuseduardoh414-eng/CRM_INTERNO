@@ -17,6 +17,7 @@ export const useEtiquetaHora = () => {
     const { inicio, fin } = clavesItem(item);
     if (tipo === 'tarea') return { texto: clave === fin ? ta('pag_vence') : clave === inicio ? ta('pag_inicia') : ta('pag_enCurso') };
     if (tipo === 'proyecto') return { texto: clave === inicio ? ta('pag_inicia') : clave === fin ? ta('pag_termina') : ta('pag_enCurso') };
+    if (tipo === 'gasto') return { texto: ta('pag_vence') };
     if (item.todoElDia) return { texto: t('agendaAllDay') };
     if (clave && inicio !== clave) return { texto: ta('pag_enCurso') };
     return {

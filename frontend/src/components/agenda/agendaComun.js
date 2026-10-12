@@ -12,6 +12,8 @@ export const COLORES_TIPO = {
   tarea: 'var(--color-accent-green)',
   evento: 'var(--color-accent-purple)',
   reunion: 'var(--color-accent-pink)',
+  // Fecha límite de un gasto pendiente (bloque virtual `gasto-<id>`).
+  gasto: 'var(--color-accent-amber)',
 };
 
 /** Version translucida de un color (sirve con variables CSS, que `#rrggbbaa` no admite). */
@@ -165,18 +167,20 @@ export const esBloqueProyecto = (evento) =>
 export const esEventoRecurrente = (evento) =>
   !!(evento?.esRecurrente || evento?.esOcurrencia || evento?.patronRecurrencia);
 
-/** Tipo para colores y filtros: proyecto | tarea | reunion | evento. */
+/** Tipo para colores y filtros: proyecto | tarea | reunion | gasto | evento. */
 export const getTipoAgenda = (evento) => {
   if (evento?.tipo === 'tarea') return 'tarea';
   if (evento?.tipo === 'reunion') return 'reunion';
+  if (evento?.tipo === 'gasto') return 'gasto';
   if (esBloqueProyecto(evento)) return 'proyecto';
   return 'evento';
 };
 
-/** Título sin los prefijos "TAREA:" / "Proyecto:" que pone el servidor. */
+/** Título sin los prefijos "TAREA:" / "Proyecto:" / "Gasto:" que pone el servidor. */
 export const tituloLimpio = (item) => String(item?.titulo || '')
   .replace(/^TAREA:\s*/i, '')
   .replace(/^Proyecto:\s*/i, '')
+  .replace(/^Gasto:\s*/i, '')
   .trim();
 
 /** Fondo de un bloque de agenda: el color del servidor o el del tipo. */

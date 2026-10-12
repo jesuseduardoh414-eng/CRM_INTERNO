@@ -29,6 +29,8 @@ const {
 } = require('../utils/security.utils');
 const { cifrar, descifrar, sha256, igualesSeguro } = require('../utils/cifrado.utils');
 const { generarSecreto, verificarTotp, uriOtpauth } = require('../utils/totp.utils');
+const { resumenPermisos } = require('../utils/finanzas.utils');
+const { moduloActivo: moduloActivoConfig } = require('../services/configuracion.service');
 const {
   ErrorSesion,
   datosCliente,
@@ -100,6 +102,9 @@ const usuarioPublico = (usuario) => ({
   dosFactoresActivo: Boolean(usuario.dosFactoresActivo),
   // La política exige 2FA y aún no la activó: el frontend lo manda a hacerlo.
   debeActivar2FA: debeActivar2FA(usuario),
+  // Nivel (ninguno | ver | editar) en Ventas, Tesorería, cada categoría de
+  // gastos e Informe. El administrador global siempre sale con `editar`.
+  finanzas: resumenPermisos(usuario),
 });
 
 // Hash ficticio contra el que se compara cuando el correo no existe, para que
@@ -543,6 +548,10 @@ const login = async (req, res) => {
     if (usuario.estado && usuario.estado !== 'activo') {
       return res.status(403).json({ error: 'Tu cuenta no está activa, contacta al administrador', codigo: 'CUENTA_INACTIVA' });
     }
+    // El portal de clientes se retiró: las cuentas de cliente ya no entran.
+    if (usuario.rol === 'CLIENTE' && !(await moduloActivoConfig('portalClientes'))) {
+      return res.status(403).json({ error: 'El portal de clientes ya no está disponible. Contacta a tu asesor.', codigo: 'PORTAL_DESACTIVADO' });
+    }
 
     if (usuario.dosFactoresActivo && usuario.dosFactoresSecreto) {
       const desafio = jwt.sign(
@@ -655,10 +664,12 @@ const me = async (req, res) => {
       select: {
         id: true, nombre: true, email: true, telefono: true, puesto: true, biografia: true,
         fotoPerfilUrl: true, area: true, rol: true, creadoEn: true, dosFactoresActivo: true, empresaId: true,
+        permisosFinanzas: true,
       },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
-    return res.json({ usuario: { ...usuario, ...usuarioPublico(usuario) } });
+    const { permisosFinanzas, ...publico } = usuario;
+    return res.json({ usuario: { ...publico, ...usuarioPublico(usuario) } });
   } catch (error) {
     console.error('[me]', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
@@ -1128,6 +1139,10 @@ const verificarInvitacion = async (req, res) => {
     }
 
     const esCliente = invitacion.rol === 'cliente';
+    // Portal retirado: se avisa al abrir el enlace, no despues de llenar el formulario.
+    if (esCliente && !(await moduloActivoConfig('portalClientes'))) {
+      return res.status(410).json({ error: 'El portal de clientes ya no está disponible, esta invitación no se puede usar.' });
+    }
     return res.json({
       nombre: invitacion.nombre,
       email: invitacion.email,
@@ -1170,6 +1185,9 @@ const aceptarInvitacion = async (req, res) => {
     // activa (si se desactivó después de invitar, no se crea la cuenta).
     const esCliente = invitacion.rol === 'cliente';
     if (esCliente) {
+      if (!(await moduloActivoConfig('portalClientes'))) {
+        return res.status(410).json({ error: 'El portal de clientes ya no está disponible, esta invitación no se puede usar.' });
+      }
       const empresa = invitacion.empresaId
         ? await prisma.empresa.findUnique({ where: { id: invitacion.empresaId }, select: { estado: true } })
         : null;

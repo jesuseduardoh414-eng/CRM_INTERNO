@@ -4,8 +4,8 @@
 // salvo "Probar conexión", que solo consulta al servidor.
 import { useState } from 'react';
 import {
-  Building2, CalendarDays, CalendarSync, Globe, Check, CircleDot, ClipboardList, Download, Eye, EyeOff, FileSignature, FileSpreadsheet,
-  FolderPlus, LayoutTemplate, Loader2, MessageSquare, Minus, Paperclip, Pencil, PlugZap, Plus, Server, ShieldCheck, Trash2, TriangleAlert, Upload,
+  Building2, CalendarDays, CalendarSync, Check, CircleDot, ClipboardList, Download, Eye, EyeOff, FileSignature, FileSpreadsheet,
+  FolderPlus, LayoutTemplate, Loader2, MessageSquare, Minus, Paperclip, Pencil, PlugZap, Plus, Server, ShieldCheck, Trash2, TriangleAlert, Upload, Wallet,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
 import SelectorSimple from '../SelectorSimple';
@@ -224,18 +224,21 @@ export const SeccionPermisos = ({ permisos, cambiar }) => {
 // ── Módulos ──────────────────────────────────────────────────────────────
 
 const MODULOS = [
-  { grupo: 'modGroupSections', filas: [['agenda', CalendarDays], ['contratos', FileSignature], ['clientes', Building2], ['portalClientes', Globe]] },
+  // El portal de clientes se retiró (2026-10-12): el CRM es solo de uso interno.
+  { grupo: 'modGroupSections', filas: [['agenda', CalendarDays], ['contratos', FileSignature], ['clientes', Building2], ['finanzas', Wallet]] },
   { grupo: 'modGroupProjects', filas: [['plantillas', LayoutTemplate], ['importar', FileSpreadsheet], ['comentarios', MessageSquare], ['adjuntos', Paperclip]] },
   { grupo: 'modGroupIntegrations', filas: [['googleCalendar', CalendarSync], ['reporteDiario', Download]] },
 ];
 // Un módulo que vive dentro de otro no se puede encender si el otro está apagado.
-const DEPENDE_DE = { googleCalendar: 'agenda', portalClientes: 'clientes' };
+const DEPENDE_DE = { googleCalendar: 'agenda' };
 
 export const ListaModulos = ({ modulos, cambiar }) => {
   const { t } = usePreferences();
-  const activos = Object.values(modulos).filter(Boolean).length;
+  // Se cuentan solo los módulos que se ven (no los retirados, como el portal).
+  const visibles = MODULOS.flatMap(({ filas }) => filas.map(([clave]) => clave));
+  const activos = visibles.filter((clave) => modulos[clave] !== false).length;
   return (
-    <Fila titulo={t('cfgModules')} descripcion={t('cfgModulesHint')} zona="modulos" extra={<span className="badge-neutral">{t('modActiveCount', { n: activos, total: Object.keys(modulos).length })}</span>}>
+    <Fila titulo={t('cfgModules')} descripcion={t('cfgModulesHint')} zona="modulos" extra={<span className="badge-neutral">{t('modActiveCount', { n: activos, total: visibles.length })}</span>}>
       <div className="space-y-5">
         {MODULOS.map(({ grupo, filas }) => (
           <div key={grupo}>

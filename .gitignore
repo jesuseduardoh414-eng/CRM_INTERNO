@@ -11,6 +11,8 @@ frontend/.env
 
 # Archivos locales que no deben versionarse
 backend/uploads/
+# Disco del servidor: adjuntos, PDF de contratos y comprobantes de finanzas
+backend/storage/
 scratch/
 backend/scratch/
 frontend/scratch/

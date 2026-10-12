@@ -7,7 +7,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 import {
   Archive, ArrowRight, CalendarOff, CheckCircle2, Clock, Copy, Database, ExternalLink, Eye, EyeOff, FileImage, FileSignature, FileSpreadsheet, FileText, FileType, KeyRound, Lock, LogOut,
-  HardDrive, Mail, MailCheck, Minus, Paperclip, Plus, RefreshCcw, Send, ShieldCheck, ShieldOff, TriangleAlert, Unlock, UserCheck, UserPlus, UserX, Users,
+  HardDrive, Mail, MailCheck, Minus, Paperclip, Plus, Receipt, RefreshCcw, Send, ShieldCheck, ShieldOff, TriangleAlert, Unlock, UserCheck, UserPlus, UserX, Users,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
 import SelectorSimple from '../SelectorSimple';
@@ -368,10 +368,11 @@ export const SeccionArchivos = ({ archivos, cambiar, estado }) => {
         </div>
       </Fila>
       <Fila titulo={t('filesSizes')} descripcion={t('filesSizesHint')}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <CampoNumero id="arc-adjuntos" etiqueta={t('filesMaxAttachments')} valor={archivos.adjuntosMaxMB} min={1} max={25} unidad={t('unitMb')} onChange={set('adjuntosMaxMB')} />
           <CampoNumero id="arc-perfil" etiqueta={t('filesMaxProfile')} valor={archivos.fotoPerfilMaxMB} min={1} max={5} unidad={t('unitMb')} onChange={set('fotoPerfilMaxMB')} />
           <CampoNumero id="arc-contratos" etiqueta={t('filesMaxContracts')} valor={archivos.contratosMaxMB} min={1} max={50} unidad={t('unitMb')} onChange={set('contratosMaxMB')} />
+          <CampoNumero id="arc-comprobantes" etiqueta={t('filesMaxReceipts')} valor={archivos.comprobantesMaxMB ?? 10} min={1} max={50} unidad={t('unitMb')} onChange={set('comprobantesMaxMB')} />
         </div>
       </Fila>
       <Fila titulo={t('filesStorage')} descripcion={t('filesStorageHint')}>
@@ -411,6 +412,16 @@ export const SeccionArchivos = ({ archivos, cambiar, estado }) => {
             </span>
             {almacen && <Estado ok={almacen.contratos.ok}>{almacen.contratos.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>}
           </li>
+          {almacen?.comprobantes && (
+            <li className="flex items-center gap-3">
+              <Receipt size={16} className="shrink-0 text-[var(--color-text-muted)]" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreReceipts')}</span>
+                <span className="block truncate font-mono text-[11.5px] text-[var(--color-text-muted)]">{almacen.comprobantes.ruta}</span>
+              </span>
+              <Estado ok={almacen.comprobantes.ok}>{almacen.comprobantes.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>
+            </li>
+          )}
           <li className="flex items-center gap-3">
             <Database size={16} className="shrink-0 text-[var(--color-text-muted)]" />
             <span className="flex-1 text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreBrand')}</span>
@@ -760,6 +771,7 @@ export const PanelEstado = ({ estado, onRefrescar, seccion }) => {
       detalle: estado.almacenamiento.adjuntos.ok ? t('sysAttachmentsDetail', { n: (estado.almacenamiento.adjuntos.archivos ?? 0).toLocaleString() }) : null,
     },
     { icono: FileSignature, etiqueta: t('sysContracts'), ok: estado.almacenamiento.contratos.ok, valor: estado.almacenamiento.contratos.ok ? t('sysOk') : t('sysWarn') },
+    estado.almacenamiento.comprobantes && { icono: Receipt, etiqueta: t('sysReceipts'), ok: estado.almacenamiento.comprobantes.ok, valor: estado.almacenamiento.comprobantes.ok ? t('sysOk') : t('sysWarn') },
     { icono: Clock, etiqueta: t('sysTime'), ok: true, valor: estado.servidor.horaLocal, detalle: estado.servidor.zonaHoraria.replace(/_/g, ' ') },
     estado.administradores && {
       icono: ShieldCheck,

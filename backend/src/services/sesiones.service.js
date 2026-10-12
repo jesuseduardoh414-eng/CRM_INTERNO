@@ -119,7 +119,7 @@ const rotarSesion = async (refreshToken, req) => {
 
   const sesion = await prisma.sesion.findUnique({
     where: { refreshHash: hash },
-    include: { usuario: { select: { id: true, estado: true } } },
+    include: { usuario: { select: { id: true, estado: true, rol: true } } },
   });
 
   if (!sesion) {
@@ -141,6 +141,12 @@ const rotarSesion = async (refreshToken, req) => {
   if (!usuarioActivo(sesion.usuario)) {
     await prisma.sesion.update({ where: { id: sesion.id }, data: { revocadaEn: ahora } });
     throw new ErrorSesion('Tu cuenta no está activa', 'CUENTA_INACTIVA');
+  }
+  // Portal de clientes retirado: una sesion de cliente ya no se renueva.
+  // eslint-disable-next-line global-require
+  if (sesion.usuario.rol === 'CLIENTE' && require('./configuracion.service').configEnCache().modulos?.portalClientes === false) {
+    await prisma.sesion.update({ where: { id: sesion.id }, data: { revocadaEn: ahora } });
+    throw new ErrorSesion('El portal de clientes ya no está disponible', 'SESION_REVOCADA');
   }
 
   const siguiente = nuevoRefresh();

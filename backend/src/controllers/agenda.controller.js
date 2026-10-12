@@ -13,6 +13,7 @@ const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fec
 const { esAdmin, cargarProyectoVisible } = require('../utils/permissions.utils');
 const { borrarBlobs } = require('../utils/blob.utils');
 const { configEnCache } = require('../services/configuracion.service');
+const { categoriasVisibles } = require('../utils/finanzas.utils');
 
 const DIAS_LABORALES_DEFAULT = [1, 2, 3, 4, 5];
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -40,9 +41,16 @@ const COLOR_CATEGORIA = {
   tarea: '#16a34a',
   reunion: '#7c3aed',
   evento: '#2563eb',
+  gasto: '#d97706',
 };
 
 const getColorCategoria = (tipo) => COLOR_CATEGORIA[tipo] || COLOR_CATEGORIA.evento;
+
+/** Instante -> medianoche UTC de su dia civil en la zona de la empresa (como se guarda un @db.Date). */
+const diaCivilUtc = (instante) => {
+  const { year, month, day } = partesDiaMexico(instante);
+  return new Date(Date.UTC(year, month, day));
+};
 
 const syncEventoBestEffort = async (eventoId) => {
   try {
@@ -312,7 +320,11 @@ const listar = async (req, res) => {
       empresa:   { select: { id: true, nombre: true, nombreComercial: true } },
     };
 
-    const [eventosNormales, eventosRecurrentes, tareas, proyectos] = await Promise.all([
+    // Gastos pendientes con fecha limite: solo de las categorias que la
+    // persona puede ver en Finanzas (bloque virtual `gasto-<id>`).
+    const categoriasGasto = configEnCache().modulos?.finanzas === false ? [] : categoriasVisibles(req.usuario);
+
+    const [eventosNormales, eventosRecurrentes, tareas, proyectos, gastosPendientes] = await Promise.all([
       // Eventos puntuales dentro del rango
       prisma.evento.findMany({
         where: {
@@ -391,6 +403,19 @@ const listar = async (req, res) => {
           creadoEn: true,
         },
       }),
+      // fechaLimite es @db.Date (medianoche UTC del dia civil): el rango, que
+      // llega en instantes, se pasa a dias civiles de la empresa. Ampliarlo un
+      // dia por lado traia vencimientos fuera de la vista (y los contaba).
+      categoriasGasto.length
+        ? prisma.gasto.findMany({
+          where: {
+            estado: 'PENDIENTE',
+            categoria: { in: categoriasGasto },
+            fechaLimite: { gte: diaCivilUtc(desde), lte: diaCivilUtc(hasta) },
+          },
+          select: { id: true, folio: true, concepto: true, categoria: true, monto: true, moneda: true, fechaLimite: true, proveedorNombre: true },
+        })
+        : Promise.resolve([]),
     ]);
 
     // Mapear tareas a formato evento
@@ -419,10 +444,30 @@ const listar = async (req, res) => {
       esLectura: true,
     }));
 
+    const eventosGastos = gastosPendientes.map((g) => ({
+      id: `gasto-${g.id}`,
+      titulo: `Gasto: ${g.concepto}`,
+      tipo: 'gasto',
+      fechaInicio: ajustarFechaTodoElDia(g.fechaLimite),
+      fechaFin: ajustarFechaTodoElDia(g.fechaLimite, true),
+      todoElDia: true,
+      color: getColorCategoria('gasto'),
+      gasto: {
+        id: g.id,
+        folio: g.folio,
+        categoria: g.categoria,
+        monto: Number(g.monto),
+        moneda: g.moneda,
+        proveedorNombre: g.proveedorNombre,
+        fechaLimite: g.fechaLimite.toISOString().slice(0, 10),
+      },
+      esLectura: true,
+    }));
+
     // Expandir recurrentes en el rango
     const expandidos = eventosRecurrentes.flatMap((e) => expandirRecurrente(e, desde, hasta));
 
-    const resultado = [...eventosNormales, ...eventosProyectos, ...eventosTareas, ...expandidos].sort(
+    const resultado = [...eventosNormales, ...eventosProyectos, ...eventosTareas, ...eventosGastos, ...expandidos].sort(
       (a, b) => new Date(a.fechaInicio) - new Date(b.fechaInicio)
     );
 

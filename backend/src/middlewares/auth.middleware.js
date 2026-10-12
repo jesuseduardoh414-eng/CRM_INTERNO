@@ -23,7 +23,7 @@ const CACHE_MAX = 2000;
 const cacheUsuarios = new Map(); // id -> { usuario, expira }
 const cacheSesiones = new Map(); // sid -> { sesion, expira }
 
-const selectUsuarioAuth = { id: true, rol: true, area: true, estado: true, nombre: true, email: true, dosFactoresActivo: true, empresaId: true };
+const selectUsuarioAuth = { id: true, rol: true, area: true, estado: true, nombre: true, email: true, dosFactoresActivo: true, empresaId: true, permisosFinanzas: true };
 
 const guardarEnCache = (mapa, clave, valor) => {
   if (mapa.size >= CACHE_MAX) mapa.clear();
@@ -70,6 +70,10 @@ const cargarSesion = async (sid) => {
   return sesion;
 };
 
+// Require diferido: el servicio de configuracion tambien carga Prisma.
+// eslint-disable-next-line global-require
+const portalActivo = () => require('../services/configuracion.service').configEnCache().modulos?.portalClientes !== false;
+
 const RUTAS_CONFIGURADOR = ['/api/auth', '/api/configuracion'];
 // Lo único que puede usar una cuenta del portal de clientes.
 const RUTAS_CLIENTE = ['/api/auth', '/api/portal', '/api/notificaciones'];
@@ -113,6 +117,12 @@ const verificarToken = async (req, res, next) => {
       return rechazar(res, 'CUENTA_INACTIVA', 'Tu cuenta no está activa o ya no existe');
     }
 
+    // Portal de clientes retirado: las sesiones de cliente que quedaron
+    // abiertas se cortan (el frontend cierra la sesion con el 401).
+    if (usuario.rol === 'CLIENTE' && !portalActivo()) {
+      return rechazar(res, 'SESION_REVOCADA', 'El portal de clientes ya no está disponible.');
+    }
+
     // La cuenta CONFIGURADOR solo puede usar su propia cuenta (/api/auth) y el
     // panel de configuracion: nada de proyectos, tareas, usuarios ni contratos.
     if (usuario.rol === 'CONFIGURADOR' && !RUTAS_CONFIGURADOR.includes(req.baseUrl)) {
@@ -140,6 +150,8 @@ const verificarToken = async (req, res, next) => {
       rol: usuario.rol,
       estado: usuario.estado,
       empresaId: usuario.empresaId ?? null,
+      // Niveles de finanzas por recurso (utils/finanzas.utils.js).
+      permisosFinanzas: usuario.permisosFinanzas ?? null,
     };
     req.sesionId = sesion.id;
     return next();

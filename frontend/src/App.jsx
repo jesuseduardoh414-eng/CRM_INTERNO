@@ -17,6 +17,7 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import VerifyAccountPage from './pages/VerifyAccountPage';
 import { AuthSkeleton, PageSkeleton } from './components/Skeleton';
 import { inicioDe } from './utils/portal';
+import { RUTA_INFORME, categoriasVisibles, puedeVerFinanzas, rutaCategoria } from './utils/finanzas';
 
 const lazyRetry = (importer, key) => lazy(async () => {
   const storageKey = `crm_lazy_retry_${key}`;
@@ -54,6 +55,10 @@ const PerfilPage = lazyRetry(() => import('./pages/PerfilPage'), 'perfil');
 const ContratosPage = lazyRetry(() => import('./pages/ContratosPage'), 'contratos');
 const ClientesPage = lazyRetry(() => import('./pages/ClientesPage'), 'clientes');
 const ReportesPage = lazyRetry(() => import('./pages/ReportesPage'), 'reportes');
+const VentasPage = lazyRetry(() => import('./pages/VentasPage'), 'ventas');
+const TesoreriaPage = lazyRetry(() => import('./pages/TesoreriaPage'), 'tesoreria');
+const GastosPage = lazyRetry(() => import('./pages/GastosPage'), 'gastos');
+const InformeGastosPage = lazyRetry(() => import('./pages/InformeGastosPage'), 'informe_gastos');
 const ConfiguracionPage = lazyRetry(() => import('./pages/ConfiguracionPage'), 'configuracion');
 const Activar2faPage = lazyRetry(() => import('./pages/Activar2faPage'), 'activar_2fa');
 const PortalLayout = lazyRetry(() => import('./components/portal/PortalLayout'), 'portal_layout');
@@ -110,6 +115,15 @@ const RutaConLayout = ({ children }) => (
 const RutaModulo = ({ modulo, children }) => {
   const { moduloActivo } = useConfiguracion();
   return moduloActivo(modulo) ? children : <Navigate to="/dashboard" replace />;
+};
+
+// /gastos a secas: la primera categoría que la persona puede ver (o el informe).
+const InicioGastos = () => {
+  const { usuario } = useAuth();
+  const categorias = categoriasVisibles(usuario);
+  if (categorias.length) return <Navigate to={rutaCategoria(categorias[0])} replace />;
+  if (puedeVerFinanzas(usuario, 'informe')) return <Navigate to={RUTA_INFORME} replace />;
+  return <Navigate to="/dashboard" replace />;
 };
 
 // Panel de configuración: solo la cuenta CONFIGURADOR (tiene su propio marco).
@@ -178,6 +192,12 @@ const AppRoutes = () => (
     <Route path="/clientes" element={<RutaConLayout><RutaModulo modulo="clientes"><ClientesPage /></RutaModulo></RutaConLayout>} />
     <Route path="/clientes/:id" element={<RutaConLayout><RutaModulo modulo="clientes"><ClientesPage /></RutaModulo></RutaConLayout>} />
     <Route path="/reportes" element={<RutaConLayout><ReportesPage /></RutaConLayout>} />
+    {/* Finanzas: cada página comprueba el permiso de la persona (usuario.finanzas). */}
+    <Route path="/ventas" element={<RutaConLayout><RutaModulo modulo="finanzas"><VentasPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/tesoreria" element={<RutaConLayout><RutaModulo modulo="finanzas"><TesoreriaPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/gastos" element={<RutaConLayout><RutaModulo modulo="finanzas"><InicioGastos /></RutaModulo></RutaConLayout>} />
+    <Route path="/gastos/informe" element={<RutaConLayout><RutaModulo modulo="finanzas"><InformeGastosPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/gastos/:categoria" element={<RutaConLayout><RutaModulo modulo="finanzas"><GastosPage /></RutaModulo></RutaConLayout>} />
     <Route path="/configuracion" element={<RutaConfigurador><ConfiguracionPage /></RutaConfigurador>} />
 
     <Route path="/portal" element={<RutaPortal><PortalInicioPage /></RutaPortal>} />

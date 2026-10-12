@@ -29,7 +29,11 @@ const IDIOMAS = ['es', 'en'];
 const TEMAS = ['sistema', 'claro', 'oscuro'];
 // Modulos que se pueden apagar. Apagado = desaparece del menu y la API responde
 // 404 MODULO_DESACTIVADO.
-const MODULOS = ['contratos', 'clientes', 'portalClientes', 'agenda', 'plantillas', 'importar', 'reporteDiario', 'googleCalendar', 'adjuntos', 'comentarios'];
+const MODULOS = ['contratos', 'clientes', 'portalClientes', 'agenda', 'plantillas', 'importar', 'reporteDiario', 'googleCalendar', 'adjuntos', 'comentarios', 'finanzas'];
+// Modulos retirados: siempre apagados, aunque la base guarde `true`. El portal
+// de clientes se desecho el 2026-10-12 (el CRM es solo de uso interno); sus
+// tablas y pantallas se conservan por si algun dia vuelve.
+const MODULOS_RETIRADOS = ['portalClientes'];
 // Lo que puede hacer un MIEMBRO (los administradores siempre pueden).
 const PERMISOS = ['crearProyectos', 'verTodosProyectos', 'crearTareas', 'editarTareas', 'borrarTareas', 'guardarPlantillas', 'subirAdjuntos'];
 const SEGURIDAD_SMTP = ['starttls', 'ssl', 'ninguna'];
@@ -80,8 +84,8 @@ const DEFECTO = Object.freeze({
     mostrarAnillo: true,
   },
   modulos: {
-    contratos: true, clientes: true, portalClientes: true, agenda: true, plantillas: true, importar: true,
-    reporteDiario: true, googleCalendar: true, adjuntos: true, comentarios: true,
+    contratos: true, clientes: true, portalClientes: false, agenda: true, plantillas: true, importar: true,
+    reporteDiario: true, googleCalendar: true, adjuntos: true, comentarios: true, finanzas: true,
   },
   // Permisos de los miembros. Los valores de fabrica son el comportamiento
   // que el CRM tenia antes de poder configurarlo.
@@ -157,6 +161,7 @@ const DEFECTO = Object.freeze({
     tiposAdjuntos: { pdf: true, imagenes: true, office: true, texto: true, comprimidos: true },
     fotoPerfilMaxMB: 2,
     contratosMaxMB: 25,
+    comprobantesMaxMB: 10,   // comprobantes de pagos y gastos (PDF o imagen)
   },
   // Avisos que genera el sistema.
   avisos: {
@@ -413,7 +418,10 @@ const validar = (entrada = {}, base = DEFECTO) => {
       beneficios,
       mostrarAnillo: booleano(l.mostrarAnillo, bl.mostrarAnillo),
     },
-    modulos: Object.fromEntries(MODULOS.map((clave) => [clave, booleano(mo[clave], b.modulos?.[clave] ?? true)])),
+    modulos: Object.fromEntries(MODULOS.map((clave) => [
+      clave,
+      MODULOS_RETIRADOS.includes(clave) ? false : booleano(mo[clave], b.modulos?.[clave] ?? true),
+    ])),
     permisos: Object.fromEntries(PERMISOS.map((clave) => [clave, booleano(pe[clave], bpe[clave])])),
     tareas: {
       estadoInicial: deLista(ta.estadoInicial, ['PENDIENTE', 'EN_PROGRESO'], bta.estadoInicial),
@@ -472,6 +480,7 @@ const validar = (entrada = {}, base = DEFECTO) => {
       tiposAdjuntos: Object.fromEntries(TIPOS_ADJUNTO.map((tipo) => [tipo, booleano((a.tiposAdjuntos || {})[tipo], tiposBase[tipo] !== false)])),
       fotoPerfilMaxMB: entero(a.fotoPerfilMaxMB, 1, 5, ba.fotoPerfilMaxMB),
       contratosMaxMB: entero(a.contratosMaxMB, 1, 50, ba.contratosMaxMB),
+      comprobantesMaxMB: entero(a.comprobantesMaxMB, 1, 50, ba.comprobantesMaxMB ?? 10),
     },
     avisos: {
       tareas: booleano(av.tareas, bav.tareas),
@@ -574,6 +583,7 @@ module.exports = {
   claveDeArea,
   ICONOS_BENEFICIO,
   MODULOS,
+  MODULOS_RETIRADOS,
   PERMISOS,
   ARCHIVOS_MARCA,
   validar,

@@ -62,6 +62,7 @@ const PLANTILLAS = [
   },
   {
     id: 'invitacionPortal',
+    modulo: 'portalClientes',
     grupo: 'Portal de clientes',
     nombre: 'Invitación al portal de clientes',
     descripcion: 'Cuando un administrador da acceso al portal a un contacto de un cliente.',
@@ -75,6 +76,7 @@ const PLANTILLAS = [
   },
   {
     id: 'mensajePortal',
+    modulo: 'portalClientes',
     grupo: 'Portal de clientes',
     nombre: 'Respuesta del equipo al cliente',
     descripcion: 'Cuando alguien del equipo escribe en la conversación de un proyecto del portal.',
@@ -392,7 +394,10 @@ const camposDe = (plantilla) => Object.keys(CAMPOS_TEXTO).filter((campo) => camp
 const ejemplosDe = (plantilla) => Object.fromEntries(plantilla.variables.map((v) => [v, V[v]?.ejemplo || v]));
 
 /** Catalogo para el panel: textos de fabrica y variables con su descripcion. */
-const catalogo = () => PLANTILLAS.map((p) => ({
+// Las plantillas de un modulo retirado (portal de clientes) no se ofrecen en
+// el panel; siguen definidas por si el modulo vuelve.
+const MODULOS_RETIRADOS_CORREO = ['portalClientes'];
+const catalogo = () => PLANTILLAS.filter((p) => !MODULOS_RETIRADOS_CORREO.includes(p.modulo)).map((p) => ({
   id: p.id,
   grupo: p.grupo,
   nombre: p.nombre,

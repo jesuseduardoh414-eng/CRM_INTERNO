@@ -2932,3 +2932,33 @@ button.ag-recuadro-fila:hover { background: var(--color-surface-3); }
   .det-kanban-cuerpo { max-height: none; }
 }
 /* ══ Fin proyectos en el móvil ═══════════════════════════════════════════ */
+
+/* ── Finanzas (Ventas, Tesorería, Gastos) ──────────────────────────────── */
+
+/* Submenú de Gastos en el menú lateral: filas más bajas y sangradas, como
+   los accesos a proyectos del miembro; la flecha gira al abrir. */
+.crm-nav-flecha { margin-left: auto; color: var(--color-text-muted); transition: transform 0.2s; }
+.crm-nav-item[aria-expanded="true"] .crm-nav-flecha { transform: rotate(180deg); }
+.crm-nav-padre-activo { font-weight: 600; }
+.crm-nav-sub { height: 2.1rem; padding-left: 2.55rem; font-size: 13.5px; font-weight: 400; }
+.crm-nav-sub[aria-current="page"] { font-weight: 600; background: color-mix(in srgb, var(--color-text) 5%, transparent); box-shadow: none; }
+.crm-nav-sub[aria-current="page"]::before { display: none; }
+@media (pointer: coarse) {
+  .crm-lateral .crm-nav-sub { height: 2.5rem; }
+}
+
+/* Informe de gastos: la fila del mes en curso y la de lo asignado. */
+.fin-informe th .badge-neutral { font-size: 10px; padding: 0 0.35rem; }
+/* Opaco (mezclado con la superficie): la primera columna es fija y, translúcida, dejaba ver las cifras al desplazar. */
+.fin-informe .fin-mes-actual td { background: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface)); }
+.fin-informe .fin-fila-asignado td { font-weight: 500; color: var(--color-text-dim); border-top: 1px dashed var(--color-border); }
+
+/* Pestañas de Gastos (categorías + informe): fila con desplazamiento
+   horizontal en pantallas angostas. */
+.fin-pestanas { display: flex; gap: 0.25rem; overflow-x: auto; overscroll-behavior-x: contain; border-bottom: 1px solid var(--color-border); scrollbar-width: none; }
+.fin-pestanas::-webkit-scrollbar { display: none; }
+.fin-pestana { flex: none; padding: 0.55rem 0.8rem; font-size: 13.5px; font-weight: 500; color: var(--color-text-dim); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; border-radius: 6px 6px 0 0; }
+.fin-pestana:hover { color: var(--color-text); background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.fin-pestana[aria-current="page"] { color: var(--color-text); font-weight: 600; border-bottom-color: var(--color-primary); }
+.fin-pestana:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+@media (pointer: coarse) { .fin-pestana { padding-block: 0.75rem; } }

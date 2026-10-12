@@ -1,0 +1,134 @@
+// Finanzas: comprobantes (PDF o imagen) de pagos y gastos. Viven en disco
+// (services/comprobantes.service.js) y solo se sirven a quien puede ver el
+// pago o el gasto al que pertenecen.
+const prisma = require('../lib/prisma');
+const comprobantes = require('../services/comprobantes.service');
+const F = require('../utils/finanzas.utils');
+
+const selectRegistro = { id: true, nombreOriginal: true, mime: true, tamano: true, creadoEn: true, subidoPor: { select: F.selectUsuarioCorto } };
+
+/** Nivel del usuario sobre el pago o gasto dueño del comprobante. */
+const nivelSobre = (usuario, registro) => {
+  if (registro.pagoId) return F.nivelDe(usuario, 'ventas');
+  if (registro.gasto) return F.nivelGasto(usuario, registro.gasto.categoria);
+  return 'ninguno';
+};
+
+// ---------------------------------------------------------------------------
+// POST /api/finanzas/pagos/:id/comprobantes
+// POST /api/finanzas/gastos/:id/comprobantes   (multipart, campo "archivo")
+// ---------------------------------------------------------------------------
+const subir = (tipo) => async (req, res) => {
+  const id = F.leerId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'ID inválido' });
+  if (!req.file) return res.status(400).json({ error: 'Selecciona un archivo (PDF, JPG, PNG o WEBP)' });
+
+  const mime = comprobantes.detectarMime(req.file.buffer);
+  if (!mime) return res.status(400).json({ error: 'El archivo no es un PDF ni una imagen válida, o está dañado' });
+
+  let nombreInterno = null;
+  try {
+    let padre;
+    if (tipo === 'pago') {
+      padre = await prisma.pago.findUnique({ where: { id }, select: { id: true, folio: true } });
+      if (!padre) return res.status(404).json({ error: 'Pago no encontrado' });
+      if (!F.puedeEditar(req.usuario, 'ventas')) return F.sinPermiso(res);
+    } else {
+      padre = await prisma.gasto.findUnique({ where: { id }, select: { id: true, folio: true, categoria: true } });
+      if (!padre) return res.status(404).json({ error: 'Gasto no encontrado' });
+      if (!F.puedeEditar(req.usuario, `gastos.${padre.categoria}`)) return F.sinPermiso(res);
+    }
+    const campoPadre = tipo === 'pago' ? 'pagoId' : 'gastoId';
+
+    const sha256 = comprobantes.huella(req.file.buffer);
+    const duplicado = await prisma.comprobanteFinanciero.findFirst({ where: { [campoPadre]: id, sha256 }, select: { nombreOriginal: true } });
+    if (duplicado) return res.status(409).json({ error: `Este archivo ya está cargado (${duplicado.nombreOriginal})` });
+
+    nombreInterno = await comprobantes.guardar(req.file.buffer, mime);
+    // Registro y fecha del padre juntos: si algo falla no queda una fila
+    // apuntando a un archivo que el catch ya borro.
+    const registro = await prisma.$transaction(async (tx) => {
+      const creado = await tx.comprobanteFinanciero.create({
+        data: {
+          [campoPadre]: id,
+          nombreOriginal: comprobantes.limpiarNombre(req.file.originalname, mime),
+          archivo: nombreInterno,
+          mime,
+          tamano: req.file.size,
+          sha256,
+          subidoPorId: req.usuario.id,
+        },
+        select: selectRegistro,
+      });
+      if (tipo === 'pago') await tx.pago.update({ where: { id }, data: { actualizadoEn: new Date() } });
+      else await tx.gasto.update({ where: { id }, data: { actualizadoEn: new Date() } });
+      return creado;
+    });
+    F.registrarFinanzas(req.usuario, tipo, id, 'COMPROBANTE', `Subió el comprobante "${registro.nombreOriginal}" a ${padre.folio}`);
+    return res.status(201).json({ mensaje: 'Comprobante cargado', comprobante: registro });
+  } catch (error) {
+    // Si el registro fallo despues de escribir en disco, no se deja basura.
+    if (nombreInterno) await comprobantes.borrar(nombreInterno).catch(() => {});
+    console.error('[finanzas.comprobantes.subir]', error);
+    return res.status(500).json({ error: 'Error al guardar el comprobante' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// GET /api/finanzas/comprobantes/:id  (?descargar=1 para bajarlo)
+// ---------------------------------------------------------------------------
+const ver = async (req, res) => {
+  const { id } = req.params;
+  if (!F.REGEX_UUID.test(String(id || ''))) return res.status(400).json({ error: 'ID de archivo inválido' });
+  try {
+    const registro = await prisma.comprobanteFinanciero.findUnique({ where: { id }, include: { gasto: { select: { categoria: true } } } });
+    if (!registro) return res.status(404).json({ error: 'Comprobante no encontrado' });
+    if (nivelSobre(req.usuario, registro) === 'ninguno') return F.sinPermiso(res);
+
+    let contenido;
+    try {
+      contenido = await comprobantes.leer(registro.archivo);
+    } catch (error) {
+      if (error?.code === 'ENOENT') return res.status(410).json({ error: 'El comprobante ya no está en el servidor' });
+      throw error;
+    }
+    const disposicion = req.query.descargar ? 'attachment' : 'inline';
+    const nombreAscii = registro.nombreOriginal.replace(/[^\x20-\x7e]/g, '_');
+    res.set({
+      'Content-Type': registro.mime,
+      'Content-Length': String(contenido.length),
+      'Content-Disposition': `${disposicion}; filename="${nombreAscii}"; filename*=UTF-8''${encodeURIComponent(registro.nombreOriginal)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox",
+    });
+    return res.send(contenido);
+  } catch (error) {
+    console.error('[finanzas.comprobantes.ver]', error);
+    return res.status(500).json({ error: 'Error al leer el comprobante' });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// DELETE /api/finanzas/comprobantes/:id
+// ---------------------------------------------------------------------------
+const eliminar = async (req, res) => {
+  const { id } = req.params;
+  if (!F.REGEX_UUID.test(String(id || ''))) return res.status(400).json({ error: 'ID de archivo inválido' });
+  try {
+    const registro = await prisma.comprobanteFinanciero.findUnique({ where: { id }, include: { gasto: { select: { categoria: true, folio: true } }, pago: { select: { folio: true } } } });
+    if (!registro) return res.status(404).json({ error: 'Comprobante no encontrado' });
+    if (nivelSobre(req.usuario, registro) !== 'editar') return F.sinPermiso(res);
+    await prisma.comprobanteFinanciero.delete({ where: { id } });
+    // La fila ya no existe: si el disco no deja borrar (archivo en uso en
+    // Windows), se anota y se responde bien igual.
+    await comprobantes.borrar(registro.archivo).catch((e) => console.error('[finanzas.comprobantes.eliminar] disco', e?.message));
+    F.registrarFinanzas(req.usuario, registro.pagoId ? 'pago' : 'gasto', registro.pagoId || registro.gastoId, 'QUITAR_COMPROBANTE', `Quitó el comprobante "${registro.nombreOriginal}" de ${registro.pago?.folio || registro.gasto?.folio}`);
+    return res.json({ mensaje: 'Comprobante eliminado' });
+  } catch (error) {
+    console.error('[finanzas.comprobantes.eliminar]', error);
+    return res.status(500).json({ error: 'Error al eliminar el comprobante' });
+  }
+};
+
+module.exports = { subirPago: subir('pago'), subirGasto: subir('gasto'), ver, eliminar };

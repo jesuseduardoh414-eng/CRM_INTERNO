@@ -428,13 +428,15 @@ const ProyectoDetallePage = () => {
   // "tareas" (lista / kanban / gantt), "actividad" (historial del proyecto) o
   // "cliente" (conversación del portal de clientes). ?vista=cliente abre esa.
   const vistaUrl = searchParams.get('vista');
-  const [seccion, setSeccion] = useState(vistaUrl === 'cliente' ? 'cliente' : 'tareas');
+  // Con el portal apagado (retirado) la pestaña "Cliente" no existe: un enlace
+  // viejo con ?vista=cliente abre las tareas en vez de una página vacía.
+  const [seccion, setSeccion] = useState(vistaUrl === 'cliente' && portalActivo ? 'cliente' : 'tareas');
   // Al llegar desde un aviso estando ya en el proyecto, cambia la pestaña sin
   // un efecto (comparando con la URL del render anterior).
   const [vistaUrlAnterior, setVistaUrlAnterior] = useState(vistaUrl);
   if (vistaUrl !== vistaUrlAnterior) {
     setVistaUrlAnterior(vistaUrl);
-    if (vistaUrl === 'cliente') setSeccion('cliente');
+    if (vistaUrl === 'cliente' && portalActivo) setSeccion('cliente');
   }
   const tpo = useTextoPortal();
   const [vista, setVista] = useState('lista');

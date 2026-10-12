@@ -9,6 +9,7 @@ import {
   Mail,
   MoreVertical,
   Plus,
+  Receipt,
   RefreshCw,
   Settings,
   X,
@@ -20,6 +21,7 @@ import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useTextoAgenda } from '../hooks/useTextoAgenda';
 import { areasDeTexto } from '../utils/areas';
+import { rutaCategoria } from '../utils/finanzas';
 import Modal from '../components/Modal';
 import Tooltip from '../components/Tooltip';
 import SelectorSimple from '../components/SelectorSimple';
@@ -111,6 +113,7 @@ const FILTROS = [
   { id: 'evento', clave: 'pag_fEventos', color: COLORES_TIPO.evento },
   { id: 'tarea', clave: 'pag_fTareas', color: COLORES_TIPO.tarea },
   { id: 'proyecto', clave: 'pag_fProyectos', color: COLORES_TIPO.proyecto },
+  { id: 'gasto', clave: 'pag_fGastos', color: COLORES_TIPO.gasto },
   { id: 'dias', clave: 'pag_fDias', color: 'var(--badge-danger-fg)' },
 ];
 
@@ -218,6 +221,7 @@ const etiquetaTipoVista = (t, tipoVista) => {
   if (tipoVista === 'tarea') return t('agendaTypeTask');
   if (tipoVista === 'proyecto') return t('agendaTypeProject');
   if (tipoVista === 'reunion') return t('eventTypeMeeting');
+  if (tipoVista === 'gasto') return t('agendaTypeExpense');
   return t('eventTypeEvent');
 };
 
@@ -469,14 +473,15 @@ const AgendaPage = () => {
   const mostrarDias = !tiposOcultos.includes('dias');
 
   const conteos = useMemo(() => {
-    const cuenta = { reunion: 0, evento: 0, tarea: 0, proyecto: 0, dias: 0 };
+    const cuenta = { reunion: 0, evento: 0, tarea: 0, proyecto: 0, gasto: 0, dias: 0 };
     eventosBase.forEach((evento) => { cuenta[getTipoAgenda(evento)] += 1; });
     const enRango = (dia) => dia.fecha && String(dia.fecha).slice(0, 10) >= claveDesde && String(dia.fecha).slice(0, 10) <= claveHasta;
     cuenta.dias = diasEmpresa.filter(enRango).length + diasEspeciales.filter(enRango).length;
     return cuenta;
   }, [claveDesde, claveHasta, diasEmpresa, diasEspeciales, eventosBase]);
 
-  const filtrosVisibles = FILTROS.filter((filtro) => !(filtro.id === 'proyecto' && ocultarBloquesProyecto));
+  // El chip de gastos solo sale si hay alguno en el rango (depende de permisos).
+  const filtrosVisibles = FILTROS.filter((filtro) => !(filtro.id === 'proyecto' && ocultarBloquesProyecto) && !(filtro.id === 'gasto' && conteos.gasto === 0 && !tiposOcultos.includes('gasto')));
   const alternarFiltro = (id) => setTiposOcultos((previos) => (
     previos.includes(id) ? previos.filter((tipo) => tipo !== id) : [...previos, id]
   ));
@@ -694,9 +699,14 @@ const AgendaPage = () => {
     setModalOpen(true);
   }, [showToast]);
 
-  /** Tareas y proyectos llevan a su proyecto; los eventos abren su ventana. */
+  /** Tareas y proyectos llevan a su proyecto; los gastos, a su categoría; los eventos abren su ventana. */
   const abrirItem = useCallback((item) => {
     const tipo = getTipoAgenda(item);
+    if (tipo === 'gasto') {
+      if (item.gasto?.categoria) navigate(`${rutaCategoria(item.gasto.categoria)}?gasto=${item.gasto.id}`);
+      else showToast(tituloLimpio(item), 'info');
+      return;
+    }
     if (tipo === 'tarea' || tipo === 'proyecto') {
       const id = getProyectoIdAgenda(item) || proyectoIdPorNombre.get(normalizarNombreProyecto(getProyectoNombreAgenda(item)));
       if (id) navigate(`/proyectos/${id}`);
@@ -839,7 +849,8 @@ const AgendaPage = () => {
   const handleMoverItemAgenda = useCallback(async (item, diasAMover) => {
     const dias = Number(diasAMover);
     const tipo = getTipoAgenda(item);
-    if (!item || !Number.isInteger(dias) || dias === 0 || tipo === 'proyecto') return false;
+    // Proyectos y gastos (fecha límite) no se mueven desde la agenda.
+    if (!item || !Number.isInteger(dias) || dias === 0 || tipo === 'proyecto' || tipo === 'gasto') return false;
 
     if (tipo !== 'tarea' && esEventoRecurrente(item)) {
       showToast(t('agendaRecurringMoveUnsupported'), 'info');
@@ -1273,6 +1284,7 @@ const AgendaPage = () => {
               <span><i className="ag-ley-punto" style={{ background: COLORES_TIPO.evento }} /> {ta('pag_leyEvento')}</span>
               <span><CheckSquare size={12} style={{ color: COLORES_TIPO.tarea }} aria-hidden="true" /> {ta('pag_leyTarea')}</span>
               {!ocultarBloquesProyecto && <span><i className="ag-ley-barra" /> {ta('pag_leyProyecto')}</span>}
+              {conteos.gasto > 0 && <span><Receipt size={12} style={{ color: COLORES_TIPO.gasto }} aria-hidden="true" /> {ta('pag_leyGasto')}</span>}
             </>
           )}
           <span><i className="ag-ley-caja" data-tipo="empresa" /> {ta('pag_leyEmpresa')}</span>
