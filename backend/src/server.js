@@ -187,6 +187,8 @@ if (!enServerless) {
     require('./services/respaldo.service').iniciarRespaldoDiario();
     // Cambios de Google Calendar hacia la agenda (cada 5 minutos).
     require('./services/google-calendar.service').iniciarSincronizacionCalendar();
+    // Cambios en las carpetas de proyectos de Google Drive (cada 5 minutos).
+    require('./services/driveProyectos.service').iniciarSincronizacionDrive();
   });
 }
 

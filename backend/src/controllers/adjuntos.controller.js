@@ -3,6 +3,7 @@ const { registrarActividad } = require('../utils/logger');
 const { puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
 const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
 const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
+const driveProyectos = require('../services/driveProyectos.service');
 
 const getEntityType = (req) => {
   if (req.baseUrl.includes('agenda')) return 'agenda';
@@ -108,6 +109,10 @@ const listar = async (req, res) => {
       }
     }
 
+    // Lo que se agrego, renombro o borro en las carpetas de Drive desde la
+    // ultima vez (espera unos segundos como mucho).
+    if (entityType !== 'agenda') await driveProyectos.sincronizarSiHaceFalta();
+
     const where = entityType === 'tareas'
       ? { tareaId: Number(parentId) }
       : entityType === 'proyectos'
@@ -169,12 +174,17 @@ const subir = async (req, res) => {
 
     const createdAdjuntos = [];
     for (const file of files) {
-      const url = await subirArchivo(file, 'adjuntos');
+      const nombre = nombreUtf8(file.originalname);
+      // Tareas y proyectos: a su carpeta de Drive con su nombre real. Eventos: como antes.
+      const { url, driveArchivoId } = createBase.eventoId
+        ? { url: await subirArchivo(file, 'adjuntos'), driveArchivoId: null }
+        : await driveProyectos.guardarAdjunto(file, nombre, { tareaId: createBase.tareaId, proyectoId: createBase.proyectoId });
 
       const adjunto = await prisma.adjunto.create({
         data: {
-          nombre: nombreUtf8(file.originalname),
+          nombre,
           url,
+          driveArchivoId,
           tipo: file.mimetype,
           tamano: file.size,
           usuarioId: req.usuario.id,

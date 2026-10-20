@@ -6,6 +6,7 @@
 // PATCH  /api/tareas/:id/estado     → actualizar solo el estado
 
 const prisma = require('../lib/prisma');
+const driveProyectos = require('../services/driveProyectos.service');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const { registrarActividad } = require('../utils/logger');
 const { sortTareas } = require('../utils/sort.utils');
@@ -741,6 +742,8 @@ const editar = async (req, res) => {
     });
 
     tarea = await normalizarVenceEnPorEstado(tarea);
+    // Su carpeta de Google Drive lleva el mismo nombre (sin esperar a Drive).
+    if (tarea.titulo !== existente.titulo) void driveProyectos.renombrarCarpeta(existente.driveCarpetaId, tarea.titulo);
 
     // Notificar a TODOS los responsables (principal y co-asignados), nunca a
     // quien edita. Los recien asignados reciben el aviso de asignacion; los
@@ -841,6 +844,7 @@ const eliminar = async (req, res) => {
 
     const urlsAdjuntos = await prisma.$transaction((tx) => borrarTareasEnCascada(tx, [id]));
     await borrarBlobs(urlsAdjuntos);
+    await driveProyectos.tirarCarpeta(existente.driveCarpetaId);
 
     // Registrar en el Log de Actividad
     await registrarActividad(
@@ -897,6 +901,7 @@ const eliminarVarias = async (req, res) => {
     const idsPermitidos = permitidas.map((tarea) => tarea.id);
     const urlsAdjuntos = await prisma.$transaction((tx) => borrarTareasEnCascada(tx, idsPermitidos));
     await borrarBlobs(urlsAdjuntos);
+    for (const tarea of permitidas) await driveProyectos.tirarCarpeta(tarea.driveCarpetaId);
 
     // Un apunte por proyecto y no uno por tarea: el registro sirve para saber
     // que paso, no para dejar treinta lineas casi identicas seguidas.

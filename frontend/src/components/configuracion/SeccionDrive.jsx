@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import {
-  AlertTriangle, BookOpen, CheckCircle2, CloudUpload, DatabaseBackup, ExternalLink, HardDrive, Loader2, RefreshCw, Unplug,
+  AlertTriangle, BookOpen, CheckCircle2, CloudUpload, DatabaseBackup, ExternalLink, FolderTree, HardDrive, Loader2, RefreshCw, Unplug,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
 import { usePreferences } from '../../context/PreferencesContext';
@@ -54,7 +54,7 @@ const SeccionDrive = ({ google, guardado, cambiar, onGuardar, guardando, nombreS
   const { data: estado, error: errorCarga, mutate } = useSWR('config-drive', () => configuracionService.drive.estado(), { revalidateOnFocus: false });
   const error = errorCarga?.message;
   const cargar = () => mutate();
-  const [ocupado, setOcupado] = useState(null); // 'conectar' | 'respaldo' | 'pendientes' | 'desconectar'
+  const [ocupado, setOcupado] = useState(null); // 'conectar' | 'respaldo' | 'pendientes' | 'ordenar' | 'desconectar'
   const [verGuia, setVerGuia] = useState(false);
 
   const fecha = (iso) => (iso ? new Date(iso).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) : '');
@@ -211,8 +211,29 @@ const SeccionDrive = ({ google, guardado, cambiar, onGuardar, guardando, nombreS
               </div>
             </dl>
 
+            {/* Conexion de antes del 2026-10-20: sin el permiso de todo Drive no se ve lo que se agrega a mano. */}
+            {!revocada && estado.permisoCompleto === false && (
+              <Aviso tono="warning" icono={AlertTriangle} titulo={t('drvPermisoViejo')} texto={t('drvPermisoViejoTexto')}>
+                <div className="mt-3">{botonConectar(t('drvReconectar'))}</div>
+              </Aviso>
+            )}
+
             {estado.errorConsulta && <p className="text-[12.5px] text-[var(--color-error)]">{estado.errorConsulta}</p>}
             {estado.ultimoError && !revocada && <p className="text-[12.5px] text-[var(--color-error)]">{estado.ultimoError}</p>}
+
+            {estado.porOrdenar > 0 && !revocada && (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  className="cfg-btn"
+                  disabled={Boolean(ocupado)}
+                  onClick={() => accion('ordenar', () => configuracionService.drive.ordenar(), (r) => t('drvOrdenarListo', { n: r.movidos + r.subidos, fallidos: r.fallidos, quedan: r.porOrdenar }))}
+                >
+                  {ocupado === 'ordenar' ? <Loader2 size={14} className="animate-spin" /> : <FolderTree size={14} />} {t('drvOrdenar')}
+                </button>
+                <span className="cfg-ayuda">{t('drvPorOrdenar', { n: estado.porOrdenar })}</span>
+              </div>
+            )}
 
             {estado.enDisco > 0 && !revocada && (
               <div className="flex flex-wrap items-center gap-3">

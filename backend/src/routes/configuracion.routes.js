@@ -52,5 +52,6 @@ router.post('/drive/conectar', limiteAccionSensible, drive.conectar);
 router.delete('/drive', limiteAccionSensible, drive.desconectar);
 router.post('/drive/respaldo', limiteAccionSensible, drive.respaldarAhora);
 router.post('/drive/pendientes', limiteAccionSensible, drive.subirPendientes);
+router.post('/drive/ordenar', limiteAccionSensible, drive.ordenar);
 
 module.exports = router;

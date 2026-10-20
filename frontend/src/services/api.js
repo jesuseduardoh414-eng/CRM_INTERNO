@@ -1180,5 +1180,10 @@ export const configuracionService = {
       const res = await apiFetch(`${API_URL}/configuracion/drive/pendientes`, { method: 'POST', headers: getHeaders() });
       return handleResponse(res);
     },
+    // Pasa los adjuntos de antes a su carpeta de proyecto o tarea en Drive.
+    ordenar: async () => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive/ordenar`, { method: 'POST', headers: getHeaders() });
+      return handleResponse(res);
+    },
   },
 };

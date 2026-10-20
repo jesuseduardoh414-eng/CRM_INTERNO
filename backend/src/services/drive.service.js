@@ -3,16 +3,21 @@
  *
  * Una cuenta de Google de la empresa se conecta una vez desde el panel de
  * configuracion (seccion "Google Drive y respaldos") con el mismo cliente
- * OAuth que Google Calendar. El permiso es "drive.file": el CRM solo puede ver
- * y tocar los archivos que el mismo crea, nunca el resto del Drive de esa
- * cuenta. Todo vive en la carpeta "Archivos del CRM" de su Mi unidad, con una
- * subcarpeta por tipo (Adjuntos, Comprobantes, Contratos, Cotizaciones, Base
- * de conocimiento, Respaldos), y ocupa el espacio de Google Workspace de la
- * empresa.
+ * OAuth que Google Calendar. Todo vive en la carpeta "Archivos del CRM" de su
+ * Mi unidad y ocupa el espacio de Google Workspace de la empresa:
+ *  - Proyectos › <proyecto> › <tarea>: los adjuntos de proyectos y tareas, con
+ *    su nombre real y en los dos sentidos (driveProyectos.service.js): lo que
+ *    se agrega, renombra o borra ahi desde Drive tambien cambia en el CRM.
+ *  - Una subcarpeta por tipo (Adjuntos, Comprobantes, Contratos, Cotizaciones,
+ *    Base de conocimiento, Respaldos) para lo demas, con su nombre interno
+ *    (uuid + extension): un archivo se encuentra por nombre dentro de su
+ *    subcarpeta. Quien decide si se usa Drive o el disco es
+ *    almacenHibrido.service.js.
  *
- * Los archivos conservan su nombre interno (uuid + extension): la base no
- * cambia y un archivo se encuentra por nombre dentro de su subcarpeta. Quien
- * decide si se usa Drive o el disco es almacenHibrido.service.js.
+ * Permiso: desde 2026-10-20 se pide todo Drive ("drive"); con "drive.file" el
+ * CRM solo veia lo que el mismo creaba y no podia leer lo que se agrega a mano
+ * en las carpetas de proyecto. Una conexion de antes sigue funcionando con su
+ * permiso (sin leer lo agregado en Drive) hasta que se vuelva a conectar.
  *
  * La conexion (cuenta y refresh token cifrado) va en la tabla conexion_drive.
  * GOOGLE_APIS_URL_PRUEBA y GOOGLE_OAUTH_URL_PRUEBA solo sirven para las
@@ -25,9 +30,11 @@ const { credencialesGoogle } = require('./google-calendar.service');
 
 const APIS = (process.env.GOOGLE_APIS_URL_PRUEBA || 'https://www.googleapis.com').replace(/\/+$/, '');
 const OAUTH = (process.env.GOOGLE_OAUTH_URL_PRUEBA || 'https://oauth2.googleapis.com').replace(/\/+$/, '');
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const SCOPE = 'https://www.googleapis.com/auth/drive';
+const SCOPE_ANTERIOR = 'https://www.googleapis.com/auth/drive.file';
 const MIME_CARPETA = 'application/vnd.google-apps.folder';
 const CARPETA_RAIZ = 'Archivos del CRM';
+const CARPETA_PROYECTOS = 'Proyectos';
 const SUBCARPETAS = {
   adjuntos: 'Adjuntos',
   comprobantes: 'Comprobantes',
@@ -59,6 +66,8 @@ const olvidar = () => {
   token = null;
   carpetas.clear();
   ids.clear();
+  // eslint-disable-next-line no-use-before-define
+  vigentes.clear();
 };
 
 const leerConexion = async () => {
@@ -79,6 +88,10 @@ const activo = async () => {
   const c = await leerConexion();
   return Boolean(c?.carpetaId && c.estado === 'ok');
 };
+
+/** ¿La cuenta dio el permiso de todo Drive? (sin el, no se ve lo agregado a mano) */
+const tienePermisoCompleto = (c) => String(c?.alcance || '').split(' ').includes(SCOPE);
+const permisoCompleto = async () => tienePermisoCompleto(await leerConexion());
 
 const anotar = async (datos) => {
   await prisma.conexionDrive.update({ where: { id: 1 }, data: datos }).catch(() => {});
@@ -156,6 +169,9 @@ const accessToken = async () => {
     throw new ErrorDrive(motivoOAuth(data) || `Google no entregó acceso a Drive: ${data.error_description || data.error || 'error desconocido'}`);
   }
   token = { valor: data.access_token, expira: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
+  // Google dice que permisos tiene el token: si cambiaron (p. ej. se quito el
+  // de todo Drive desde la cuenta), se anota para el panel.
+  if (data.scope && data.scope !== c.alcance) await anotar({ alcance: String(data.scope).slice(0, 500) });
   return token.valor;
 };
 
@@ -250,12 +266,11 @@ const buscarId = async (clave, nombre) => {
 const md5 = (buffer) => crypto.createHash('md5').update(buffer).digest('hex');
 
 /**
- * Sube un archivo a su subcarpeta y comprueba que llegue entero (md5).
- * Devuelve { id, bytes }.
+ * Sube un archivo a la carpeta `padre` (id) y comprueba que llegue entero
+ * (md5). `propiedades`: appProperties (solo las ve el CRM). Devuelve { id, bytes }.
  */
-const subir = async (clave, nombre, buffer, mime = 'application/octet-stream') => {
-  const padre = await carpeta(clave);
-  const meta = JSON.stringify({ name: nombre, parents: [padre], mimeType: mime });
+const subirA = async (padre, nombre, buffer, mime = 'application/octet-stream', propiedades = undefined) => {
+  const meta = JSON.stringify({ name: nombre, parents: [padre], mimeType: mime, appProperties: propiedades });
   let creado;
   if (buffer.length <= LIMITE_MULTIPART) {
     const limite = `crm${crypto.randomUUID().replace(/-/g, '')}`;
@@ -287,9 +302,138 @@ const subir = async (clave, nombre, buffer, mime = 'application/octet-stream') =
     await pedir(`${APIS}/drive/v3/files/${encodeURIComponent(creado.id)}`, { metodo: 'DELETE', permitidos: [404] }).catch(() => {});
     throw new ErrorDrive('El archivo llegó dañado a Google Drive.');
   }
-  recordar(clave, nombre, creado.id);
   return { id: creado.id, bytes: Number(creado.size) || buffer.length };
 };
+
+/** Sube un archivo a su subcarpeta por tipo (con su nombre interno). Devuelve { id, bytes }. */
+const subir = async (clave, nombre, buffer, mime = 'application/octet-stream') => {
+  const subido = await subirA(await carpeta(clave), nombre, buffer, mime);
+  recordar(clave, nombre, subido.id);
+  return subido;
+};
+
+// ── Archivos por id (adjuntos de proyectos y tareas) ────────────────────────
+
+const urlArchivo = (id, resto = '') => `${APIS}/drive/v3/files/${encodeURIComponent(id)}${resto}`;
+
+/** Metadatos de un archivo o carpeta, o null si no existe (o no se puede ver). */
+const metadatos = async (id, campos = 'id,name,mimeType,parents,trashed,size,md5Checksum') => {
+  const res = await pedir(urlArchivo(id, `?fields=${encodeURIComponent(campos)}`), { permitidos: [404] });
+  return res.status === 404 ? null : res.json();
+};
+
+// Los documentos de Google (Docs, Hojas, Presentaciones) no tienen archivo:
+// se bajan convertidos.
+const EXPORTAR = {
+  'application/vnd.google-apps.document': 'application/pdf',
+  'application/vnd.google-apps.presentation': 'application/pdf',
+  'application/vnd.google-apps.drawing': 'application/pdf',
+  'application/vnd.google-apps.spreadsheet': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+const MIME_GOOGLE = 'application/vnd.google-apps.';
+/** ¿Se puede guardar como adjunto? (todo menos carpetas y documentos de Google sin conversion) */
+const esArchivoAdjuntable = (mime) => !String(mime || '').startsWith(MIME_GOOGLE) || Boolean(EXPORTAR[mime]);
+
+/** { contenido, mime, nombre } de un archivo por id, o null si ya no esta. */
+const bajarPorId = async (id) => {
+  const meta = await metadatos(id, 'id,name,mimeType,trashed');
+  if (!meta || meta.trashed || !esArchivoAdjuntable(meta.mimeType)) return null;
+  const exportar = EXPORTAR[meta.mimeType];
+  const res = await pedir(
+    exportar ? urlArchivo(id, `/export?mimeType=${encodeURIComponent(exportar)}`) : urlArchivo(id, '?alt=media'),
+    { permitidos: [404] },
+  );
+  if (res.status === 404) return null;
+  return { contenido: Buffer.from(await res.arrayBuffer()), mime: exportar || meta.mimeType || 'application/octet-stream', nombre: meta.name };
+};
+
+/** Renombra y/o mueve (agregar un padre y quitar otro) un archivo o carpeta. */
+const actualizarArchivo = async (id, { nombre, agregarPadre, quitarPadre, propiedades } = {}) => {
+  const params = new URLSearchParams({ fields: 'id,name,parents' });
+  if (agregarPadre) params.set('addParents', agregarPadre);
+  if (quitarPadre) params.set('removeParents', quitarPadre);
+  const res = await pedir(urlArchivo(id, `?${params}`), {
+    metodo: 'PATCH',
+    cabeceras: { 'Content-Type': 'application/json; charset=UTF-8' },
+    cuerpo: JSON.stringify({ name: nombre || undefined, appProperties: propiedades }),
+    permitidos: [404],
+  });
+  return res.status === 404 ? null : res.json();
+};
+
+/** Archivos y carpetas (no borrados) dentro de una carpeta. */
+const listarHijos = (carpetaId) => buscar(`${literal(carpetaId)} in parents and trashed = false`, 'id,name,mimeType,size,parents,appProperties,createdTime');
+
+/** Id del archivo de la subcarpeta Adjuntos con ese nombre interno (los de antes). */
+const idEnSubcarpeta = (clave, nombre) => buscarId(clave, nombre);
+
+// ── Carpetas de proyectos y tareas ──────────────────────────────────────────
+
+/** Nombre de carpeta valido en Drive a partir del nombre de un proyecto o tarea. */
+const nombreCarpeta = (texto) => String(texto || '').replace(/[\\/]+/g, '-').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Sin nombre';
+
+// Carpetas que se comprobaron hace poco (no se vuelve a preguntar a Google en
+// cada subida) y trabajos en curso (no crear dos carpetas si llegan juntos).
+const vigentes = new Map(); // id -> expira
+const enCurso = new Map();
+const unaVez = (llave, fn) => {
+  if (!enCurso.has(llave)) enCurso.set(llave, fn().finally(() => enCurso.delete(llave)));
+  return enCurso.get(llave);
+};
+const carpetaVigente = async (id) => {
+  if (!id) return false;
+  if ((vigentes.get(id) || 0) > Date.now()) return true;
+  const meta = await metadatos(id, 'id,mimeType,trashed');
+  const ok = Boolean(meta && !meta.trashed && meta.mimeType === MIME_CARPETA);
+  if (ok) vigentes.set(id, Date.now() + 10 * 60 * 1000);
+  else vigentes.delete(id);
+  return ok;
+};
+
+/** Carpeta "Proyectos" dentro de "Archivos del CRM". */
+const carpetaProyectos = () => unaVez('proyectos', async () => {
+  const c = await leerConexion();
+  if (await carpetaVigente(c.proyectosCarpetaId)) return c.proyectosCarpetaId;
+  const id = await buscarCarpeta(CARPETA_PROYECTOS, c.carpetaId) || await crearCarpeta(CARPETA_PROYECTOS, c.carpetaId);
+  await anotar({ proyectosCarpetaId: id });
+  return id;
+});
+
+/** Carpeta de un proyecto (la crea si no existe o si la borraron en Drive). */
+const carpetaDeProyecto = (proyectoId) => unaVez(`p${proyectoId}`, async () => {
+  const proyecto = await prisma.proyecto.findUnique({ where: { id: proyectoId }, select: { id: true, nombre: true, driveCarpetaId: true } });
+  if (!proyecto) throw new ErrorDrive('El proyecto ya no existe.', 404);
+  if (await carpetaVigente(proyecto.driveCarpetaId)) return proyecto.driveCarpetaId;
+  const id = await crearCarpeta(nombreCarpeta(proyecto.nombre), await carpetaProyectos());
+  vigentes.set(id, Date.now() + 10 * 60 * 1000);
+  await prisma.proyecto.update({ where: { id: proyectoId }, data: { driveCarpetaId: id } });
+  return id;
+});
+
+/** Carpeta de una tarea, dentro de la de su proyecto. */
+const carpetaDeTarea = (tareaId) => unaVez(`t${tareaId}`, async () => {
+  const tarea = await prisma.tarea.findUnique({ where: { id: tareaId }, select: { id: true, titulo: true, proyectoId: true, driveCarpetaId: true } });
+  if (!tarea) throw new ErrorDrive('La tarea ya no existe.', 404);
+  if (await carpetaVigente(tarea.driveCarpetaId)) return tarea.driveCarpetaId;
+  const id = await crearCarpeta(nombreCarpeta(tarea.titulo), await carpetaDeProyecto(tarea.proyectoId));
+  vigentes.set(id, Date.now() + 10 * 60 * 1000);
+  await prisma.tarea.update({ where: { id: tareaId }, data: { driveCarpetaId: id } });
+  return id;
+});
+
+// ── Lista de cambios de Drive ───────────────────────────────────────────────
+
+/** Marca desde la que pedir cambios (lo de antes no se trae). */
+const tokenInicialCambios = async () => (await pedirJson(`${APIS}/drive/v3/changes/startPageToken`)).startPageToken;
+
+/** Una pagina de cambios desde `pageToken`. */
+const listarCambios = (pageToken) => pedirJson(`${APIS}/drive/v3/changes?${new URLSearchParams({
+  pageToken,
+  includeRemoved: 'true',
+  spaces: 'drive',
+  pageSize: '1000',
+  fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed,size,appProperties,createdTime))',
+})}`);
 
 /** Contenido de un archivo, o null si no esta en Drive. */
 const bajar = async (clave, nombre) => {
@@ -360,7 +504,7 @@ const conectar = async (codigo, usuarioId) => {
     throw new ErrorDrive(motivo || `Google no aceptó la conexión: ${data.error_description || data.error || 'error desconocido'}`, 400);
   }
   if (!String(data.scope || '').split(' ').includes(SCOPE)) {
-    throw new ErrorDrive('No se dio permiso para guardar archivos en Drive. Vuelve a intentarlo y marca la casilla de Google Drive.', 400);
+    throw new ErrorDrive('No se dio permiso sobre Google Drive. Vuelve a intentarlo y marca la casilla de Google Drive ("ver, editar, crear y borrar…").', 400);
   }
   const acceso = { Authorization: `Bearer ${data.access_token}` };
   const sobre = await (await fetch(`${APIS}/drive/v3/about?fields=user(emailAddress)`, { headers: acceso })).json().catch(() => ({}));
@@ -380,10 +524,13 @@ const conectar = async (codigo, usuarioId) => {
     throw new ErrorDrive('Google no entregó un permiso permanente. Quita el acceso del CRM en myaccount.google.com/permissions y vuelve a conectar.', 409);
   }
 
+  // La marca de cambios se reinicia: con el permiso nuevo se empieza a leer
+  // desde ahora (driveProyectos.service).
+  const alcance = String(data.scope || '').slice(0, 500);
   await prisma.conexionDrive.upsert({
     where: { id: 1 },
-    create: { id: 1, cuenta, refreshTokenCifrado: cifrar(refresh), conectadoPorId: usuarioId ?? null },
-    update: { cuenta, refreshTokenCifrado: cifrar(refresh), estado: 'ok', ultimoError: null, conectadoPorId: usuarioId ?? null },
+    create: { id: 1, cuenta, refreshTokenCifrado: cifrar(refresh), conectadoPorId: usuarioId ?? null, alcance },
+    update: { cuenta, refreshTokenCifrado: cifrar(refresh), estado: 'ok', ultimoError: null, conectadoPorId: usuarioId ?? null, alcance, cambiosToken: null },
   });
   olvidar();
   token = { valor: data.access_token, expira: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
@@ -423,6 +570,9 @@ const estado = async ({ detalle = true } = {}) => {
   const resultado = {
     ...base,
     activo: Boolean(c.carpetaId && c.estado === 'ok'),
+    // Sin el permiso de todo Drive (conexion de antes del 2026-10-20) no se ve
+    // lo que se agrega a mano en las carpetas de proyecto: hay que reconectar.
+    permisoCompleto: tienePermisoCompleto(c),
     cuenta: c.cuenta,
     estado: c.estado,
     ultimoError: c.ultimoError,
@@ -447,12 +597,29 @@ const estado = async ({ detalle = true } = {}) => {
 module.exports = {
   ErrorDrive,
   SCOPE,
+  SCOPE_ANTERIOR,
   SUBCARPETAS,
+  MIME_CARPETA,
   activo,
+  permisoCompleto,
+  leerConexion,
   anotar,
   olvidar,
   subir,
+  subirA,
   bajar,
+  bajarPorId,
+  metadatos,
+  actualizarArchivo,
+  listarHijos,
+  esArchivoAdjuntable,
+  idEnSubcarpeta,
+  carpeta,
+  nombreCarpeta,
+  carpetaDeProyecto,
+  carpetaDeTarea,
+  tokenInicialCambios,
+  listarCambios,
   aPapelera,
   huellaEnDrive,
   md5,

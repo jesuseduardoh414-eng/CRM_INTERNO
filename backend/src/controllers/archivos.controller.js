@@ -20,10 +20,13 @@ const ver = async (req, res) => {
       ? `default-src 'none'; style-src 'unsafe-inline'; frame-ancestors ${origenesMarco()}`
       : `default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox; frame-ancestors ${origenesMarco()}`;
     res.removeHeader('X-Frame-Options');
+    const disposicion = archivo.enLinea ? 'inline' : 'attachment';
     res.set({
       'Content-Type': archivo.tipo,
-      'Content-Disposition': archivo.enLinea ? 'inline' : 'attachment',
-      'Cache-Control': 'private, max-age=86400, immutable',
+      // Los de Drive llevan su nombre real; los del disco se llaman por su uuid.
+      'Content-Disposition': archivo.nombre ? `${disposicion}; filename*=UTF-8''${encodeURIComponent(archivo.nombre)}` : disposicion,
+      // Un archivo de Drive se puede reemplazar alla con la misma URL.
+      'Cache-Control': archivo.cambiante ? 'private, max-age=300' : 'private, max-age=86400, immutable',
       'X-Content-Type-Options': 'nosniff',
       'Content-Security-Policy': csp,
       // El frontend vive en otro origen: helmet pone same-origin por defecto.

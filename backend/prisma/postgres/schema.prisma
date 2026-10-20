@@ -351,6 +351,10 @@ model Proyecto {
   mensajesPortal MensajePortal[]
   pagos          Pago[]
 
+  // Carpeta del proyecto en Google Drive (Archivos del CRM › Proyectos › …),
+  // donde van sus adjuntos y se leen los que se agreguen desde Drive.
+  driveCarpetaId String? @map("drive_carpeta_id") @db.VarChar(100)
+
   @@index([clienteId])
   @@map("proyectos")
 }
@@ -416,6 +420,9 @@ model Tarea {
   @@index([asignadoId])
   @@index([creadorId])
   @@index([estado])
+  // Carpeta de la tarea dentro de la de su proyecto en Google Drive.
+  driveCarpetaId  String?        @map("drive_carpeta_id") @db.VarChar(100)
+
   @@index([proyectoId, numeroActividad])
   @@map("tareas")
 }
@@ -486,6 +493,12 @@ model Adjunto {
   evento         Evento?   @relation(fields: [eventoId], references: [id], onDelete: Cascade)
   usuario        Usuario   @relation("AutorAdjunto", fields: [usuarioId], references: [id])
 
+  // Archivo en Google Drive (adjuntos de proyecto y tarea en sus carpetas):
+  // su url es /api/archivos/drive/<id>. desdeDrive: lo agrego alguien en Drive.
+  driveArchivoId String?   @map("drive_archivo_id") @db.VarChar(100)
+  desdeDrive     Boolean   @default(false) @map("desde_drive")
+
+  @@index([driveArchivoId])
   @@map("adjuntos")
 }
 
@@ -663,6 +676,13 @@ model ConexionDrive {
   conectadoPorId      Int?      @map("conectado_por_id")
   conectadoEn         DateTime  @default(now()) @map("conectado_en")
   actualizadoEn       DateTime  @updatedAt @map("actualizado_en")
+  // Permisos que dio la cuenta (desde 2026-10-20 se pide todo Drive para leer
+  // lo que se agrega a mano en las carpetas de proyecto), la carpeta
+  // "Proyectos" y la marca de la lista de cambios de Drive.
+  alcance             String?   @db.VarChar(500)
+  proyectosCarpetaId  String?   @map("proyectos_carpeta_id") @db.VarChar(100)
+  cambiosToken        String?   @map("cambios_token") @db.VarChar(255)
+  cambiosEn           DateTime? @map("cambios_en")
 
   @@map("conexion_drive")
 }

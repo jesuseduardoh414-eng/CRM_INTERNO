@@ -328,8 +328,14 @@ la empresa y usan sus 2 TB, no el disco de Verpex. Además, cada noche (a
 partir de las 3:00) el CRM sube ahí un respaldo completo de la base y conserva
 los últimos 30. Las fotos de perfil se quedan en el disco (pesan poco).
 
-El CRM pide el permiso **"drive.file"**: solo puede ver y tocar los archivos
-que él mismo crea, nunca el resto del Drive de esa cuenta. No hacen falta
+Los adjuntos de proyectos y tareas van en **Archivos del CRM › Proyectos ›
+proyecto › tarea** con su nombre real y **en los dos sentidos**: lo que se sube,
+renombra, mueve o borra ahí desde Drive también cambia en el CRM (en unos
+minutos o al abrir los adjuntos). Para eso el CRM pide permiso sobre **todo el
+Drive** de esa cuenta (desde el 2026-10-20; antes era "drive.file", que solo
+dejaba ver lo que el CRM creaba): usa una cuenta dedicada al CRM. Una conexión
+hecha con el permiso anterior sigue funcionando hacia Drive, y el panel pide
+volver a conectar para que funcione también desde Drive. No hacen falta
 cuentas de servicio ni claves en el servidor.
 
 **La guía está en el propio panel**, igual en **Google Drive y respaldos** y en

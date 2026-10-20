@@ -16,6 +16,11 @@
  * Con Google Drive conectado, los adjuntos van a Drive (almacenHibrido); las
  * fotos de perfil se quedan siempre en el disco (pesan poco y se cargan a
  * cada rato). La URL guardada en la base no cambia.
+ *
+ * Los adjuntos de proyectos y tareas que viven en sus carpetas de Drive
+ * (driveProyectos.service.js) usan /api/archivos/drive/<id del archivo en
+ * Drive>: el id de Drive es tan imposible de adivinar como un uuid, y asi se
+ * leen y se borran sin buscar nada en la base.
  */
 const fs = require('fs/promises');
 const path = require('path');
@@ -24,6 +29,13 @@ const { crearAlmacenHibrido } = require('./almacenHibrido.service');
 
 const CARPETAS = ['adjuntos', 'perfiles'];
 const PREFIJO_URL = '/api/archivos/';
+const ID_DRIVE = /^[A-Za-z0-9_-]{10,200}$/;
+// Lo que se muestra en el navegador en vez de descargarse.
+const MIME_EN_LINEA = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain']);
+const drive = () => require('./drive.service');
+
+/** URL de un adjunto que vive en Drive. */
+const urlDrive = (id) => `${PREFIJO_URL}drive/${id}`;
 
 // Extension segun el tipo real aceptado por los middlewares de subida.
 const EXTENSIONES = {
@@ -108,7 +120,9 @@ const guardar = async (file, carpeta = 'adjuntos') => {
 const desdeUrl = (url) => {
   if (typeof url !== 'string' || !url.startsWith(PREFIJO_URL)) return null;
   const [carpeta, nombre, ...resto] = url.slice(PREFIJO_URL.length).split('?')[0].split('/');
-  return resto.length === 0 && rutaDe(carpeta, nombre) ? { carpeta, nombre } : null;
+  if (resto.length > 0) return null;
+  if (carpeta === 'drive') return ID_DRIVE.test(nombre || '') ? { carpeta, nombre } : null;
+  return rutaDe(carpeta, nombre) ? { carpeta, nombre } : null;
 };
 
 const esLocal = (url) => desdeUrl(url) !== null;
@@ -116,16 +130,35 @@ const esLocal = (url) => desdeUrl(url) !== null;
 /** Borra archivos por URL. Nunca lanza: la fila en la base ya se borro. */
 const borrar = async (urls) => {
   const lista = (Array.isArray(urls) ? urls : [urls]).map(desdeUrl).filter(Boolean);
-  await Promise.all(lista.map(({ carpeta, nombre }) => (carpeta === 'adjuntos'
-    ? adjuntosHibrido.borrar(nombre)
-    : fs.unlink(rutaDe(carpeta, nombre))
-  ).catch((error) => {
+  const borrarUno = async ({ carpeta, nombre }) => {
+    if (carpeta === 'drive') {
+      // A la papelera de Drive (30 dias para recuperarlo).
+      if (await drive().activo()) await drive().aPapeleraPorId(nombre);
+      return;
+    }
+    if (carpeta === 'adjuntos') { await adjuntosHibrido.borrar(nombre); return; }
+    await fs.unlink(rutaDe(carpeta, nombre));
+  };
+  await Promise.all(lista.map((archivo) => borrarUno(archivo).catch((error) => {
     if (error.code !== 'ENOENT') console.error('No se pudo borrar un adjunto:', error.message);
   })));
 };
 
 /** Cabeceras y contenido para servir un archivo; null si no existe. */
 const leer = async (carpeta, nombre) => {
+  if (carpeta === 'drive') {
+    if (!ID_DRIVE.test(String(nombre || '')) || !(await drive().activo())) return null;
+    const archivo = await drive().bajarPorId(nombre);
+    if (!archivo) return null;
+    return {
+      contenido: archivo.contenido,
+      tipo: archivo.mime,
+      enLinea: MIME_EN_LINEA.has(archivo.mime),
+      ext: archivo.mime === 'application/pdf' ? '.pdf' : '',
+      nombre: archivo.nombre,
+      cambiante: true,
+    };
+  }
   const ruta = rutaDe(carpeta, nombre);
   if (!ruta) return null;
   try {
@@ -160,4 +193,4 @@ const estado = async () => {
   return resultado;
 };
 
-module.exports = { CARPETAS, EXTENSIONES, directorio, guardar, borrar, leer, esLocal, desdeUrl, estado };
+module.exports = { CARPETAS, EXTENSIONES, TIPOS_POR_EXTENSION, directorio, rutaDe, guardar, borrar, leer, esLocal, desdeUrl, urlDrive, estado };

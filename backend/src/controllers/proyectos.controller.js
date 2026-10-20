@@ -3,6 +3,7 @@
 // MIEMBRO → solo los proyectos donde tiene tareas asignadas
 
 const prisma = require('../lib/prisma');
+const driveProyectos = require('../services/driveProyectos.service');
 const { registrarActividad } = require('../utils/logger');
 const { sortProyectos } = require('../utils/sort.utils');
 const { addDays, buildTemplateTasksFromProject } = require('../utils/plantillas.utils');
@@ -780,6 +781,8 @@ const editar = async (req, res) => {
       data: dataUpdate,
       include: INCLUDE_PROYECTO,
     });
+    // Su carpeta de Google Drive lleva el mismo nombre (sin esperar a Drive).
+    if (proyecto.nombre !== existente.nombre) void driveProyectos.renombrarCarpeta(proyecto.driveCarpetaId, proyecto.nombre);
 
     // Aviso por correo solo a quien se acaba de agregar al equipo.
     if (dataUpdate.miembros) {
@@ -814,7 +817,7 @@ const eliminar = async (req, res) => {
   try {
     const existente = await prisma.proyecto.findUnique({
       where: { id },
-      select: { id: true, nombre: true, area: true, creadorId: true, miembros: { select: { id: true } }, _count: { select: { tareas: true } } },
+      select: { id: true, nombre: true, area: true, creadorId: true, driveCarpetaId: true, miembros: { select: { id: true } }, _count: { select: { tareas: true } } },
     });
     if (!existente) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
@@ -847,6 +850,8 @@ const eliminar = async (req, res) => {
 
     // Ya confirmado el borrado en la base, se quitan los archivos de Blob
     await borrarBlobs(urlsAdjuntos);
+    // Y su carpeta de Google Drive (con las de sus tareas) va a la papelera.
+    await driveProyectos.tirarCarpeta(existente.driveCarpetaId);
 
     // La bitacora (`logs_actividad`) tiene FK al proyecto con borrado en
     // cascada: no hay donde dejar el apunte en la base (antes se intentaba

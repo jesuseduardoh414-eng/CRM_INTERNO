@@ -275,11 +275,22 @@ de los demas calendarios no entran al CRM.
 
 Desde el 2026-10-16 se puede conectar una cuenta de Google Workspace de la
 empresa desde el panel de configuracion (**Google Drive y respaldos**, mismo
-cliente OAuth que Google Calendar, permiso `drive.file`). Con Drive conectado:
+cliente OAuth que Google Calendar; desde el 2026-10-20 con permiso `drive`
+sobre todo su Drive, antes `drive.file`). Con Drive conectado:
 
-- Adjuntos, comprobantes, contratos, cotizaciones y archivos de la base de
-  conocimiento se guardan en la carpeta "Archivos del CRM" de esa cuenta (una
-  subcarpeta por tipo) con su mismo nombre interno: la base no cambia. Las
+- Los adjuntos de proyectos y tareas van en "Archivos del CRM › Proyectos ›
+  proyecto › tarea" con su nombre real y en los dos sentidos
+  (`services/driveProyectos.service.js`): su URL es `/api/archivos/drive/<id>`
+  y lo que se agrega, renombra, mueve o borra en esas carpetas desde Drive
+  cambia el adjunto (lista de cambios de Drive cada 5 minutos,
+  `DRIVE_SYNC=off` la apaga, y al abrir los adjuntos). Renombrar o borrar un
+  proyecto o tarea renombra o tira su carpeta. Los adjuntos de antes se
+  acomodan solos en su carpeta (`ordenarAdjuntos`, o "Ordenar ahora" en el
+  panel). Una conexion con el permiso viejo sigue subiendo a las carpetas pero
+  no lee lo agregado en Drive hasta reconectar.
+- Comprobantes, contratos, cotizaciones, archivos de la base de conocimiento y
+  adjuntos de eventos se guardan en una subcarpeta por tipo con su mismo nombre
+  interno: la base no cambia. Las
   fotos de perfil siguen en el disco. Al leer se busca en Drive y, si no esta,
   en el disco; si Drive falla al guardar, el archivo va al disco y se sube
   despues. Borrar manda a la papelera de Drive.
