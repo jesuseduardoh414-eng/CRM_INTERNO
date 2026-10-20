@@ -23,7 +23,7 @@ const CACHE_MAX = 2000;
 const cacheUsuarios = new Map(); // id -> { usuario, expira }
 const cacheSesiones = new Map(); // sid -> { sesion, expira }
 
-const selectUsuarioAuth = { id: true, rol: true, area: true, estado: true, nombre: true, email: true, dosFactoresActivo: true, empresaId: true, permisosFinanzas: true };
+const selectUsuarioAuth = { id: true, rol: true, area: true, estado: true, nombre: true, email: true, dosFactoresActivo: true, empresaId: true, permisosFinanzas: true, permisos: true };
 
 const guardarEnCache = (mapa, clave, valor) => {
   if (mapa.size >= CACHE_MAX) mapa.clear();
@@ -150,7 +150,10 @@ const verificarToken = async (req, res, next) => {
       rol: usuario.rol,
       estado: usuario.estado,
       empresaId: usuario.empresaId ?? null,
-      // Niveles de finanzas por recurso (utils/finanzas.utils.js).
+      // Ajustes de permisos de la persona sobre los de su area
+      // (utils/permisosArea.utils.js); los de finanzas anteriores cuentan
+      // mientras no tenga ajustes nuevos.
+      permisos: usuario.permisos ?? null,
       permisosFinanzas: usuario.permisosFinanzas ?? null,
     };
     req.sesionId = sesion.id;

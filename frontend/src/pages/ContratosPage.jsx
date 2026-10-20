@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { contratosService, empresasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useTextoClientes } from '../hooks/useTextoClientes';
@@ -80,7 +81,9 @@ const ContratosPage = () => {
   const tc = useTextoClientes();
   const { moduloActivo } = useConfiguracion();
   const q = useDebounce(busqueda, 300);
-  const esAdmin = usuario?.rol === 'ADMIN';
+  // Sección Contratos: ver / crear / editar / eliminar (utils/permisos.js).
+  const esAdmin = puede(usuario, 'contratos.ver');
+  const puedeCrear = puede(usuario, 'contratos.crear');
 
   const { data, error, isLoading, mutate } = useSWR(
     esAdmin ? ['contratos', q, tipo, estado, empresaId] : null,
@@ -153,9 +156,11 @@ const ContratosPage = () => {
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{t('ctrTitle')}</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">{t('ctrSubtitle')}</p>
         </div>
-        <Button className="w-full md:w-auto" onClick={abrirNuevo}>
-          <FilePlus2 size={16} /> {t('ctrNew')}
-        </Button>
+        {puedeCrear && (
+          <Button className="w-full md:w-auto" onClick={abrirNuevo}>
+            <FilePlus2 size={16} /> {t('ctrNew')}
+          </Button>
+        )}
       </div>
 
       <dl className="cli-cifras mb-6">
@@ -270,7 +275,7 @@ const ContratosPage = () => {
             <div className="mt-3">
               {hayFiltros
                 ? <Button variant="outline" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
-                : <Button onClick={abrirNuevo}><FilePlus2 size={16} /> {t('ctrNew')}</Button>}
+                : puedeCrear && <Button onClick={abrirNuevo}><FilePlus2 size={16} /> {t('ctrNew')}</Button>}
             </div>
           </div>
         )}

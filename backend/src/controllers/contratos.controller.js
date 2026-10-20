@@ -1,7 +1,8 @@
-// Contratos con clientes y proveedores (solo administradores).
+// Contratos con clientes y proveedores.
 //
-// Rutas en routes/contratos.routes.js. Todas pasan por verificarToken +
-// soloAdmin. Los PDF se guardan en disco (services/contratosArchivos.service.js).
+// Rutas en routes/contratos.routes.js. Todas pasan por verificarToken y los
+// permisos contratos.* (Configuración → Permisos). Los PDF se guardan en disco
+// (services/contratosArchivos.service.js).
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { claveDiaMexico } = require('../utils/fechas.utils');

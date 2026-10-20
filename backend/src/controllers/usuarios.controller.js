@@ -2,13 +2,16 @@ const prisma = require('../lib/prisma');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const bcrypt = require('bcryptjs');
 const { sortTareas } = require('../utils/sort.utils');
-const { esAdmin, esAdminGlobal, esAdminDeArea, puedeGestionarArea } = require('../utils/permissions.utils');
+const { esAdminGlobal, veTodosLosUsuarios, gestionaUsuariosDe } = require('../utils/permissions.utils');
+const {
+  alcanceDe, ajustesDe, heredados, permisosEfectivos, limpiarMapa, catalogoPublico,
+} = require('../utils/permisosArea.utils');
+const { configEnCache } = require('../services/configuracion.service');
 const { rangoDiaMexico, rangoSemanaMexico } = require('../utils/fechas.utils');
 const { validarPasswordNueva, esAreaValida, esRolValido, esEmailValido } = require('../utils/security.utils');
 const { subirArchivo, borrarBlobs, esBlobVercel, esLocal } = require('../utils/blob.utils');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
 const { Prisma } = require('@prisma/client');
-const { normalizarPermisos } = require('../utils/finanzas.utils');
 const { generarInvitacion } = require('./auth.controller');
 const {
   enviarInvitacion,
@@ -218,16 +221,21 @@ const guardarFotoPerfil = async (file) => {
   return subirArchivo(file, 'perfiles');
 };
 
-const obtenerFiltroUsuariosGestion = (usuario) => (
-  esAdminDeArea(usuario) ? { area: usuario.area } : {}
-);
+// "usuarios.ver": ninguno = solo el directorio basico (nombre, area, rol);
+// area = gestiona a los de su area; todos = a cualquiera.
+const veGestion = (usuario) => esAdminGlobal(usuario) || alcanceDe(usuario, 'usuarios.ver') !== 'ninguno';
+const veTodos = veTodosLosUsuarios;
+const alcanzaArea = gestionaUsuariosDe;
+
+const obtenerFiltroUsuariosGestion = (usuario) => (veTodos(usuario) ? {} : { area: usuario.area });
 
 // Devuelve todos los usuarios con su actividad pre-calculada de forma eficiente
 const listar = async (req, res) => {
   try {
     const ahoraMs = Date.now();
     const filtroGestion = obtenerFiltroUsuariosGestion(req.usuario);
-    const solicitanteGlobal = esAdminGlobal(req.usuario);
+    const solicitanteGlobal = veTodos(req.usuario);
+    const gestiona = veGestion(req.usuario);
 
     // Filtros opcionales (?q= &area= &rol= &estado=) y paginacion.
     // Sin parametros la respuesta sale completa, como antes.
@@ -246,7 +254,7 @@ const listar = async (req, res) => {
     };
 
     // Si hay datos en caché y no han expirado, devolverlos de inmediato.
-    // La cache guarda la lista completa del admin global, asi que solo sirve
+    // La cache guarda la lista completa (quien ve a todos), asi que solo sirve
     // cuando no hay filtros; paginar sobre ella si es correcto porque es el
     // mismo conjunto.
     if (cacheUsuarios && !hayFiltros && solicitanteGlobal && (ahoraMs - ultimaActualizacion < CACHE_TTL)) {
@@ -254,7 +262,7 @@ const listar = async (req, res) => {
     }
 
     const usuarios = await prisma.usuario.findMany({
-      where: combinarWhere(esAdmin(req.usuario) ? filtroGestion : undefined, filtrosExtra, SIN_CONFIGURADOR),
+      where: combinarWhere(gestiona ? filtroGestion : undefined, filtrosExtra, SIN_CONFIGURADOR),
       orderBy: { nombre: 'asc' },
       select: {
         id:     true,
@@ -265,14 +273,10 @@ const listar = async (req, res) => {
         rol:    true,
         creadoEn: true,
         estado: true,
-        permisosFinanzas: true,
       },
     });
 
-    if (!esAdmin(req.usuario)) {
-      // Los permisos de finanzas de los demás solo los ven los administradores.
-      return responder(usuarios.map(({ permisosFinanzas, ...u }) => u));
-    }
+    if (!gestiona) return responder(usuarios);
 
     // OPTIMIZACIÓN: Obtener solo tareas relevantes (activas o terminadas hoy) en una sola consulta.
     // "Hoy" se corta en hora de Mexico y por fecha de cierre (`completadoEn`).
@@ -330,9 +334,9 @@ const listar = async (req, res) => {
       };
     });
 
-    // Solo se cachea la lista completa del admin global: guardar un resultado
-    // filtrado o parcial (admin de area) haria que la siguiente peticion sin
-    // filtros recibiera datos incompletos.
+    // Solo se cachea la lista completa (quien ve a todos): guardar un
+    // resultado filtrado o parcial (solo su area) haria que la siguiente
+    // peticion sin filtros recibiera datos incompletos.
     if (!hayFiltros && solicitanteGlobal) {
       cacheUsuarios = usuariosConActividad;
       ultimaActualizacion = Date.now();
@@ -499,7 +503,7 @@ const actualizarPerfil = async (req, res) => {
   }
 };
 
-// Crear nuevo usuario (solo ADMIN).
+// Crear nuevo usuario ("usuarios.invitar").
 // Genera una invitacion real (misma logica que POST /auth/invitar) y manda
 // el enlace /invitacion/:token: antes creaba el usuario en estado
 // `pendiente` con un enlace que apuntaba a una invitacion inexistente.
@@ -525,8 +529,11 @@ const crear = async (req, res) => {
   }
 
   try {
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, areaFinal)) {
+    if (!alcanzaArea(req.usuario, areaFinal)) {
       return res.status(403).json({ error: 'Solo puedes crear usuarios de tu propia área' });
+    }
+    if (rolFinal === 'ADMIN' && !esAdminGlobal(req.usuario)) {
+      return res.status(403).json({ error: 'Solo el administrador global puede asignar el rol de administrador' });
     }
 
     const existe = await prisma.usuario.findUnique({ where: { email: emailNormalizado }, select: { id: true } });
@@ -560,12 +567,12 @@ const crear = async (req, res) => {
   }
 };
 
-// Editar usuario (solo ADMIN)
+// Editar usuario ("usuarios.editar")
 const editar = async (req, res) => {
   const id = parseInt(req.params.id);
   if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
 
-  const { nombre, email, password, area, rol, permisosFinanzas } = req.body;
+  const { nombre, email, password, area, rol } = req.body;
 
   try {
     const objetivo = await prisma.usuario.findUnique({
@@ -588,10 +595,11 @@ const editar = async (req, res) => {
       return res.status(400).json({ error: 'Área no válida' });
     }
 
-    // Un admin de area solo gestiona miembros de su area: no puede tocar a
-    // otros administradores, ni ascender a nadie, ni cambiar contraseñas.
-    if (esAdminDeArea(req.usuario)) {
-      if (!puedeGestionarArea(req.usuario, objetivo.area)) {
+    // Fuera del administrador general, se gestiona a los miembros que alcanza
+    // "usuarios.ver": sin tocar a administradores, ni ascender a nadie, ni
+    // cambiar contraseñas.
+    if (!esAdminGlobal(req.usuario)) {
+      if (!alcanzaArea(req.usuario, objetivo.area)) {
         return res.status(403).json({ error: 'Solo puedes editar usuarios de tu propia área' });
       }
       if (objetivo.rol === 'ADMIN') {
@@ -603,7 +611,7 @@ const editar = async (req, res) => {
       if (cambiaPassword) {
         return res.status(403).json({ error: 'Solo el administrador global puede cambiar contraseñas' });
       }
-      if (areaNormalizada !== undefined && !puedeGestionarArea(req.usuario, areaNormalizada)) {
+      if (areaNormalizada !== undefined && !alcanzaArea(req.usuario, areaNormalizada)) {
         return res.status(403).json({ error: 'No puedes mover usuarios a otra área' });
       }
     }
@@ -612,19 +620,7 @@ const editar = async (req, res) => {
       return res.status(400).json({ error: 'No puedes cambiar tu propio rol' });
     }
 
-    // Permisos de finanzas (ventas, tesorería, gastos por categoría e
-    // informe): solo los reparte el administrador global. Se guardan aunque
-    // el usuario sea ADMIN global (siempre puede todo) por si cambia de rol.
-    if (permisosFinanzas !== undefined && !esAdminGlobal(req.usuario)) {
-      return res.status(403).json({ error: 'Solo el administrador global puede asignar permisos de finanzas' });
-    }
-
     const data = {};
-
-    if (permisosFinanzas !== undefined) {
-      const normalizados = normalizarPermisos(permisosFinanzas);
-      data.permisosFinanzas = normalizados === null ? Prisma.DbNull : normalizados;
-    }
 
     if (nombre !== undefined) {
       const nombreLimpio = String(nombre).trim();
@@ -664,7 +660,7 @@ const editar = async (req, res) => {
     const usuario = await prisma.usuario.update({
       where: { id },
       data,
-      select: { id: true, nombre: true, email: true, area: true, rol: true, permisosFinanzas: true }
+      select: { id: true, nombre: true, email: true, area: true, rol: true }
     });
 
     // Si un admin le cambia la contraseña a alguien, sus sesiones abiertas
@@ -736,8 +732,11 @@ const eliminar = async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, objetivo.area)) {
+    if (!alcanzaArea(req.usuario, objetivo.area)) {
       return res.status(403).json({ error: 'Solo puedes desactivar usuarios de tu propia área' });
+    }
+    if (objetivo.rol === 'ADMIN' && !esAdminGlobal(req.usuario)) {
+      return res.status(403).json({ error: 'Solo el administrador global puede desactivar a otros administradores' });
     }
 
     if (objetivo.estado !== 'inactivo') {
@@ -775,8 +774,11 @@ const toggleEstado = async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, objetivo.area)) {
+    if (!alcanzaArea(req.usuario, objetivo.area)) {
       return res.status(403).json({ error: 'Solo puedes cambiar el estado de usuarios de tu propia área' });
+    }
+    if (objetivo.rol === 'ADMIN' && !esAdminGlobal(req.usuario)) {
+      return res.status(403).json({ error: 'Solo el administrador global puede cambiar el estado de otros administradores' });
     }
 
     if (id === req.usuario.id) {
@@ -820,7 +822,7 @@ const actividad = async (req, res) => {
       return res.status(404).json({ error: 'Usuario no encontrado' });
     }
 
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, usuario.area)) {
+    if (!veGestion(req.usuario) || !alcanzaArea(req.usuario, usuario.area)) {
       return res.status(403).json({ error: 'Solo puedes consultar actividad de usuarios de tu propia área' });
     }
 
@@ -832,4 +834,78 @@ const actividad = async (req, res) => {
   }
 };
 
-module.exports = { listar, listarParaProyectos, obtenerPerfil, actualizarPerfil, crear, editar, eliminar, toggleEstado, actividad };
+// ── Ajustes de permisos por persona (solo el administrador general) ──
+// La persona hereda la tabla de su area y rol (Configuracion → Permisos); aqui
+// se guardan solo sus excepciones, en usuarios.permisos.
+
+const SELECT_PERMISOS = { id: true, nombre: true, area: true, rol: true, estado: true, permisos: true, permisosFinanzas: true };
+
+const cargarObjetivoPermisos = async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (isNaN(id)) { res.status(400).json({ error: 'ID inválido' }); return null; }
+  if (!esAdminGlobal(req.usuario)) {
+    res.status(403).json({ error: 'Solo el administrador general asigna permisos por persona' });
+    return null;
+  }
+  const objetivo = await prisma.usuario.findUnique({ where: { id }, select: SELECT_PERMISOS });
+  if (!objetivo || !['ADMIN', 'MIEMBRO'].includes(objetivo.rol)) {
+    res.status(404).json({ error: 'Usuario no encontrado' });
+    return null;
+  }
+  return objetivo;
+};
+
+const respuestaPermisos = (objetivo) => {
+  const config = configEnCache();
+  const { permisos: _p, permisosFinanzas: _pf, ...usuario } = objetivo;
+  return {
+    usuario,
+    adminGeneral: esAdminGlobal(objetivo),
+    catalogo: catalogoPublico(),
+    heredados: heredados(objetivo, config),
+    ajustes: ajustesDe(objetivo),
+    efectivos: permisosEfectivos(objetivo, config),
+  };
+};
+
+// GET /usuarios/:id/permisos
+const obtenerPermisos = async (req, res) => {
+  try {
+    const objetivo = await cargarObjetivoPermisos(req, res);
+    if (!objetivo) return undefined;
+    res.set('Cache-Control', 'no-store');
+    return res.json(respuestaPermisos(objetivo));
+  } catch (error) {
+    console.error('[usuarios.obtenerPermisos]', error);
+    return res.status(500).json({ error: 'Error al obtener los permisos' });
+  }
+};
+
+// PUT /usuarios/:id/permisos { ajustes: { clave: valor } }. {} = como su area.
+// Al guardar, los permisos de finanzas anteriores quedan reemplazados.
+const guardarPermisos = async (req, res) => {
+  try {
+    const objetivo = await cargarObjetivoPermisos(req, res);
+    if (!objetivo) return undefined;
+    if (esAdminGlobal(objetivo)) {
+      return res.status(400).json({ error: 'El administrador general siempre tiene todos los permisos' });
+    }
+    const ajustes = limpiarMapa(req.body?.ajustes);
+    const actualizado = await prisma.usuario.update({
+      where: { id: objetivo.id },
+      data: { permisos: ajustes, permisosFinanzas: Prisma.DbNull },
+      select: SELECT_PERMISOS,
+    });
+    limpiarCacheUsuarios();
+    invalidarCacheUsuario(objetivo.id);
+    return res.json(respuestaPermisos(actualizado));
+  } catch (error) {
+    console.error('[usuarios.guardarPermisos]', error);
+    return res.status(500).json({ error: 'Error al guardar los permisos' });
+  }
+};
+
+module.exports = {
+  listar, listarParaProyectos, obtenerPerfil, actualizarPerfil, crear, editar, eliminar, toggleEstado, actividad,
+  obtenerPermisos, guardarPermisos,
+};

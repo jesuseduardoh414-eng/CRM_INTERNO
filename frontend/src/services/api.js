@@ -473,6 +473,18 @@ export const usuariosService = {
     });
     return handleResponse(res);
   },
+  // Ajustes de permisos de una persona (solo el administrador general):
+  // { usuario, catalogo, heredados, ajustes, efectivos }.
+  obtenerPermisos: async (id) => {
+    const res = await apiFetch(`${API_URL}/usuarios/${id}/permisos`, { headers: getHeaders() });
+    return handleResponse(res);
+  },
+  guardarPermisos: async (id, ajustes) => {
+    const res = await apiFetch(`${API_URL}/usuarios/${id}/permisos`, {
+      method: 'PUT', headers: getHeaders(), body: JSON.stringify({ ajustes }),
+    });
+    return handleResponse(res);
+  },
 
   // Invitaciones (Solo Admin)
   invitar: async (datos) => {
@@ -811,7 +823,7 @@ export const contratosService = {
 };
 
 // ── Finanzas: Ventas (pagos), Tesorería (partidas) y Gastos ────────────────
-// El acceso es por usuario y recurso (usuario.finanzas); el servidor manda
+// El acceso es por usuario y recurso (usuario.permisos, casillas finanzas.*); el servidor manda
 // 403 SIN_PERMISO si no alcanza el nivel.
 const pedirFinanzas = async (ruta, { metodo = 'GET', cuerpo, formData } = {}) => {
   const res = await apiFetch(`${API_URL}/finanzas${ruta}`, {
@@ -826,6 +838,20 @@ const formularioComprobante = (archivo) => {
   fd.append('archivo', archivo);
   return fd;
 };
+/** FormData con el archivo y los demás campos (los vacíos no se mandan). */
+const formularioConArchivo = (archivo, datos = {}) => {
+  const fd = formularioComprobante(archivo);
+  Object.entries(datos).forEach(([clave, valor]) => {
+    if (valor !== undefined && valor !== null && valor !== '') fd.append(clave, valor);
+  });
+  return fd;
+};
+/** Archivo privado de la API como URL de memoria (blob); quien llama la libera. */
+const urlBlob = async (url) => {
+  const res = await apiFetch(url, { headers: getHeaders(true) });
+  if (!res.ok) await handleResponse(res);
+  return URL.createObjectURL(await res.blob());
+};
 
 export const finanzasService = {
   catalogos: () => pedirFinanzas('/catalogos'),
@@ -835,12 +861,6 @@ export const finanzasService = {
     crear: (datos) => pedirFinanzas('/cuentas', { metodo: 'POST', cuerpo: datos }),
     editar: (id, datos) => pedirFinanzas(`/cuentas/${id}`, { metodo: 'PUT', cuerpo: datos }),
     eliminar: (id) => pedirFinanzas(`/cuentas/${id}`, { metodo: 'DELETE' }),
-  },
-  partidas: {
-    listar: () => pedirFinanzas('/partidas'),
-    crear: (datos) => pedirFinanzas('/partidas', { metodo: 'POST', cuerpo: datos }),
-    editar: (id, datos) => pedirFinanzas(`/partidas/${id}`, { metodo: 'PUT', cuerpo: datos }),
-    eliminar: (id) => pedirFinanzas(`/partidas/${id}`, { metodo: 'DELETE' }),
   },
   pagos: {
     listar: (params = {}) => pedirFinanzas(`/pagos${construirQuery(params)}`),
@@ -855,6 +875,8 @@ export const finanzasService = {
   gastos: {
     listar: (params = {}) => pedirFinanzas(`/gastos${construirQuery(params)}`),
     resumen: (params = {}) => pedirFinanzas(`/gastos/resumen${construirQuery(params)}`),
+    // Presupuesto de una categoría en un mes: { categoria, anio, mes }.
+    presupuesto: (params = {}) => pedirFinanzas(`/gastos/presupuesto${construirQuery(params)}`),
     obtener: (id) => pedirFinanzas(`/gastos/${id}`),
     crear: (datos) => pedirFinanzas('/gastos', { metodo: 'POST', cuerpo: datos }),
     editar: (id, datos) => pedirFinanzas(`/gastos/${id}`, { metodo: 'PUT', cuerpo: datos }),
@@ -867,15 +889,25 @@ export const finanzasService = {
   },
   tesoreria: {
     resumen: (params = {}) => pedirFinanzas(`/tesoreria${construirQuery(params)}`),
-    asignaciones: (params = {}) => pedirFinanzas(`/tesoreria/asignaciones${construirQuery(params)}`),
-    crearAsignacion: (datos) => pedirFinanzas('/tesoreria/asignaciones', { metodo: 'POST', cuerpo: datos }),
-    editarAsignacion: (id, datos) => pedirFinanzas(`/tesoreria/asignaciones/${id}`, { metodo: 'PUT', cuerpo: datos }),
-    eliminarAsignacion: (id) => pedirFinanzas(`/tesoreria/asignaciones/${id}`, { metodo: 'DELETE' }),
+    // { anio, mes, presupuestos: [{ categoria, monto }] } (monto 0 = quitarlo).
+    guardarPresupuestos: (datos) => pedirFinanzas('/tesoreria/presupuestos', { metodo: 'PUT', cuerpo: datos }),
+  },
+  cotizaciones: {
+    listar: (params = {}) => pedirFinanzas(`/cotizaciones${construirQuery(params)}`),
+    obtener: (id) => pedirFinanzas(`/cotizaciones/${id}`),
+    // datos: { tipo, titulo, descripcion, empresaId, contraparteNombre, moneda, fecha, monto, nota }
+    crear: (archivo, datos) => pedirFinanzas('/cotizaciones', { metodo: 'POST', formData: formularioConArchivo(archivo, datos) }),
+    nuevaVersion: (id, archivo, datos) => pedirFinanzas(`/cotizaciones/${id}/versiones`, { metodo: 'POST', formData: formularioConArchivo(archivo, datos) }),
+    editar: (id, datos) => pedirFinanzas(`/cotizaciones/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    cambiarEstado: (id, estado) => pedirFinanzas(`/cotizaciones/${id}/estado`, { metodo: 'POST', cuerpo: { estado } }),
+    eliminar: (id) => pedirFinanzas(`/cotizaciones/${id}`, { metodo: 'DELETE' }),
+    urlArchivo: (versionId) => urlBlob(`${API_URL}/finanzas/cotizaciones/versiones/${versionId}/archivo`),
+    descargarArchivo: (versionId, nombre) => descargarArchivo(`${API_URL}/finanzas/cotizaciones/versiones/${versionId}/archivo?descargar=1`, nombre),
   },
   informe: (params = {}) => pedirFinanzas(`/informe${construirQuery(params)}`),
   descargarInforme: (params = {}) => descargarArchivo(
     `${API_URL}/finanzas/informe${construirQuery({ ...params, formato: 'excel' })}`,
-    `informe_gastos_${params.anio || ''}.xlsx`,
+    `informe_${params.vista || 'presupuesto'}_${params.anio || ''}${params.mes ? `_${String(params.mes).padStart(2, '0')}` : ''}.xlsx`,
   ),
   comprobantes: {
     // Sin URL pública: se pide con la sesión y se muestra desde memoria (blob).
@@ -888,6 +920,28 @@ export const finanzasService = {
     descargar: (id, nombre) => descargarArchivo(`${API_URL}/finanzas/comprobantes/${id}?descargar=1`, nombre),
     eliminar: (id) => pedirFinanzas(`/comprobantes/${id}`, { metodo: 'DELETE' }),
   },
+};
+
+// ── Base de conocimiento ──────────────────────────────────────────────────
+const pedirConocimiento = async (ruta, { metodo = 'GET', cuerpo, formData } = {}) => {
+  const res = await apiFetch(`${API_URL}/conocimiento${ruta}`, {
+    method: metodo,
+    headers: getHeaders(Boolean(formData)),
+    body: formData || (cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined),
+  });
+  return handleResponse(res);
+};
+
+export const conocimientoService = {
+  listar: (params = {}) => pedirConocimiento(construirQuery(params)),
+  obtener: (id) => pedirConocimiento(`/${id}`),
+  crear: (datos) => pedirConocimiento('', { metodo: 'POST', cuerpo: datos }),
+  editar: (id, datos) => pedirConocimiento(`/${id}`, { metodo: 'PUT', cuerpo: datos }),
+  eliminar: (id) => pedirConocimiento(`/${id}`, { metodo: 'DELETE' }),
+  subirArchivo: (id, archivo) => pedirConocimiento(`/${id}/archivos`, { metodo: 'POST', formData: formularioComprobante(archivo) }),
+  eliminarArchivo: (id) => pedirConocimiento(`/archivos/${id}`, { metodo: 'DELETE' }),
+  urlArchivo: (id) => urlBlob(`${API_URL}/conocimiento/archivos/${id}`),
+  descargarArchivo: (id, nombre) => descargarArchivo(`${API_URL}/conocimiento/archivos/${id}?descargar=1`, nombre),
 };
 
 // ── Configuración de la instalación ────────────────────────────────────────
@@ -1096,5 +1150,28 @@ export const configuracionService = {
   estado: async () => {
     const res = await apiFetch(`${API_URL}/configuracion/estado`, { headers: getHeaders() });
     return handleResponse(res);
+  },
+  // Google Drive: archivos del CRM y respaldo diario de la base.
+  drive: {
+    estado: async () => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive`, { headers: getHeaders() });
+      return handleResponse(res);
+    },
+    conectar: async (code) => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive/conectar`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ code }) });
+      return handleResponse(res);
+    },
+    desconectar: async () => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive`, { method: 'DELETE', headers: getHeaders() });
+      return handleResponse(res);
+    },
+    respaldar: async () => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive/respaldo`, { method: 'POST', headers: getHeaders() });
+      return handleResponse(res);
+    },
+    subirPendientes: async () => {
+      const res = await apiFetch(`${API_URL}/configuracion/drive/pendientes`, { method: 'POST', headers: getHeaders() });
+      return handleResponse(res);
+    },
   },
 };

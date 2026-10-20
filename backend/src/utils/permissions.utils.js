@@ -1,3 +1,14 @@
+// Reglas de acceso a proyectos y areas. Lo que puede cada persona sale de la
+// tabla de permisos de su area y de sus ajustes (utils/permisosArea.utils.js);
+// aqui se traduce a "este proyecto si / no".
+//
+// Alcances (proyectos.ver, proyectos.editar, tareas.crear, ...):
+//   propios  proyectos donde es creador o miembro (para ver, tambien donde
+//            participa en alguna tarea)
+//   area     los de su area, mas los propios
+//   todos    cualquiera
+const { alcanceDe } = require('./permisosArea.utils');
+
 const normalizarAreas = (value) => String(value || '')
   .split(',')
   .map((area) => area.trim())
@@ -6,8 +17,6 @@ const normalizarAreas = (value) => String(value || '')
 const esAdmin = (usuario) => usuario?.rol === 'ADMIN';
 
 const esAdminGlobal = (usuario) => esAdmin(usuario) && usuario?.area === 'ADMINISTRACION';
-
-const esAdminDeArea = (usuario) => esAdmin(usuario) && !esAdminGlobal(usuario);
 
 const proyectoCoincideConArea = (areaProyecto, areaUsuario) => {
   if (!areaUsuario) return false;
@@ -23,37 +32,79 @@ const buildFiltroAreaProyecto = (area, campo = 'area') => ({
   ],
 });
 
+// Recorte de los tableros del equipo (inicio del admin, Reportes): el
+// administrador general ve todo; cualquier otra persona, solo su area.
 const buildScopeProyectoParaAdmin = (usuario, campo = 'area') => {
-  if (!esAdmin(usuario)) return null;
   if (esAdminGlobal(usuario)) return {};
-  return buildFiltroAreaProyecto(usuario.area, campo);
+  return buildFiltroAreaProyecto(usuario?.area, campo);
 };
 
-const puedeGestionarArea = (usuario, areaObjetivo) => (
-  esAdminGlobal(usuario) || (esAdminDeArea(usuario) && usuario.area === areaObjetivo)
-);
+// Gestion de personas e invitaciones ("usuarios.ver"): con "todos" cualquier
+// area; si no, solo la propia.
+const veTodosLosUsuarios = (usuario) => esAdminGlobal(usuario) || alcanceDe(usuario, 'usuarios.ver') === 'todos';
+const gestionaUsuariosDe = (usuario, area) => veTodosLosUsuarios(usuario) || (Boolean(area) && area === usuario?.area);
 
-const puedeAdministrarProyecto = (usuario, proyecto) => {
-  if (!esAdmin(usuario)) return false;
-  if (esAdminGlobal(usuario)) return true;
-  return proyectoCoincideConArea(proyecto?.area, usuario.area);
+/** Miembro explicito del proyecto (`proyecto.miembros` = [{ id }]). */
+const esMiembroDe = (usuario, proyecto) => (proyecto?.miembros || []).some((m) => m.id === usuario?.id);
+
+/**
+ * ¿El alcance llega a este proyecto? Para "propios" cuenta ser creador o
+ * miembro explicito (el proyecto debe traer `miembros` y `creadorId`).
+ */
+const alcanzaProyecto = (usuario, proyecto, alcance) => {
+  if (!usuario || !proyecto || !alcance || alcance === 'ninguno') return false;
+  if (alcance === 'todos') return true;
+  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
+  return proyecto.creadorId === usuario.id || esMiembroDe(usuario, proyecto);
 };
 
-// Regla unica de lectura de un proyecto. Se usa en todos los endpoints que
-// devuelven datos de un proyecto o de sus tareas (comentarios, adjuntos,
-// historial, equipo, tareas). Misma regla que `tareas.listar`:
-//  - ADMIN global: siempre.
-//  - ADMIN de area: solo si el proyecto es de su area.
-//  - MIEMBRO: si es miembro, creador del proyecto, o participa en alguna
-//    tarea (asignado principal, co-asignado o creador de la tarea). Con el
-//    permiso "verTodosProyectos" del panel, cualquiera.
+/** Editar el proyecto (datos, estado, equipo) segun "proyectos.editar". */
+const puedeAdministrarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, alcanceDe(usuario, 'proyectos.editar'));
+
+const puedeEliminarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, alcanceDe(usuario, 'proyectos.eliminar'));
+
+/**
+ * Accion sobre tareas ("tareas.crear" | "tareas.editar" | "tareas.eliminar").
+ * Con "area" o "todos" vale cualquier tarea de esos proyectos. Con "propios"
+ * hace falta ser miembro explicito del proyecto y, si hay tarea, que sea suya:
+ * sin responsable, asignada a la persona o creada por ella (`tareaEsAccesible`).
+ */
+const puedeActuarEnTarea = (usuario, proyecto, permiso, tareaEsAccesible = true) => {
+  const alcance = alcanceDe(usuario, permiso);
+  if (alcance === 'ninguno' || !proyecto) return false;
+  if (alcance === 'todos') return true;
+  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
+  return esMiembroDe(usuario, proyecto) && tareaEsAccesible;
+};
+
+/** Filtro de Prisma con los proyectos que la persona puede ver ("proyectos.ver"). */
+const filtroProyectosVisibles = (usuario) => {
+  const alcance = alcanceDe(usuario, 'proyectos.ver');
+  if (alcance === 'todos') return {};
+  if (alcance === 'ninguno') return { id: -1 };
+  const propios = [
+    { miembros: { some: { id: usuario.id } } },
+    { creadorId: usuario.id },
+    { tareas: { some: { asignadoId: usuario.id } } },
+    { tareas: { some: { asignados: { some: { id: usuario.id } } } } },
+    { tareas: { some: { creadorId: usuario.id } } },
+  ];
+  if (alcance === 'area') return { OR: [...buildFiltroAreaProyecto(usuario.area).OR, ...propios] };
+  return { OR: propios };
+};
+
+// Regla unica de lectura de un proyecto ("proyectos.ver"). Se usa en todos los
+// endpoints que devuelven datos de un proyecto o de sus tareas (comentarios,
+// adjuntos, historial, equipo, tareas). Propios = creador, miembro o participa
+// en alguna tarea (responsable, co-asignado o creador de la tarea).
 // `proyecto` debe traer `id`, `area`, `creadorId` y, opcionalmente,
 // `miembros` ([{ id }]). Si no trae `miembros`, se consultan.
 const puedeVerProyecto = async (prisma, usuario, proyecto) => {
   if (!usuario || !proyecto) return false;
-  // Permiso del panel: los miembros pueden ver todos los proyectos.
-  if (!esAdmin(usuario) && require('../services/configuracion.service').configEnCache().permisos?.verTodosProyectos) return true;
-  if (esAdmin(usuario)) return puedeAdministrarProyecto(usuario, proyecto);
+  const alcance = alcanceDe(usuario, 'proyectos.ver');
+  if (alcance === 'ninguno') return false;
+  if (alcance === 'todos') return true;
+  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
   if (proyecto.creadorId === usuario.id) return true;
 
   let miembros = proyecto.miembros;
@@ -99,10 +150,13 @@ module.exports = {
   cargarProyectoVisible,
   esAdmin,
   esAdminGlobal,
-  esAdminDeArea,
   proyectoCoincideConArea,
   buildFiltroAreaProyecto,
   buildScopeProyectoParaAdmin,
-  puedeGestionarArea,
+  veTodosLosUsuarios,
+  gestionaUsuariosDe,
   puedeAdministrarProyecto,
+  puedeEliminarProyecto,
+  puedeActuarEnTarea,
+  filtroProyectosVisibles,
 };

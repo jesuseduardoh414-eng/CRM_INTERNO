@@ -9,7 +9,7 @@
 // `color` es el tono solido (puntos, barras, iconos); `bg` y `fg` son el par
 // fondo/texto de una etiqueta (badge).
 
-import { AREA_GENERAL } from './areas';
+import { alcanceDe } from './permisos';
 
 export const ESTADOS_TAREA = [
   {
@@ -90,22 +90,22 @@ const areasDeProyecto = (area) => String(area || '')
   .filter(Boolean);
 
 /**
- * Replica de la regla del backend (`puedeAccederTarea` en tareas.controller y
- * `puedeAdministrarProyecto` en permissions.utils) para no mostrar acciones que
- * el servidor va a rechazar:
+ * Replica de la regla del backend (`puedeActuarEnTarea` en permissions.utils)
+ * para no mostrar acciones que el servidor va a rechazar. `clave` es el
+ * permiso: "tareas.editar" (editar y cambiar estado) o "tareas.eliminar".
  *
- *  - Admin global (area ADMINISTRACION): siempre.
- *  - Admin de area: solo en proyectos de su area.
- *  - Miembro: si la tarea no tiene responsable, si es el creador o si es uno de
- *    los responsables.
+ *  - Alcance "todos": cualquier tarea.
+ *  - Alcance "area": las de proyectos de su area (y las propias).
+ *  - Alcance "propios": miembro del proyecto y la tarea sin responsable, creada
+ *    por la persona o asignada a ella.
  */
-export const puedeGestionarTarea = (tarea, usuario, proyecto) => {
+export const puedeGestionarTarea = (tarea, usuario, proyecto, clave = 'tareas.editar') => {
   if (!tarea || !usuario) return false;
 
-  if (usuario.rol === 'ADMIN') {
-    if (usuario.area === AREA_GENERAL) return true;
-    return areasDeProyecto(proyecto?.area).includes(String(usuario.area || '').toUpperCase());
-  }
+  const alcance = alcanceDe(usuario, clave);
+  if (alcance === 'ninguno') return false;
+  if (alcance === 'todos') return true;
+  if (alcance === 'area' && areasDeProyecto(proyecto?.area).includes(String(usuario.area || '').toUpperCase())) return true;
 
   // El backend exige ademas ser miembro del proyecto (`esMiembro &&
   // puedeAccederTarea`): quien creo una tarea pero ya salio del proyecto no

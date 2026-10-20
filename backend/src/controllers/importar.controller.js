@@ -15,7 +15,8 @@ const XLSX = require('xlsx');
 const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
 const { serializeTasksForExport } = require('../utils/plantillas.utils');
-const { esAdmin, puedeAdministrarProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { puedeActuarEnTarea, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { alcanceDe } = require('../utils/permisosArea.utils');
 const { visibilidadTareasPara } = require('./tareas.controller');
 const {
   ErrorImportacion,
@@ -46,8 +47,7 @@ const responderErrorImportacion = (res, error, contexto) => {
   return res.status(500).json({ error: 'Error interno al procesar la importación' });
 };
 
-// Quien importa debe poder crear tareas en el proyecto: ADMIN con permiso
-// sobre el area, o MIEMBRO que pertenezca al proyecto.
+// Quien importa debe poder crear tareas en el proyecto ("tareas.crear").
 const resolverAsignadoPorDefecto = (modoAsignacion, proyecto, usuario, asignadoIdRaw) => {
   if (modoAsignacion === 'yo') {
     if (!proyecto.miembros.some((m) => m.id === usuario.id)) {
@@ -84,11 +84,7 @@ const prepararImportacion = async (req) => {
   });
   if (!proyecto) throw new ErrorImportacion('Proyecto no encontrado', 404);
 
-  if (esAdmin(req.usuario)) {
-    if (!puedeAdministrarProyecto(req.usuario, proyecto)) {
-      throw new ErrorImportacion('No tienes permiso para importar tareas en este proyecto', 403);
-    }
-  } else if (!proyecto.miembros.some((m) => m.id === req.usuario.id)) {
+  if (!puedeActuarEnTarea(req.usuario, proyecto, 'tareas.crear')) {
     throw new ErrorImportacion('No tienes permiso para importar tareas en este proyecto', 403);
   }
 
@@ -200,8 +196,8 @@ const plantillaExcel = (_req, res) => {
 };
 
 // Carga el proyecto con las tareas que el usuario puede ver, con la misma
-// regla que el listado: el ADMIN ve todas y el MIEMBRO solo las suyas, las
-// sin responsable y las que creo. Devuelve null si no existe o no lo puede ver.
+// regla que el listado ("tareas.ver"): todas, o solo las suyas, las sin
+// responsable y las que creo. Devuelve null si no existe o no lo puede ver.
 const cargarProyectoParaExportar = async (proyectoId, usuario) => {
   const { proyecto: visible, permitido } = await cargarProyectoVisible(prisma, usuario, proyectoId);
   if (!visible) return { status: 404, error: 'Proyecto no encontrado' };
@@ -218,7 +214,7 @@ const cargarProyectoParaExportar = async (proyectoId, usuario) => {
       fechaInicio: true,
       fechaFin: true,
       tareas: {
-        where: esAdmin(usuario) ? undefined : visibilidadTareasPara(usuario.id),
+        where: alcanceDe(usuario, 'tareas.ver') === 'todos' ? undefined : visibilidadTareasPara(usuario.id),
         include: {
           asignado: { select: { id: true, nombre: true, email: true, area: true } },
         },

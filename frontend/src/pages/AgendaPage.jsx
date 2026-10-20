@@ -21,6 +21,8 @@ import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useTextoAgenda } from '../hooks/useTextoAgenda';
 import { areasDeTexto } from '../utils/areas';
+import { cargarGoogleIdentityScript } from '../utils/googleIdentity';
+import { puede } from '../utils/permisos';
 import { rutaCategoria } from '../utils/finanzas';
 import Modal from '../components/Modal';
 import Tooltip from '../components/Tooltip';
@@ -67,32 +69,8 @@ import {
   tituloLimpio,
 } from '../components/agenda/agendaComun';
 
-// ── Google Identity: se carga UNA vez para toda la agenda ────────────────────
-// La ventana de ajustes recibe el estado y las acciones por props; antes tenia
-// su propia copia de este cargador y el script podia insertarse dos veces.
-let googleScriptPromise = null;
-
-const cargarGoogleIdentityScript = () => {
-  if (window.google?.accounts?.oauth2) return Promise.resolve(window.google);
-  if (googleScriptPromise) return googleScriptPromise;
-
-  googleScriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
-    script.async = true;
-    script.defer = true;
-    script.onload = () => resolve(window.google);
-    script.onerror = () => {
-      googleScriptPromise = null;
-      const error = new Error('google-script');
-      error.code = 'google-script';
-      reject(error);
-    };
-    document.head.appendChild(script);
-  });
-
-  return googleScriptPromise;
-};
+// Google Identity se carga UNA vez para toda la aplicacion (utils/googleIdentity.js):
+// la ventana de ajustes recibe el estado y las acciones por props.
 
 // Vistas de la agenda. "Equipo" solo la ven los administradores.
 const VISTAS = [
@@ -100,7 +78,7 @@ const VISTAS = [
   { id: 'SEMANA', clave: 'pag_vistaSemana' },
   { id: 'DIA', clave: 'pag_vistaDia' },
   { id: 'AGENDA', clave: 'pag_vistaAgenda' },
-  { id: 'EQUIPO', clave: 'pag_vistaEquipo', soloAdmin: true },
+  { id: 'EQUIPO', clave: 'pag_vistaEquipo', permiso: 'agenda.equipo' },
 ];
 
 // La vista de lista abarca 30 días desde la fecha elegida.
@@ -326,8 +304,9 @@ const AgendaPage = () => {
   // siete columnas; por debajo se ensena el dia y el selector no la ofrece.
   const [semanaCabe, setSemanaCabe] = useState(() => window.innerWidth >= 768);
   // Si alguien deja de ser admin con la vista de equipo abierta, vuelve al mes.
-  const vistaEfectiva = !semanaCabe && view === 'SEMANA' ? 'DIA' : (view === 'EQUIPO' && !esAdmin ? 'MES' : view);
-  const vistasDisponibles = VISTAS.filter((vista) => (!vista.soloAdmin || esAdmin) && !(!semanaCabe && vista.id === 'SEMANA'));
+  const veEquipo = puede(usuario, 'agenda.equipo');
+  const vistaEfectiva = !semanaCabe && view === 'SEMANA' ? 'DIA' : (view === 'EQUIPO' && !veEquipo ? 'MES' : view);
+  const vistasDisponibles = VISTAS.filter((vista) => (!vista.permiso || puede(usuario, vista.permiso)) && !(!semanaCabe && vista.id === 'SEMANA'));
 
   const [eventos, setEventos] = useState([]);
   const [invitaciones, setInvitaciones] = useState([]);

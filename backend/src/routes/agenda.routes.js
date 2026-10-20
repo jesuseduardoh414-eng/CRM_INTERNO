@@ -6,7 +6,7 @@ const { verificarToken } = require('../middlewares/auth.middleware');
 const { listar: listarAdjuntos, subir: subirAdjunto, eliminar: eliminarAdjunto } = require('../controllers/adjuntos.controller');
 const upload = require('../middlewares/upload.middleware');
 const { requiereModulo } = require('../middlewares/modulos.middleware');
-const { soloAdmin } = require('../middlewares/roles.middleware');
+const { requiere } = require('../middlewares/roles.middleware');
 const equipo = require('../controllers/agendaEquipo.controller');
 
 // Todas las rutas de agenda requieren autenticación
@@ -38,12 +38,12 @@ router.delete('/adjuntos/:id', eliminarAdjunto);
 
 // Calendario de la empresa (todos lo leen; lo editan los administradores)
 router.get('/dias-empresa', equipo.listarDiasEmpresa);
-router.get('/dias-empresa/registros', soloAdmin, equipo.registrosDiasEmpresa);
-router.post('/dias-empresa', soloAdmin, equipo.crearDiaEmpresa);
-router.delete('/dias-empresa/:id', soloAdmin, equipo.eliminarDiaEmpresa);
+router.get('/dias-empresa/registros', requiere('agenda.diasEmpresa'), equipo.registrosDiasEmpresa);
+router.post('/dias-empresa', requiere('agenda.diasEmpresa'), equipo.crearDiaEmpresa);
+router.delete('/dias-empresa/:id', requiere('agenda.diasEmpresa'), equipo.eliminarDiaEmpresa);
 
 // Vista de equipo (administradores) y horarios libres para reuniones
-router.get('/equipo', soloAdmin, requiereModulo('agenda'), equipo.agendaEquipo);
+router.get('/equipo', requiere('agenda.equipo'), requiereModulo('agenda'), equipo.agendaEquipo);
 router.get('/sugerir-horarios', requiereModulo('agenda'), equipo.sugerirHorarios);
 
 // Días especiales (personales)

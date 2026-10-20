@@ -1,7 +1,9 @@
 // Ventana para registrar o editar un gasto. La categoría viene fijada por la
 // pantalla desde la que se abre (se puede cambiar a otra donde se tenga
 // permiso de edición). Al crear se puede adjuntar ya la factura o ticket.
+// Muestra cuánto queda del presupuesto de la categoría en el mes del gasto.
 import { useEffect, useRef, useState } from 'react';
+import useSWR from 'swr';
 import { FileUp, Loader2, Save, X } from 'lucide-react';
 import Modal from '../Modal';
 import { Button } from '../ui/button';
@@ -11,15 +13,16 @@ import { useAuth } from '../../context/AuthContext';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
-import { AvisoError, Campo, PuntoPartida, Seccion } from './piezas';
+import { AvisoError, Campo, Seccion } from './piezas';
+import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
 import {
-  ACEPTA_COMPROBANTE, METODOS_PAGO, MONEDAS, MONEDA_BASE, categoriasEditables, comprobanteMaxBytes, comprobanteMaxMegas,
-  esComprobanteValido, hoyClave,
+  ACEPTA_COMPROBANTE, METODOS_PAGO, MONEDAS, MONEDA_BASE, OPCIONES_SWR_FINANZAS, categoriasCon, comprobanteMaxBytes, comprobanteMaxMegas,
+  esComprobanteValido, hoyClave, nombreMesAnio,
 } from '../../utils/finanzas';
 
 const VACIO = {
   categoria: '', concepto: '', descripcion: '', monto: '', moneda: 'MXN', fecha: '', fechaLimite: '', estado: 'PENDIENTE', pagadoEn: '',
-  metodo: '', referencia: '', partidaId: '', empresaId: '', proveedorNombre: '', cuentaId: '', notas: '',
+  metodo: '', referencia: '', empresaId: '', proveedorNombre: '', cuentaId: '', notas: '',
 };
 
 const desdeGasto = (g) => Object.fromEntries(Object.keys(VACIO).map((k) => {
@@ -32,6 +35,7 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
   const { usuario } = useAuth();
   const { t } = usePreferences();
   const tf = useTextoFinanzas();
+  const { monto, locale } = useFormatoFinanzas();
   const { showToast } = useToast();
   const editando = Boolean(gasto?.id);
   const [form, setForm] = useState(() => (editando ? desdeGasto(gasto) : { ...VACIO, categoria: categoria || '', fecha: hoyClave() }));
@@ -39,7 +43,11 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
   const refError = useRef(null);
-  const categorias = categoriasEditables(usuario);
+  // Registrar pide "crear" en la categoría; al corregir un gasto también vale
+  // "editar" en la categoría destino (igual que el servidor).
+  const categorias = editando
+    ? [...new Set([...categoriasCon(usuario, 'crear'), ...categoriasCon(usuario, 'editar')])]
+    : categoriasCon(usuario, 'crear');
 
   useEffect(() => {
     if (error) refError.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
@@ -80,7 +88,6 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
     setError(null);
     const datos = {
       ...form,
-      partidaId: form.partidaId || null,
       empresaId: form.empresaId || null,
       cuentaId: form.cuentaId || null,
       metodo: form.metodo || null,
@@ -107,10 +114,26 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
     }
   };
 
+  // Presupuesto de la categoría en el mes de la fecha (solo cuenta la moneda base).
+  const [anioGasto, mesGasto] = /^\d{4}-\d{2}-\d{2}$/.test(form.fecha) ? form.fecha.split('-').map(Number) : [null, null];
+  const consultar = Boolean(form.categoria && anioGasto && form.moneda === MONEDA_BASE);
+  const { data: datosPresupuesto } = useSWR(
+    consultar ? ['finanzas-presupuesto-categoria', form.categoria, anioGasto, mesGasto] : null,
+    () => finanzasService.gastos.presupuesto({ categoria: form.categoria, anio: anioGasto, mes: mesGasto }),
+    OPCIONES_SWR_FINANZAS,
+  );
+  const presupuesto = consultar ? datosPresupuesto?.presupuesto : null;
+  // Al editar, el gasto ya cuenta en ese presupuesto si sigue en la misma categoría, mes y moneda.
+  const yaCuenta = editando && gasto.estado !== 'ANULADO' && gasto.moneda === MONEDA_BASE
+    && gasto.categoria === form.categoria && String(gasto.fecha).slice(0, 7) === form.fecha.slice(0, 7);
+  const quedan = presupuesto ? Math.round((presupuesto.remanente + (yaCuenta ? Number(gasto.monto) : 0)) * 100) / 100 : 0;
+  const montoGasto = Number(form.monto) > 0 ? Number(form.monto) : 0;
+  const despues = Math.round((quedan - montoGasto) * 100) / 100;
+  const excede = Boolean(presupuesto?.tienePresupuesto) && montoGasto > 0 && despues < 0;
+  const mesPresupuesto = presupuesto ? nombreMesAnio(presupuesto.anio, presupuesto.mes, locale) : '';
+
   const proveedores = catalogos?.proveedores || [];
-  const partidas = (catalogos?.partidas || []).filter((p) => p.activa || String(p.id) === form.partidaId);
   const cuentas = (catalogos?.cuentas || []).filter((c) => c.activa || String(c.id) === form.cuentaId);
-  const conPartida = Boolean(form.partidaId);
 
   return (
     <Modal
@@ -133,11 +156,8 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
         <AvisoError error={error} refError={refError} />
 
         <Seccion titulo={tf('finSecGasto')}>
-          <Campo id="gasto-categoria" label={tf('finCategoria')} requerido>
+          <Campo id="gasto-categoria" label={tf('finCategoria')} requerido ancho>
             <SelectorSimple id="gasto-categoria" valor={form.categoria} onCambio={elegir('categoria')} opcionVacia={tf('finElegir')} opciones={categorias.map((c) => ({ valor: c, etiqueta: tf(`finCat${c}`) }))} />
-          </Campo>
-          <Campo id="gasto-partida" label={tf('finPartida')} ayuda={partidas.length === 0 ? tf('finSinPartidasAyuda') : tf('finPartidaAyuda')}>
-            <SelectorSimple id="gasto-partida" valor={form.partidaId} onCambio={elegir('partidaId')} opcionVacia={tf('finSinPartida')} opciones={partidas.map((p) => ({ valor: String(p.id), etiqueta: p.nombre }))} />
           </Campo>
           <Campo id="gasto-concepto" label={tf('finConcepto')} requerido ancho>
             <input id="gasto-concepto" name="concepto" className="form-input" value={form.concepto} onChange={cambiar} placeholder={tf('finConceptoGastoPh')} maxLength={255} required autoFocus />
@@ -145,7 +165,7 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
           <Campo id="gasto-monto" label={tf('finMonto')} requerido>
             <input id="gasto-monto" name="monto" type="number" min="0.01" step="0.01" inputMode="decimal" className="form-input" value={form.monto} onChange={cambiar} required />
           </Campo>
-          <Campo id="gasto-moneda" label={tf('finMoneda')} ayuda={conPartida && form.moneda !== MONEDA_BASE ? tf('finPartidaSoloMxn', { moneda: MONEDA_BASE }) : undefined}>
+          <Campo id="gasto-moneda" label={tf('finMoneda')} ayuda={form.moneda !== MONEDA_BASE ? tf('finPresupuestoSoloMoneda', { moneda: MONEDA_BASE }) : undefined}>
             <SelectorSimple id="gasto-moneda" valor={form.moneda} onCambio={elegir('moneda')} opciones={MONEDAS.map((m) => ({ valor: m, etiqueta: m }))} />
           </Campo>
           <Campo id="gasto-fecha" label={tf('finFechaGasto')} requerido ayuda={tf('finFechaGastoAyuda')}>
@@ -158,6 +178,17 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
             <textarea id="gasto-desc" name="descripcion" rows={2} className="form-input" value={form.descripcion} onChange={cambiar} />
           </Campo>
         </Seccion>
+
+        {presupuesto && (
+          <div className={`-mt-2 mb-6 rounded-xl border px-4 py-3 text-[12.5px] ${excede ? 'border-[var(--color-warning)]' : 'border-[var(--color-border)] bg-[var(--color-surface-2)]'}`}>
+            <p className="text-[var(--color-text)]">
+              {presupuesto.tienePresupuesto
+                ? tf('finPresupuestoQuedan', { mes: mesPresupuesto, remanente: monto(quedan), presupuesto: monto(presupuesto.presupuesto) })
+                : tf('finPresupuestoNinguno', { mes: mesPresupuesto })}
+            </p>
+            {excede && <p className="mt-1 font-medium text-[var(--color-warning)]">{tf('finPresupuestoExcede', { monto: monto(-despues) })}</p>}
+          </div>
+        )}
 
         <Seccion titulo={tf('finSecProveedorPago')}>
           {proveedores.length > 0 && (
@@ -191,13 +222,6 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
             <textarea id="gasto-notas" name="notas" rows={2} className="form-input" value={form.notas} onChange={cambiar} />
           </Campo>
         </Seccion>
-
-        {conPartida && (
-          <p className="-mt-3 mb-5 flex items-center gap-2 text-[12.5px] text-[var(--color-text-muted)]">
-            <PuntoPartida color={partidas.find((p) => String(p.id) === form.partidaId)?.color} />
-            {tf('finPartidaDescuenta', { partida: partidas.find((p) => String(p.id) === form.partidaId)?.nombre || '' })}
-          </p>
-        )}
 
         {!editando && (
           <Seccion titulo={tf('finCompAdjuntarAhora')}>

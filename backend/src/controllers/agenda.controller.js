@@ -10,7 +10,8 @@ const {
 } = require('../services/google-calendar.service');
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
-const { esAdmin, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { cargarProyectoVisible } = require('../utils/permissions.utils');
+const { puede } = require('../utils/permisosArea.utils');
 const { borrarBlobs } = require('../utils/blob.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { categoriasVisibles } = require('../utils/finanzas.utils');
@@ -520,11 +521,11 @@ async function crearNotificacionesInvitados(eventoId, creadorId, invitadosIds, t
 }
 
 // ── POST /api/agenda ─────────────────────────────────────────────────────────
-// Reunión con un cliente (aparece en su portal). Solo administradores y solo
-// empresas que sean clientes. Devuelve { empresaId } o { error, status }.
+// Reunión con un cliente (aparece en su portal). Solo quien ve el directorio
+// de clientes ("clientes.ver") y solo empresas que sean clientes. Devuelve { empresaId } o { error, status }.
 const resolverEmpresaEvento = async (usuario, valor) => {
   if (valor === null || valor === '') return { empresaId: null };
-  if (!esAdmin(usuario)) return { error: 'Solo un administrador puede ligar una reunión a un cliente', status: 403 };
+  if (!puede(usuario, 'clientes.ver')) return { error: 'No tienes permiso para ligar una reunión a un cliente', status: 403 };
   const id = Number.parseInt(valor, 10);
   if (!Number.isInteger(id) || id <= 0) return { error: 'Cliente no válido', status: 400 };
   const empresa = await prisma.empresa.findUnique({ where: { id }, select: { id: true, tipo: true } });
@@ -598,8 +599,8 @@ const crear = async (req, res) => {
       empresaId = resultado.empresaId;
     }
 
-    // Solo un ADMIN puede publicar un evento para todo el equipo
-    const esGlobal = esAdmin(req.usuario) ? !!es_global : false;
+    // Publicar un evento para todo el equipo pide "agenda.eventosEmpresa"
+    const esGlobal = puede(req.usuario, 'agenda.eventosEmpresa') ? !!es_global : false;
     const esCompartido = !!es_compartido;
     const todoElDia = tipo === 'dia_completo' ? true : todo_el_dia === true;
 
@@ -786,8 +787,8 @@ const editar = async (req, res) => {
       empresaIdFinal = resultado.empresaId;
     }
 
-    // Solo un ADMIN puede marcar un evento como global
-    const esGlobalFinal = esAdmin(req.usuario)
+    // Marcar un evento como global pide "agenda.eventosEmpresa"
+    const esGlobalFinal = puede(req.usuario, 'agenda.eventosEmpresa')
       ? (es_global !== undefined ? !!es_global : existente.esGlobal)
       : false;
     const esCompartidoFinal = es_compartido !== undefined ? !!es_compartido : existente.esCompartido;
@@ -1118,7 +1119,8 @@ const consultarDisponibilidad = async (req, res) => {
     ];
 
     // Privacidad: de los demas solo se devuelve el bloque ocupado, sin titulo
-    const solicitanteEsAdmin = esAdmin(req.usuario);
+    // (salvo a quien ve la agenda del equipo)
+    const solicitanteEsAdmin = puede(req.usuario, 'agenda.equipo');
     const ocultarDetalle = (conflicto) => (
       solicitanteEsAdmin || conflicto.usuarioId === req.usuario.id
         ? conflicto

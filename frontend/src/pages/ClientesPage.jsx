@@ -8,6 +8,7 @@ import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from '
 import { Building2, ChevronLeft, ChevronRight, Plus, RefreshCcw, Search, X } from 'lucide-react';
 import { empresasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { ListSkeleton } from '../components/Skeleton';
@@ -91,7 +92,9 @@ const ClientesPage = () => {
   const setPagina = (fn) => actualizarFiltros({ pagina: typeof fn === 'function' ? fn(pagina) : fn });
 
   const [formulario, setFormulario] = useState(null); // clave de apertura
-  const esAdmin = usuario?.rol === 'ADMIN';
+  // Sección Clientes: ver / crear / editar / eliminar (utils/permisos.js).
+  const esAdmin = puede(usuario, 'clientes.ver');
+  const puedeCrear = puede(usuario, 'clientes.crear');
 
   const { data, error, isLoading, mutate } = useSWR(
     esAdmin ? ['empresas', qUrl, tipo, estado, pagina] : null,
@@ -145,9 +148,11 @@ const ClientesPage = () => {
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{tc('cliTitulo')}</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">{tc('cliSubtitulo')}</p>
         </div>
-        <Button className="w-full md:w-auto" onClick={() => setFormulario(Date.now())}>
-          <Plus size={16} /> {tc('cliNueva')}
-        </Button>
+        {puedeCrear && (
+          <Button className="w-full md:w-auto" onClick={() => setFormulario(Date.now())}>
+            <Plus size={16} /> {tc('cliNueva')}
+          </Button>
+        )}
       </div>
 
       <dl className="cli-cifras mb-6">
@@ -226,7 +231,7 @@ const ClientesPage = () => {
             <div className="mt-3">
               {hayFiltros
                 ? <Button variant="outline" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
-                : <Button onClick={() => setFormulario(Date.now())}><Plus size={16} /> {tc('cliNueva')}</Button>}
+                : puedeCrear && <Button onClick={() => setFormulario(Date.now())}><Plus size={16} /> {tc('cliNueva')}</Button>}
             </div>
           </div>
         )}

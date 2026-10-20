@@ -4,6 +4,7 @@ import useSWR from 'swr';
 import { Link } from 'react-router-dom';
 import { ArrowUpRight, Building2, Eye, FileText, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { puede } from '../../utils/permisos';
 import { useToast } from '../../context/ToastContext';
 import { useTextoPortal } from '../../hooks/useTextoPortal';
 import { portalEquipoService } from '../../services/api';
@@ -87,7 +88,7 @@ const PanelClienteProyecto = ({ proyectoId }) => {
               <span className="block text-[12px] text-[var(--color-text-muted)]">{tp('ptlCompartirAyuda')}</span>
             </span>
           </div>
-          {usuario?.rol === 'ADMIN' && (
+          {puede(usuario, 'clientes.editar') && (
             <Link to={`/clientes/${cliente.id}`} className="ptl-fila">
               <span className="ptl-icono"><Building2 size={16} aria-hidden="true" /></span>
               <span className="min-w-0 flex-1 text-[13px] font-medium">{tp('ptlGestionarAccesos')}</span>

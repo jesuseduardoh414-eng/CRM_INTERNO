@@ -1,11 +1,11 @@
-// Bloques del panel de configuración para áreas, reglas de tareas, permisos de
-// los miembros, módulos y servidor de correo (SMTP). Editan el borrador de la
+// Bloques del panel de configuración para áreas, reglas de tareas, permisos
+// por área, módulos y servidor de correo (SMTP). Editan el borrador de la
 // página con `cambiar` / `onChange`; nada se guarda hasta pulsar Guardar,
 // salvo "Probar conexión", que solo consulta al servidor.
 import { useState } from 'react';
 import {
-  Building2, CalendarDays, CalendarSync, Check, CircleDot, ClipboardList, Download, Eye, EyeOff, FileSignature, FileSpreadsheet,
-  FolderPlus, LayoutTemplate, Loader2, MessageSquare, Minus, Paperclip, Pencil, PlugZap, Plus, Server, ShieldCheck, Trash2, TriangleAlert, Upload, Wallet,
+  BookOpen, Building2, CalendarDays, CalendarSync, Check, CircleDot, ClipboardList, Download, Eye, EyeOff, FileSignature, FileSpreadsheet,
+  LayoutTemplate, Loader2, MessageSquare, Minus, Paperclip, PlugZap, Plus, Server, ShieldCheck, Trash2, TriangleAlert, Wallet,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
 import SelectorSimple from '../SelectorSimple';
@@ -13,6 +13,7 @@ import { usePreferences } from '../../context/PreferencesContext';
 import { AREA_GENERAL, CLAVE_TRADUCCION_AREA, nombreDesdeClave } from '../../utils/areas';
 import { Campo, Fila, Interruptor } from './PiezasConfiguracion';
 import { CampoNumero, OpcionesTarjeta } from './SeccionesSistema';
+import PermisosPorArea from './PermisosPorArea';
 
 const MAX_AREAS = 20;
 const COLORES_AREA = ['#2563eb', '#f59e0b', '#8b5cf6', '#db2777', '#0d9488', '#ea580c', '#0891b2', '#65a30d', '#dc2626', '#4f46e5', '#ca8a04', '#64748b'];
@@ -143,23 +144,11 @@ export const ReglasTareas = ({ tareas, operacion, cambiar }) => {
 
 // ── Roles y permisos ─────────────────────────────────────────────────────
 
-const PERMISOS = [
-  { grupo: 'permGroupProjects', filas: [
-    { clave: 'crearProyectos', icono: FolderPlus },
-    { clave: 'verTodosProyectos', icono: Eye },
-    { clave: 'guardarPlantillas', icono: LayoutTemplate },
-  ] },
-  { grupo: 'permGroupTasks', filas: [
-    { clave: 'crearTareas', icono: Plus },
-    { clave: 'editarTareas', icono: Pencil },
-    { clave: 'borrarTareas', icono: Trash2 },
-  ] },
-  { grupo: 'permGroupFiles', filas: [
-    { clave: 'subirAdjuntos', icono: Upload },
-  ] },
-];
-
-export const SeccionPermisos = ({ permisos, cambiar }) => {
+/**
+ * Sección Permisos: los tres niveles y, debajo, la tabla por área
+ * (PermisosPorArea). `catalogo` y `defectos` vienen de GET /configuracion.
+ */
+export const SeccionPermisos = ({ areas, permisosAreas, onCambio, catalogo, defectos }) => {
   const { t } = usePreferences();
   return (
     <>
@@ -173,50 +162,8 @@ export const SeccionPermisos = ({ permisos, cambiar }) => {
           ))}
         </div>
       </Fila>
-      <Fila titulo={t('permTitle')} descripcion={t('permHint')}>
-        <div className="overflow-hidden rounded-[8px] border border-[var(--cfg-linea-fuerte)]">
-          <table className="cfg-tabla-permisos w-full text-left">
-            <thead>
-              <tr>
-                <th scope="col">{t('permAction')}</th>
-                {/* En el teléfono no cabe: el administrador siempre puede todo */}
-                <th scope="col" className="hidden w-28 text-center sm:table-cell">{t('permAdmin')}</th>
-                <th scope="col" className="w-24 text-center sm:w-28">{t('permMember')}</th>
-              </tr>
-            </thead>
-            {PERMISOS.map(({ grupo, filas }) => (
-              <tbody key={grupo}>
-                <tr className="cfg-tabla-grupo"><th colSpan={3} scope="colgroup">{t(grupo)}</th></tr>
-                {filas.map(({ clave, icono: Icono }) => (
-                  <tr key={clave}>
-                    <th scope="row">
-                      <span className="flex items-start gap-2.5">
-                        <Icono size={15} className="mt-0.5 shrink-0 text-[var(--color-text-muted)]" />
-                        <span>
-                          <span className="block text-[13.5px] font-medium text-[var(--color-text)]">{t(`perm_${clave}`)}</span>
-                          <span className="block text-[12px] font-normal leading-snug text-[var(--color-text-dim)]">{t(`perm_${clave}Hint`)}</span>
-                        </span>
-                      </span>
-                    </th>
-                    <td className="hidden text-center sm:table-cell"><Check size={16} className="mx-auto text-[var(--color-success)]" aria-label={t('permAlways')} /></td>
-                    <td className="text-center">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={permisos[clave]}
-                        aria-label={`${t(`perm_${clave}`)} · ${t('permMember')}`}
-                        onClick={() => cambiar('permisos', clave, !permisos[clave])}
-                        className="cfg-switch mx-auto"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            ))}
-          </table>
-        </div>
-        <p className="cfg-ayuda">{t('permFootnote')}</p>
-      </Fila>
+      <PermisosPorArea areas={areas} valor={permisosAreas} onCambio={onCambio} catalogo={catalogo} defectos={defectos} />
+      <p className="cfg-ayuda px-1">{t('permFootnote')}</p>
     </>
   );
 };
@@ -225,7 +172,7 @@ export const SeccionPermisos = ({ permisos, cambiar }) => {
 
 const MODULOS = [
   // El portal de clientes se retiró (2026-10-12): el CRM es solo de uso interno.
-  { grupo: 'modGroupSections', filas: [['agenda', CalendarDays], ['contratos', FileSignature], ['clientes', Building2], ['finanzas', Wallet]] },
+  { grupo: 'modGroupSections', filas: [['agenda', CalendarDays], ['contratos', FileSignature], ['clientes', Building2], ['finanzas', Wallet], ['conocimiento', BookOpen]] },
   { grupo: 'modGroupProjects', filas: [['plantillas', LayoutTemplate], ['importar', FileSpreadsheet], ['comentarios', MessageSquare], ['adjuntos', Paperclip]] },
   { grupo: 'modGroupIntegrations', filas: [['googleCalendar', CalendarSync], ['reporteDiario', Download]] },
 ];

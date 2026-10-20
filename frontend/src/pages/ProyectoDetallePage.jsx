@@ -32,6 +32,7 @@ import { useConfirmacion } from '../components/ConfirmDialog';
 import { sortTareas, sortTareasLista } from '../utils/sorters';
 import { getEstadoProyecto, estaListoParaRevision } from '../utils/estadosProyecto';
 import { areasDeTexto } from '../utils/areas';
+import { alcanzaProyecto, puede, puedeEnTareas } from '../utils/permisos';
 import {
   ESTADOS_TAREA,
   PRIORIDADES_TAREA,
@@ -404,13 +405,12 @@ const ProyectoDetallePage = () => {
   const { confirmar, dialogo: dialogoConfirmacion } = useConfirmacion();
   // Modulos y permisos de la instalacion: lo que el backend rechazaria
   // (403/404) no se ofrece.
-  const { moduloActivo, puede, reglasTareas, colorArea, nombreArea } = useConfiguracion();
-  const puedeCrearTareas = puede(usuario, 'crearTareas');
-  const puedeEditarTareas = puede(usuario, 'editarTareas');
-  const puedeBorrarTareas = puede(usuario, 'borrarTareas');
+  const { moduloActivo, reglasTareas, colorArea, nombreArea } = useConfiguracion();
+  // Borrar en lote solo se ofrece a quien tiene algun alcance para borrar.
+  const puedeBorrarTareas = puede(usuario, 'tareas.eliminar');
   const adjuntosActivos = moduloActivo('adjuntos');
   const portalActivo = moduloActivo('clientes') && moduloActivo('portalClientes');
-  const puedeSubirAdjuntos = adjuntosActivos && puede(usuario, 'subirAdjuntos');
+  const puedeSubirAdjuntos = adjuntosActivos && puede(usuario, 'tareas.adjuntos');
   const diasPorVencer = reglasTareas.diasPorVencer;
 
   const [proyecto, setProyecto] = useState(null);
@@ -622,26 +622,27 @@ const ProyectoDetallePage = () => {
     paginaLista * TAREAS_POR_PAGINA,
   );
 
-  // Replica de la regla del backend: admin del proyecto, creador o responsable,
-  // y ademas el permiso de editar (o borrar) tareas de la configuracion.
+  // Replica de la regla del backend: el alcance de "tareas.editar" o
+  // "tareas.eliminar" de la persona sobre esta tarea.
   const puedeGestionar = useCallback(
-    (tarea) => puedeEditarTareas && puedeGestionarTarea(tarea, usuario, proyecto),
-    [usuario, proyecto, puedeEditarTareas],
+    (tarea) => puedeGestionarTarea(tarea, usuario, proyecto, 'tareas.editar'),
+    [usuario, proyecto],
   );
   const puedeBorrar = useCallback(
-    (tarea) => puedeBorrarTareas && puedeGestionarTarea(tarea, usuario, proyecto),
-    [usuario, proyecto, puedeBorrarTareas],
+    (tarea) => puedeGestionarTarea(tarea, usuario, proyecto, 'tareas.eliminar'),
+    [usuario, proyecto],
   );
 
-  // Guardar como plantilla: admin, o miembro con permiso que crea o participa
-  // en el proyecto (misma regla que el backend).
+  // Guardar como plantilla: permiso "proyectos.plantillas" y poder editar el
+  // proyecto, haberlo creado o ser miembro (misma regla que el backend).
   const esParteDelProyecto = Boolean(usuario?.id) && (
     (proyecto?.creadorId ?? proyecto?.creador?.id) === usuario.id
     || (proyecto?.miembros || []).some((m) => m.id === usuario.id)
   );
-  const puedeGuardarPlantilla = moduloActivo('plantillas') && (
-    usuario?.rol === 'ADMIN' || (puede(usuario, 'guardarPlantillas') && esParteDelProyecto)
-  );
+  const puedeEditarProyecto = alcanzaProyecto(usuario, proyecto, 'proyectos.editar');
+  const puedeGuardarPlantilla = moduloActivo('plantillas') && puede(usuario, 'proyectos.plantillas')
+    && (puedeEditarProyecto || esParteDelProyecto);
+  const puedeCrearTareas = puedeEnTareas(usuario, proyecto, 'tareas.crear');
   const puedeImportar = moduloActivo('importar') && puedeCrearTareas;
   const mostrarDocsProyecto = vista === 'lista' && adjuntosActivos;
 
@@ -887,9 +888,9 @@ const ProyectoDetallePage = () => {
     );
   }
 
-  const esAdmin = usuario?.rol === 'ADMIN';
+  const veClientes = puede(usuario, 'clientes.ver');
   const areasProyecto = areasDeTexto(proyecto?.area);
-  // El cliente solo se enlaza con el directorio activo; la ficha es de admin.
+  // El cliente solo se enlaza con el directorio activo; la ficha, a quien ve clientes.
   const clienteProyecto = moduloActivo('clientes') ? proyecto?.cliente : null;
   const fechaInicioProyecto = formatFechaLarga(proyecto?.fechaInicio);
   const fechaFinProyecto = formatFechaLarga(proyecto?.fechaFin);
@@ -923,7 +924,7 @@ const ProyectoDetallePage = () => {
               </span>
             )}
             {clienteProyecto && (
-              esAdmin ? (
+              veClientes ? (
                 <Link to={`/clientes/${clienteProyecto.id}`} className="det-meta det-meta-enlace" title={tx('det_cliente')}>
                   <Building2 size={13} aria-hidden="true" /> <span className="truncate">{clienteProyecto.nombre}</span>
                 </Link>
@@ -974,18 +975,18 @@ const ProyectoDetallePage = () => {
               { label: t('projectExport'), icon: <ArrowUpFromLine size={15} />, onSelect: () => setModalExportar(true) },
               puedeGuardarPlantilla && { separator: true },
               puedeGuardarPlantilla && { label: t('projectSaveTemplate'), icon: <Save size={15} />, onSelect: () => setModalPlantilla(true) },
-              esAdmin && { separator: true },
-              esAdmin && estadoProyecto.value !== 'TERMINADO' && estadoProyecto.value !== 'ARCHIVADO' && {
+              puedeEditarProyecto && { separator: true },
+              puedeEditarProyecto && estadoProyecto.value !== 'TERMINADO' && estadoProyecto.value !== 'ARCHIVADO' && {
                 label: t('projectMarkFinished'),
                 icon: <BadgeCheck size={15} />,
                 onSelect: () => handleCambiarEstadoProyecto('TERMINADO'),
               },
-              esAdmin && estadoProyecto.value !== 'ACTIVO' && {
+              puedeEditarProyecto && estadoProyecto.value !== 'ACTIVO' && {
                 label: t('projectReactivate'),
                 icon: <RotateCcw size={15} />,
                 onSelect: () => handleCambiarEstadoProyecto('ACTIVO'),
               },
-              esAdmin && (estadoProyecto.value === 'ARCHIVADO'
+              puedeEditarProyecto && (estadoProyecto.value === 'ARCHIVADO'
                 ? { label: t('projectUnarchive'), icon: <ArchiveRestore size={15} />, onSelect: () => handleCambiarEstadoProyecto('ACTIVO') }
                 : { label: t('projectArchive'), icon: <Archive size={15} />, onSelect: () => handleCambiarEstadoProyecto('ARCHIVADO') }),
             ]}
@@ -1283,7 +1284,7 @@ const ProyectoDetallePage = () => {
             ayuda={t('projectDocsHint')}
             uploadLabel={t('projectAddFiles')}
             showUploader={puedeSubirAdjuntos}
-            compartirCliente={portalActivo && esAdmin && Boolean(clienteProyecto)}
+            compartirCliente={portalActivo && puede(usuario, 'clientes.editar') && Boolean(clienteProyecto)}
           />
         </aside>
         )}

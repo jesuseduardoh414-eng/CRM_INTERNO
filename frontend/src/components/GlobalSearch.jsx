@@ -30,6 +30,7 @@ import { useDebounce } from '../utils/useDebounce';
 import { getEstadoProyecto } from '../utils/estadosProyecto';
 import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
 import { puedeVerFinanzas, tieneAccesoGastos } from '../utils/finanzas';
+import { puede } from '../utils/permisos';
 
 // Con una letra la busqueda devuelve medio catalogo; con dos ya discrimina.
 const MIN_CARACTERES = 2;
@@ -39,8 +40,8 @@ const ATAJOS = [
   { to: '/dashboard', labelKey: 'home', Icon: LayoutDashboard },
   { to: '/proyectos', labelKey: 'projects', Icon: FolderKanban },
   { to: '/agenda', labelKey: 'agenda', Icon: Calendar, modulo: 'agenda' },
-  { to: '/usuarios', labelKey: 'users', Icon: ShieldCheck, soloAdmin: true },
-  // Finanzas: salen solo con permiso (usuario.finanzas) y el módulo activo.
+  { to: '/usuarios', labelKey: 'users', Icon: ShieldCheck, permiso: 'usuarios.ver' },
+  // Finanzas: salen solo con permiso (usuario.permisos) y el módulo activo.
   { to: '/ventas', tfKey: 'finVentasTitulo', Icon: Receipt, modulo: 'finanzas', finanzas: 'ventas' },
   { to: '/tesoreria', tfKey: 'finTesoreriaTitulo', Icon: PiggyBank, modulo: 'finanzas', finanzas: 'tesoreria' },
   { to: '/gastos', tfKey: 'finGastosTitulo', Icon: ReceiptText, modulo: 'finanzas', finanzas: 'gastos' },
@@ -64,7 +65,8 @@ const GlobalSearch = ({ open, onClose }) => {
   const navigate = useNavigate();
   const [texto, setTexto] = useState('');
   const termino = useDebounce(texto.trim(), 250);
-  const esAdmin = usuario?.rol === 'ADMIN';
+  // Personas: solo para quien gestiona usuarios ("usuarios.ver").
+  const esAdmin = puede(usuario, 'usuarios.ver');
 
   // La busqueda de personas solo para el admin: la pantalla a la que lleva
   // (Usuarios) es suya. La API responde a cualquiera, pero un miembro no tendria
@@ -122,7 +124,7 @@ const GlobalSearch = ({ open, onClose }) => {
         <CommandList className="max-h-[min(60dvh,420px)] overscroll-contain p-2">
           {!buscando && (
             <CommandGroup heading={t('searchGoTo')}>
-              {ATAJOS.filter((atajo) => (!atajo.soloAdmin || esAdmin)
+              {ATAJOS.filter((atajo) => (!atajo.permiso || puede(usuario, atajo.permiso))
                 && (!atajo.modulo || moduloActivo(atajo.modulo))
                 && (!atajo.finanzas || (atajo.finanzas === 'gastos' ? tieneAccesoGastos(usuario) : puedeVerFinanzas(usuario, atajo.finanzas)))).map(({ to, labelKey, tfKey, Icon }) => (
                 <CommandItem key={to} value={`ir-${to}`} onSelect={() => ir(to)} className="cursor-pointer rounded-lg py-2.5">

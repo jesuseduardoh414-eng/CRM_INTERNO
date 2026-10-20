@@ -94,10 +94,21 @@ model Usuario {
   // sin acceso. El administrador global siempre puede todo (no se consulta).
   // Validado en utils/finanzas.utils.js.
   permisosFinanzas         Json?                   @map("permisos_finanzas")
+  // Ajustes de permisos de esta persona sobre los de su area y rol
+  // ({ "clientes.ver": true, "proyectos.ver": "todos", ... }, solo lo que
+  // cambia; utils/permisosArea.utils.js). null = igual que su area. Mientras
+  // sea null, sus permisos_finanzas anteriores cuentan como ajustes.
+  permisos                 Json?
   pagosRegistrados         Pago[]                  @relation("CreadorPago")
   gastosRegistrados        Gasto[]                 @relation("CreadorGasto")
   asignacionesHechas       AsignacionPartida[]     @relation("CreadorAsignacion")
+  presupuestosFijados      PresupuestoCategoria[]  @relation("FijaPresupuesto")
   comprobantesSubidos      ComprobanteFinanciero[] @relation("SubeComprobante")
+  cotizacionesRegistradas  Cotizacion[]            @relation("CreadorCotizacion")
+  versionesCotizacion      VersionCotizacion[]     @relation("SubeVersionCotizacion")
+  articulosEscritos        ArticuloConocimiento[]  @relation("AutorArticulo")
+  articulosEditados        ArticuloConocimiento[]  @relation("EditorArticulo")
+  archivosConocimiento     ArchivoConocimiento[]   @relation("SubeArchivoConocimiento")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -221,6 +232,7 @@ model Empresa {
   reuniones       Evento[]
   pagos           Pago[] // como cliente que paga
   gastos          Gasto[] // como proveedor al que se le paga
+  cotizaciones    Cotizacion[] // proveedor que cotiza o cliente al que se cotiza
 
   @@index([tipo])
   @@index([nombre])
@@ -622,6 +634,28 @@ model AvisoEnviado {
   @@map("avisos_enviados")
 }
 
+// Conexion con Google Drive (una sola fila, id = 1): la cuenta de Google en
+// cuyo Drive se guardan los archivos del CRM y los respaldos diarios de la
+// base (services/drive.service.js). El permiso es "drive.file": el CRM solo ve
+// los archivos que el mismo crea. Va aparte de la configuracion para que
+// "restablecer" el panel nunca corte el acceso a los archivos.
+model ConexionDrive {
+  id                  Int       @id @default(1)
+  cuenta              String    @db.VarChar(191)
+  refreshTokenCifrado String    @map("refresh_token_cifrado") @db.Text
+  carpetaId           String?   @map("carpeta_id") @db.VarChar(100)
+  // ok | revocada (Google retiro el permiso: hay que volver a conectar)
+  estado              String    @default("ok") @db.VarChar(20)
+  ultimoError         String?   @map("ultimo_error") @db.VarChar(500)
+  ultimoRespaldoEn    DateTime? @map("ultimo_respaldo_en")
+  ultimoRespaldoBytes Int?      @map("ultimo_respaldo_bytes")
+  conectadoPorId      Int?      @map("conectado_por_id")
+  conectadoEn         DateTime  @default(now()) @map("conectado_en")
+  actualizadoEn       DateTime  @updatedAt @map("actualizado_en")
+
+  @@map("conexion_drive")
+}
+
 // ---------------------------------------------------------------------------
 // Finanzas: Ventas (pagos recibidos), Tesoreria (partidas) y Gastos.
 // Los montos son Decimal(14,2); los importes se suman en la base o con
@@ -646,8 +680,31 @@ model CuentaFinanciera {
   @@map("cuentas_financieras")
 }
 
-// Partida de tesoreria: "sobre" al que se aparta dinero de la bolsa de
-// ingresos (Marketing, Caja chica, Ahorro, Inversion...). Se crean libremente.
+// Presupuesto mensual de una categoria de gastos, fijado en Tesoreria (uno
+// por categoria y mes). Sale de la bolsa de ingresos: mientras el mes esta
+// abierto aparta el monto (o lo gastado, si ya se paso); al cerrar el mes solo
+// cuenta lo gastado y el remanente vuelve a la bolsa. Calculo en
+// services/presupuestos.service.js.
+model PresupuestoCategoria {
+  id            Int      @id @default(autoincrement())
+  categoria     String   @db.VarChar(30)
+  anio          Int
+  mes           Int // 1-12
+  monto         Decimal  @db.Decimal(14, 2)
+  fijadoPorId   Int?     @map("fijado_por_id")
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  actualizadoEn DateTime @updatedAt @map("actualizado_en")
+  fijadoPor     Usuario? @relation("FijaPresupuesto", fields: [fijadoPorId], references: [id], onDelete: SetNull)
+
+  @@unique([categoria, anio, mes])
+  @@index([anio, mes])
+  @@map("presupuestos_categoria")
+}
+
+// Partida de tesoreria: "sobre" al que se apartaba dinero de la bolsa
+// (Marketing, Caja chica, Ahorro...). Desde el 2026-10-14 los presupuestos
+// son por categoria (PresupuestoCategoria): las partidas quedaron archivadas
+// y solo se conservan como historial (gastos viejos y vista del informe).
 model Partida {
   id           Int                 @id @default(autoincrement())
   nombre       String              @db.VarChar(80)
@@ -786,7 +843,7 @@ model ComprobanteFinanciero {
 // nombre por si la cuenta se desactiva o cambia.
 model LogFinanzas {
   id            Int      @id @default(autoincrement())
-  entidad       String   @db.VarChar(20) // pago | gasto | partida | asignacion | cuenta (los comprobantes se anotan en su pago o gasto)
+  entidad       String   @db.VarChar(20) // pago | gasto | presupuesto | cotizacion | cuenta | partida | asignacion (los comprobantes se anotan en su pago o gasto)
   entidadId     Int      @map("entidad_id")
   accion        String   @db.VarChar(30)
   descripcion   String   @db.Text
@@ -797,4 +854,99 @@ model LogFinanzas {
   @@index([entidad, entidadId])
   @@index([creadoEn])
   @@map("logs_finanzas")
+}
+
+// Cotizacion (finanzas): recibida de un proveedor o enviada a un cliente. Sus
+// archivos son versiones que nunca se reemplazan ni se borran (la 1 es la
+// original); los cambios se suben como versiones nuevas. Solo el
+// administrador global corrige los datos, cambia el estado o la elimina
+// completa. `contraparteNombre` guarda el nombre tal como estaba al registrar.
+model Cotizacion {
+  id                Int                 @id @default(autoincrement())
+  folio             String              @unique @db.VarChar(40) // COT-2026-0001
+  tipo              String              @db.VarChar(20) // RECIBIDA (de un proveedor) | ENVIADA (a un cliente)
+  titulo            String              @db.VarChar(255)
+  descripcion       String?             @db.Text
+  empresaId         Int?                @map("empresa_id")
+  contraparteNombre String?             @map("contraparte_nombre") @db.VarChar(255)
+  moneda            String              @default("MXN") @db.VarChar(3)
+  fecha             DateTime            @db.Date
+  estado            String              @default("PENDIENTE") @db.VarChar(20) // PENDIENTE | APROBADA | RECHAZADA
+  creadoPorId       Int?                @map("creado_por_id")
+  creadoEn          DateTime            @default(now()) @map("creado_en")
+  actualizadoEn     DateTime            @updatedAt @map("actualizado_en")
+  empresa           Empresa?            @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  creadoPor         Usuario?            @relation("CreadorCotizacion", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  versiones         VersionCotizacion[]
+
+  @@index([tipo])
+  @@index([estado])
+  @@index([fecha])
+  @@index([empresaId])
+  @@map("cotizaciones")
+}
+
+// Un archivo de una cotizacion, con el monto de esa version (para ver cuanto
+// cambio) y la nota de que cambio. En disco (COTIZACIONES_DIR), no se edita.
+model VersionCotizacion {
+  id             Int        @id @default(autoincrement())
+  cotizacionId   Int        @map("cotizacion_id")
+  numero         Int // 1 = la original
+  monto          Decimal?   @db.Decimal(14, 2)
+  nota           String?    @db.Text
+  nombreOriginal String     @map("nombre_original") @db.VarChar(255)
+  archivo        String     @unique @db.VarChar(80)
+  mime           String     @db.VarChar(100)
+  tamano         Int
+  sha256         String     @db.VarChar(64)
+  subidoPorId    Int?       @map("subido_por_id")
+  creadoEn       DateTime   @default(now()) @map("creado_en")
+  cotizacion     Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  subidoPor      Usuario?   @relation("SubeVersionCotizacion", fields: [subidoPorId], references: [id], onDelete: SetNull)
+
+  @@unique([cotizacionId, numero])
+  @@map("versiones_cotizacion")
+}
+
+// Articulo de la base de conocimiento (procedimientos, guias, preguntas
+// frecuentes). Lo escriben los administradores y lo lee todo el equipo; un
+// borrador (publicado = false) solo lo ven los administradores. `contenido`
+// es texto con formato basico tipo Markdown que el frontend pinta sin HTML.
+model ArticuloConocimiento {
+  id            Int                   @id @default(autoincrement())
+  titulo        String                @db.VarChar(200)
+  categoria     String                @db.VarChar(80)
+  resumen       String?               @db.VarChar(300)
+  contenido     String                @db.Text
+  publicado     Boolean               @default(true)
+  fijado        Boolean               @default(false)
+  autorId       Int?                  @map("autor_id")
+  editadoPorId  Int?                  @map("editado_por_id")
+  creadoEn      DateTime              @default(now()) @map("creado_en")
+  actualizadoEn DateTime              @updatedAt @map("actualizado_en")
+  autor         Usuario?              @relation("AutorArticulo", fields: [autorId], references: [id], onDelete: SetNull)
+  editadoPor    Usuario?              @relation("EditorArticulo", fields: [editadoPorId], references: [id], onDelete: SetNull)
+  archivos      ArchivoConocimiento[]
+
+  @@index([categoria])
+  @@map("articulos_conocimiento")
+}
+
+// Archivo adjunto de un articulo (manual, formato, politica). En disco
+// (CONOCIMIENTO_DIR) y solo se sirve a quien puede ver el articulo.
+model ArchivoConocimiento {
+  id             String               @id @default(uuid()) @db.VarChar(36)
+  articuloId     Int                  @map("articulo_id")
+  nombreOriginal String               @map("nombre_original") @db.VarChar(255)
+  archivo        String               @unique @db.VarChar(80)
+  mime           String               @db.VarChar(100)
+  tamano         Int
+  sha256         String               @db.VarChar(64)
+  subidoPorId    Int?                 @map("subido_por_id")
+  creadoEn       DateTime             @default(now()) @map("creado_en")
+  articulo       ArticuloConocimiento @relation(fields: [articuloId], references: [id], onDelete: Cascade)
+  subidoPor      Usuario?             @relation("SubeArchivoConocimiento", fields: [subidoPorId], references: [id], onDelete: SetNull)
+
+  @@index([articuloId])
+  @@map("archivos_conocimiento")
 }

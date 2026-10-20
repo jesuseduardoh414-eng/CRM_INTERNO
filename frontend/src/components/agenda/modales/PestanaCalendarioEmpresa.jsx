@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { usePreferences } from '../../../context/PreferencesContext';
 import { useConfiguracion } from '../../../context/ConfiguracionContext';
 import { useTextoAgenda } from '../../../hooks/useTextoAgenda';
-import { AREA_GENERAL } from '../../../utils/areas';
+import { alcanceDe, puede } from '../../../utils/permisos';
 import { claveDiaLocal, fechaDesdeClave } from '../../../utils/fechasLocales';
 import SelectorRangoFechas from '../../SelectorRangoFechas';
 import Tooltip from '../../Tooltip';
@@ -47,8 +47,10 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
   const tx = useTextoAgenda();
   const { usuario } = useAuth();
   const { areas, nombreArea } = useConfiguracion();
-  const esAdmin = usuario?.rol === 'ADMIN';
-  const esAdminDeArea = esAdmin && usuario?.area && usuario.area !== AREA_GENERAL;
+  // "agenda.diasEmpresa": con alcance "area" solo se marcan días de la propia
+  // área; con "todos", de la empresa o de cualquier área.
+  const esAdmin = puede(usuario, 'agenda.diasEmpresa');
+  const esAdminDeArea = esAdmin && Boolean(usuario?.area) && alcanceDe(usuario, 'agenda.diasEmpresa') !== 'todos';
 
   const [registros, setRegistros] = useState([]);
   const [proximos, setProximos] = useState([]);

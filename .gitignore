@@ -20,3 +20,8 @@ tareas_generadas.json
 *.local
 dist/
 respaldos/
+# Zips para subir al cPanel (backend/scripts/empaquetar_cpanel.js)
+paquete_cpanel/
+# Material del cliente (el repo es público): logos originales y la carta
+/LOGOD/
+/*.pdf

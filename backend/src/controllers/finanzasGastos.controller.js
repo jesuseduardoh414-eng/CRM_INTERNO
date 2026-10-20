@@ -2,15 +2,19 @@
 // NOMINA, FIJOS, VARIABLES, OTROS). El permiso es por categoria y por usuario
 // (utils/finanzas.utils.js): se comprueba aqui, registro por registro, porque
 // depende de la categoria del gasto. Rutas en routes/finanzas.routes.js.
+//
+// Cada gasto descuenta del presupuesto de su categoria en el mes de su fecha
+// (Tesoreria, services/presupuestos.service.js). La partida de los gastos
+// anteriores al 2026-10-14 se conserva solo como dato historico.
 const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { partesDiaMexico } = require('../utils/fechas.utils');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const comprobantes = require('../services/comprobantes.service');
+const presupuestos = require('../services/presupuestos.service');
 const F = require('../utils/finanzas.utils');
 
 const incluirListado = {
-  partida: { select: F.selectPartidaCorta },
   empresa: { select: F.selectEmpresaCorta },
   cuenta: { select: F.selectCuentaCorta },
   creadoPor: { select: F.selectUsuarioCorto },
@@ -51,17 +55,18 @@ const serializar = (gasto, hoy = F.hoyFecha()) => {
 // Validacion. Con `parcial` (editar) solo se validan los campos que vienen.
 // `usuario` decide que categorias puede usar.
 // ---------------------------------------------------------------------------
-// `partidaActual`: al editar, la partida que ya tenia el gasto; esa se acepta
-// aunque este archivada. Cambiar a otra partida archivada no.
-const normalizar = async (body = {}, { parcial = false, usuario, partidaActual = null } = {}) => {
+const normalizar = async (body = {}, { parcial = false, usuario } = {}) => {
   const errores = [];
   const data = {};
   const viene = (campo) => body[campo] !== undefined;
 
   if (!parcial || viene('categoria')) {
     const categoria = String(body.categoria || '').toUpperCase();
+    // Registrar en una categoria pide "crear" en ella (al corregir un gasto
+    // basta "editar" en la categoria destino).
+    const permitida = F.puedeGasto(usuario, categoria, 'crear') || (parcial && F.puedeGasto(usuario, categoria, 'editar'));
     if (!F.CATEGORIAS_GASTO.includes(categoria)) errores.push('Categoría de gasto no válida');
-    else if (!F.puedeEditar(usuario, `gastos.${categoria}`)) errores.push('No tienes permiso para registrar gastos en esa categoría');
+    else if (!permitida) errores.push('No tienes permiso para registrar gastos en esa categoría');
     else data.categoria = categoria;
   }
   if (!parcial || viene('concepto')) {
@@ -112,16 +117,6 @@ const normalizar = async (body = {}, { parcial = false, usuario, partidaActual =
   if (viene('referencia')) data.referencia = F.textoOpcional(body.referencia, 80);
   if (viene('notas')) data.notas = F.textoOpcional(body.notas, 2000);
 
-  if (viene('partidaId')) {
-    const partidaId = body.partidaId === null || body.partidaId === '' ? null : F.leerId(body.partidaId);
-    if (body.partidaId && !partidaId) errores.push('Partida no válida');
-    else if (partidaId) {
-      const partida = await prisma.partida.findUnique({ where: { id: partidaId }, select: { id: true, activa: true } });
-      if (!partida) errores.push('La partida no existe');
-      else if (!partida.activa && partidaId !== partidaActual) errores.push('La partida está archivada');
-      else data.partidaId = partidaId;
-    } else data.partidaId = null;
-  }
   // Proveedor: ficha del directorio y/o nombre libre (foto del momento).
   let empresa = null;
   if (viene('empresaId')) {
@@ -151,7 +146,6 @@ const normalizar = async (body = {}, { parcial = false, usuario, partidaActual =
 /** Coherencias que dependen de varios campos (se aplican sobre el registro final). */
 const validarCoherencia = (final) => {
   const errores = [];
-  if (final.partidaId && final.moneda !== F.MONEDA_BASE) errores.push(`Los gastos con partida deben ir en ${F.MONEDA_BASE}: la tesorería solo maneja esa moneda`);
   if (final.estado === 'PAGADO' && !final.pagadoEn) final.pagadoEn = final.fecha;
   if (final.estado === 'PENDIENTE') final.pagadoEn = null;
   return errores;
@@ -160,7 +154,7 @@ const validarCoherencia = (final) => {
 const cargarVisible = async (id, usuario, include = incluirDetalle) => {
   const gasto = await prisma.gasto.findUnique({ where: { id }, include });
   if (!gasto) return { error: 404 };
-  if (F.nivelGasto(usuario, gasto.categoria) === 'ninguno') return { error: 403 };
+  if (!F.puedeGasto(usuario, gasto.categoria)) return { error: 403 };
   return { gasto };
 };
 
@@ -168,7 +162,7 @@ const responderError = (res, error) => (error === 404 ? res.status(404).json({ e
 
 // ---------------------------------------------------------------------------
 // GET /api/finanzas/gastos
-// ?categoria= &estado=(PENDIENTE|PAGADO|ANULADO|VENCIDO) &partidaId= &empresaId=
+// ?categoria= &estado=(PENDIENTE|PAGADO|ANULADO|VENCIDO) &empresaId=
 // &desde= &hasta= &anio= &q= &page= &limit=
 // Sin categoria: todas las que el usuario puede ver.
 // ---------------------------------------------------------------------------
@@ -181,7 +175,6 @@ const listar = async (req, res) => {
     if (!visibles.length) return F.sinPermiso(res);
 
     const estado = String(req.query.estado || '').toUpperCase();
-    const partidaId = F.leerId(req.query.partidaId);
     const empresaId = F.leerId(req.query.empresaId);
     const desde = F.leerFecha(req.query.desde);
     const hasta = F.leerFecha(req.query.hasta);
@@ -194,7 +187,6 @@ const listar = async (req, res) => {
       construirBusqueda(req.query.q, ['folio', 'concepto', 'proveedorNombre', 'referencia']),
       F.ESTADOS_GASTO.includes(estado) ? { estado } : null,
       estado === 'VENCIDO' ? { estado: 'PENDIENTE', fechaLimite: { lt: F.hoyFecha() } } : null,
-      partidaId ? { partidaId } : null,
       empresaId ? { empresaId } : null,
       desde ? { fecha: { gte: desde } } : null,
       hasta ? { fecha: { lte: hasta } } : null,
@@ -265,6 +257,26 @@ const resumen = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
+// GET /api/finanzas/gastos/presupuesto?categoria=&anio=&mes=
+// Presupuesto del mes (por defecto el actual) de una categoria, lo gastado y
+// el remanente. Lo ve quien ve esa categoria o la tesoreria.
+// ---------------------------------------------------------------------------
+const presupuesto = async (req, res) => {
+  try {
+    const categoria = String(req.query.categoria || '').toUpperCase();
+    if (!F.CATEGORIAS_GASTO.includes(categoria)) return res.status(400).json({ error: 'Categoría no válida' });
+    if (!F.puedeGasto(req.usuario, categoria) && !F.puedeVer(req.usuario, 'tesoreria')) return F.sinPermiso(res);
+    const actual = presupuestos.mesActual();
+    const anio = F.leerAnio(req.query.anio, actual.anio);
+    const mes = F.leerMes(req.query.mes) || actual.mes;
+    return res.json({ presupuesto: await presupuestos.resumenCategoriaMes(categoria, anio, mes) });
+  } catch (error) {
+    console.error('[finanzas.gastos.presupuesto]', error);
+    return res.status(500).json({ error: 'Error al leer el presupuesto' });
+  }
+};
+
+// ---------------------------------------------------------------------------
 // GET /api/finanzas/gastos/:id
 // ---------------------------------------------------------------------------
 const obtener = async (req, res) => {
@@ -313,10 +325,10 @@ const editar = async (req, res) => {
   try {
     const actual = await prisma.gasto.findUnique({ where: { id } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
-    if (!F.puedeEditar(req.usuario, `gastos.${actual.categoria}`)) return F.sinPermiso(res);
+    if (!F.puedeGasto(req.usuario, actual.categoria, 'editar')) return F.sinPermiso(res);
     if (actual.estado === 'ANULADO') return res.status(409).json({ error: 'Un gasto anulado no se puede editar' });
 
-    const { data, errores } = await normalizar(req.body, { parcial: true, usuario: req.usuario, partidaActual: actual.partidaId });
+    const { data, errores } = await normalizar(req.body, { parcial: true, usuario: req.usuario });
     if (!errores.length) {
       const final = { ...actual, ...data };
       errores.push(...validarCoherencia(final));
@@ -345,7 +357,7 @@ const cambiarEstado = (accion) => async (req, res) => {
   try {
     const actual = await prisma.gasto.findUnique({ where: { id } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
-    if (!F.puedeEditar(req.usuario, `gastos.${actual.categoria}`)) return F.sinPermiso(res);
+    if (!F.puedeGasto(req.usuario, actual.categoria, 'editar')) return F.sinPermiso(res);
 
     const data = {};
     let descripcion = '';
@@ -391,12 +403,10 @@ const duplicar = async (req, res) => {
   try {
     const actual = await prisma.gasto.findUnique({ where: { id } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
-    if (!F.puedeEditar(req.usuario, `gastos.${actual.categoria}`)) return F.sinPermiso(res);
+    if (!F.puedeGasto(req.usuario, actual.categoria, 'crear')) return F.sinPermiso(res);
 
     const meses = Math.max(1, Math.min(12, Number.parseInt(req.body?.meses, 10) || 1));
     const fecha = F.sumarMeses(actual.fecha, meses);
-    // Una partida archivada ya no recibe gastos nuevos: la copia sale sin partida.
-    const partida = actual.partidaId ? await prisma.partida.findUnique({ where: { id: actual.partidaId }, select: { activa: true } }) : null;
     const data = {
       categoria: actual.categoria,
       concepto: actual.concepto,
@@ -407,7 +417,6 @@ const duplicar = async (req, res) => {
       fechaLimite: actual.fechaLimite ? F.sumarMeses(actual.fechaLimite, meses) : null,
       estado: 'PENDIENTE',
       metodo: actual.metodo,
-      partidaId: partida?.activa ? actual.partidaId : null,
       empresaId: actual.empresaId,
       proveedorNombre: actual.proveedorNombre,
       cuentaId: actual.cuentaId,
@@ -434,7 +443,7 @@ const eliminar = async (req, res) => {
   try {
     const actual = await prisma.gasto.findUnique({ where: { id }, include: { comprobantes: { select: { archivo: true } } } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
-    if (!F.puedeEditar(req.usuario, `gastos.${actual.categoria}`)) return F.sinPermiso(res);
+    if (!F.puedeGasto(req.usuario, actual.categoria, 'eliminar')) return F.sinPermiso(res);
     await prisma.gasto.delete({ where: { id } });
     await Promise.all(actual.comprobantes.map((c) => comprobantes.borrar(c.archivo).catch((e) => console.error('[finanzas.gastos.eliminar] comprobante', e?.message))));
     F.registrarFinanzas(req.usuario, 'gasto', id, 'ELIMINAR', `Eliminó el gasto ${actual.folio} (${actual.categoria}) "${actual.concepto}" por ${F.aNumero(actual.monto)} ${actual.moneda}`);
@@ -448,6 +457,7 @@ const eliminar = async (req, res) => {
 module.exports = {
   listar,
   resumen,
+  presupuesto,
   obtener,
   crear,
   editar,

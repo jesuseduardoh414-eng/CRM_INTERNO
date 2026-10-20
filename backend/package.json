@@ -20,6 +20,8 @@
     "db:schema:postgres": "node scripts/generar_schema_postgres.js",
     "db:migracion:postgres": "node scripts/nueva_migracion_postgres.js",
     "db:copiar": "node scripts/copiar_base.js",
+    "db:probar": "node scripts/probar_base.js",
+    "empaquetar:cpanel": "node scripts/empaquetar_cpanel.js",
     "crear-configurador": "node scripts/crear_configurador.js",
     "crear-cliente": "node scripts/crear_cliente.js",
     "datos-prueba": "node scripts/datos_prueba.js"

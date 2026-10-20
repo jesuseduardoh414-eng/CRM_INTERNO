@@ -1,6 +1,6 @@
 // Ventas: pagos recibidos de los clientes. Cifras del año, filtros y lista;
-// la ficha y el formulario son ventanas. El permiso `ventas` (ver / editar)
-// viene en usuario.finanzas y lo vuelve a comprobar el servidor.
+// la ficha y el formulario son ventanas. Los permisos de ventas (ver / crear / editar / eliminar)
+// viene en usuario.permisos (finanzas.ventas.*) y lo vuelve a comprobar el servidor.
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Navigate, useSearchParams } from 'react-router-dom';
@@ -19,7 +19,7 @@ import DetallePago from '../components/finanzas/DetallePago';
 import GestionCuentas from '../components/finanzas/GestionCuentas';
 import { Cifras, ErrorCarga, SelectorAnio, Vacio } from '../components/finanzas/piezas';
 import { useFormatoFinanzas } from '../hooks/useFormatoFinanzas';
-import { BADGE_ESTADO_PAGO, OPCIONES_SWR_FINANZAS, aniosSelector, nivelFinanzas, recargarFinanzas } from '../utils/finanzas';
+import { BADGE_ESTADO_PAGO, OPCIONES_SWR_FINANZAS, aniosSelector, puedeFinanzas, recargarFinanzas } from '../utils/finanzas';
 
 const SEGMENTOS_ESTADO = ['TODOS', 'REGISTRADO', 'ANULADO'];
 
@@ -37,9 +37,12 @@ const VentasPage = () => {
   const [detalleId, setDetalleId] = useState(() => Number(params.get('pago')) || null);
   const [cuentasAbiertas, setCuentasAbiertas] = useState(false);
   const q = useDebounce(busqueda, 300);
-  const nivel = nivelFinanzas(usuario, 'ventas');
-  const puedeVer = nivel !== 'ninguno';
-  const puedeEditar = nivel === 'editar';
+  const puedeVer = puedeFinanzas(usuario, 'ventas');
+  const puedeCrear = puedeFinanzas(usuario, 'ventas', 'crear');
+  const puedeEditar = puedeFinanzas(usuario, 'ventas', 'editar');
+  const puedeEliminar = puedeFinanzas(usuario, 'ventas', 'eliminar');
+  // Las cuentas las gestiona quien edita ventas o tesorería (igual que el servidor).
+  const gestionaCuentas = puedeEditar || puedeFinanzas(usuario, 'tesoreria', 'editar');
 
   const { data, error, isLoading, mutate } = useSWR(
     puedeVer ? ['finanzas-pagos', q, estado, cuentaId, anio] : null,
@@ -65,7 +68,7 @@ const VentasPage = () => {
     anio === new Date().getFullYear() && { clave: 'mes', etiqueta: tf('finKpiMes'), valor: resumen ? monto(resumen.mes.total) : null, sub: resumen ? tf('finKpiPagos', { n: resumen.mes.cantidad }) : null },
     { clave: 'anual', etiqueta: tf('finKpiAnio', { anio }), valor: resumen ? monto(resumen.anual.total) : null, sub: resumen ? tf('finKpiPagos', { n: resumen.anual.cantidad }) : null },
     { clave: 'historico', etiqueta: tf('finKpiHistorico'), valor: resumen ? monto(resumen.historico.total) : null, sub: resumen ? tf('finKpiPagos', { n: resumen.historico.cantidad }) : null },
-    { clave: 'cuentas', etiqueta: tf('finKpiCuentas'), valor: catalogos ? catalogos.cuentas.filter((c) => c.activa).length : null, onClick: puedeEditar ? () => setCuentasAbiertas(true) : undefined },
+    { clave: 'cuentas', etiqueta: tf('finKpiCuentas'), valor: catalogos ? catalogos.cuentas.filter((c) => c.activa).length : null, onClick: gestionaCuentas ? () => setCuentasAbiertas(true) : undefined },
   ].filter(Boolean);
 
   return (
@@ -75,10 +78,10 @@ const VentasPage = () => {
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{tf('finVentasTitulo')}</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">{tf('finVentasSubtitulo')}</p>
         </div>
-        {puedeEditar && (
+        {(gestionaCuentas || puedeCrear) && (
           <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
-            <Button variant="outline" className="w-full md:w-auto" onClick={() => setCuentasAbiertas(true)}><Landmark size={16} /> {tf('finCuentas')}</Button>
-            <Button className="w-full md:w-auto" onClick={abrirNuevo}><Plus size={16} /> {tf('finPagoNuevo')}</Button>
+            {gestionaCuentas && <Button variant="outline" className="w-full md:w-auto" onClick={() => setCuentasAbiertas(true)}><Landmark size={16} /> {tf('finCuentas')}</Button>}
+            {puedeCrear && <Button className="w-full md:w-auto" onClick={abrirNuevo}><Plus size={16} /> {tf('finPagoNuevo')}</Button>}
           </div>
         )}
       </div>
@@ -143,7 +146,7 @@ const VentasPage = () => {
             texto={!hayFiltros ? tf('finPagosVacioHint') : undefined}
             accion={hayFiltros
               ? <Button variant="outline" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
-              : (puedeEditar && <Button onClick={abrirNuevo}><Plus size={16} /> {tf('finPagoNuevo')}</Button>)}
+              : (puedeCrear && <Button onClick={abrirNuevo}><Plus size={16} /> {tf('finPagoNuevo')}</Button>)}
           />
         )}
 
@@ -224,7 +227,7 @@ const VentasPage = () => {
         />
       )}
       {detalleId && (
-        <DetallePago key={detalleId} open pagoId={detalleId} puedeEditar={puedeEditar} onClose={cerrarDetalle} onEditar={abrirEdicion} onCambio={recargarTodo} />
+        <DetallePago key={detalleId} open pagoId={detalleId} puedeEditar={puedeEditar} puedeEliminar={puedeEliminar} onClose={cerrarDetalle} onEditar={abrirEdicion} onCambio={recargarTodo} />
       )}
       {cuentasAbiertas && (
         <GestionCuentas open onClose={() => setCuentasAbiertas(false)} onCambio={recargarTodo} />

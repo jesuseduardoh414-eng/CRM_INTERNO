@@ -1,5 +1,5 @@
-// Catálogos, permisos y ayudas del módulo de Finanzas (Ventas, Tesorería y
-// Gastos). Los valores coinciden con backend/src/utils/finanzas.utils.js:
+// Catálogos, permisos y ayudas del módulo de Finanzas (Ventas, Tesorería,
+// Gastos y Cotizaciones). Los valores coinciden con backend/src/utils/finanzas.utils.js:
 // si cambia una lista allá, cambia aquí.
 import { mutate } from 'swr';
 import { formatearFechaCorta, formatearMonto, formatearTamano } from './contratos';
@@ -16,7 +16,6 @@ const esClaveFinanzas = (clave) => String(Array.isArray(clave) ? clave[0] : clav
 export const recargarFinanzas = () => mutate(esClaveFinanzas);
 
 export const CATEGORIAS_GASTO = ['PRESUPUESTO_GENERAL', 'PRESUPUESTO_OFICINA', 'NOMINA', 'FIJOS', 'VARIABLES', 'OTROS'];
-export const NIVELES = ['ninguno', 'ver', 'editar'];
 export const MONEDAS = ['MXN', 'USD', 'EUR'];
 // La tesorería y el informe trabajan en esta moneda.
 export const MONEDA_BASE = 'MXN';
@@ -24,50 +23,37 @@ export const METODOS_PAGO = ['TRANSFERENCIA', 'EFECTIVO', 'TARJETA', 'CHEQUE', '
 export const TIPOS_CUENTA = ['BANCO', 'EFECTIVO', 'PASARELA', 'OTRA'];
 export const ESTADOS_PAGO = ['REGISTRADO', 'ANULADO'];
 export const ESTADOS_GASTO = ['PENDIENTE', 'PAGADO', 'ANULADO'];
+// RECIBIDA: la cotiza un proveedor. ENVIADA: la cotizamos a un cliente.
+export const TIPOS_COTIZACION = ['RECIBIDA', 'ENVIADA'];
+export const ESTADOS_COTIZACION = ['PENDIENTE', 'APROBADA', 'RECHAZADA'];
 // Para filtrar se suma el estado calculado "vencido".
 export const ESTADOS_FILTRO_GASTO = ['PENDIENTE', 'VENCIDO', 'PAGADO', 'ANULADO'];
 
 // Clase de badge (index.css) por estado mostrado.
 export const BADGE_ESTADO_GASTO = { PENDIENTE: 'badge-warning', VENCIDO: 'badge-danger', PAGADO: 'badge-success', ANULADO: 'badge-neutral' };
 export const BADGE_ESTADO_PAGO = { REGISTRADO: 'badge-success', ANULADO: 'badge-neutral' };
+export const BADGE_ESTADO_COTIZACION = { PENDIENTE: 'badge-warning', APROBADA: 'badge-success', RECHAZADA: 'badge-danger' };
 
 /** Estado que se pinta: "vencido" tiene prioridad sobre "pendiente". */
 export const estadoVisibleGasto = (gasto) => (gasto?.vencido ? 'VENCIDO' : gasto?.estado);
 
 // ── Permisos ──────────────────────────────────────────────────────────────
-// El backend manda en el usuario `finanzas: { ventas, tesoreria, informe,
-// gastos: { CATEGORIA: nivel } }` ya resuelto (el administrador global trae
-// `editar` en todo). Aquí solo se lee; la comprobación real es del servidor.
+// Las casillas finanzas.* llegan ya resueltas en usuario.permisos (ver
+// utils/permisos.js): ventas y cada categoría de gastos con ver / crear /
+// editar / eliminar; tesorería con ver / editar; informe con ver; y
+// cotizaciones con ver / crear (subir y versiones) / editar (corregir datos) /
+// aprobar (estado) / eliminar. Aquí solo se lee; la comprobación real es del
+// servidor.
 
-export const nivelFinanzas = (usuario, recurso) => {
-  const f = usuario?.finanzas;
-  if (!f) return 'ninguno';
-  if (recurso.startsWith('gastos.')) return f.gastos?.[recurso.slice(7)] || 'ninguno';
-  return f[recurso] || 'ninguno';
-};
-export const puedeVerFinanzas = (usuario, recurso) => nivelFinanzas(usuario, recurso) !== 'ninguno';
-export const puedeEditarFinanzas = (usuario, recurso) => nivelFinanzas(usuario, recurso) === 'editar';
-export const categoriasVisibles = (usuario) => CATEGORIAS_GASTO.filter((c) => puedeVerFinanzas(usuario, `gastos.${c}`));
-export const categoriasEditables = (usuario) => CATEGORIAS_GASTO.filter((c) => puedeEditarFinanzas(usuario, `gastos.${c}`));
-export const tieneAccesoFinanzas = (usuario) => ['ventas', 'tesoreria', 'informe'].some((r) => puedeVerFinanzas(usuario, r)) || categoriasVisibles(usuario).length > 0;
+/** recurso: 'ventas', 'tesoreria', 'informe', 'cotizaciones' o 'gastos.FIJOS'. */
+export const puedeFinanzas = (usuario, recurso, accion = 'ver') => usuario?.permisos?.[`finanzas.${recurso}.${accion}`] === true;
+export const puedeVerFinanzas = (usuario, recurso) => puedeFinanzas(usuario, recurso, 'ver');
+/** Categorías de gastos en las que puede la acción. */
+export const categoriasCon = (usuario, accion = 'ver') => CATEGORIAS_GASTO.filter((c) => puedeFinanzas(usuario, `gastos.${c}`, accion));
+export const categoriasVisibles = (usuario) => categoriasCon(usuario, 'ver');
+const RECURSOS_BASE = ['ventas', 'tesoreria', 'informe', 'cotizaciones'];
+export const tieneAccesoFinanzas = (usuario) => RECURSOS_BASE.some((r) => puedeVerFinanzas(usuario, r)) || categoriasVisibles(usuario).length > 0;
 export const tieneAccesoGastos = (usuario) => categoriasVisibles(usuario).length > 0 || puedeVerFinanzas(usuario, 'informe');
-
-/** Matriz vacía para el editor de permisos de un usuario. */
-export const permisosVacios = () => ({
-  ventas: 'ninguno',
-  tesoreria: 'ninguno',
-  informe: 'ninguno',
-  gastos: Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c, 'ninguno'])),
-});
-
-/** Lo guardado en el usuario (puede ser null o incompleto) -> matriz completa. */
-export const permisosDesde = (guardados) => {
-  const base = permisosVacios();
-  if (!guardados || typeof guardados !== 'object') return base;
-  ['ventas', 'tesoreria', 'informe'].forEach((r) => { if (NIVELES.includes(guardados[r])) base[r] = guardados[r]; });
-  CATEGORIAS_GASTO.forEach((c) => { if (NIVELES.includes(guardados.gastos?.[c])) base.gastos[c] = guardados.gastos[c]; });
-  return base;
-};
 
 // ── Rutas ─────────────────────────────────────────────────────────────────
 
@@ -91,12 +77,29 @@ export const esComprobanteValido = (archivo) => (
 );
 export const esImagen = (mime) => String(mime || '').startsWith('image/');
 
+// ── Documentos (cotizaciones y base de conocimiento) ──────────────────────
+// PDF, imágenes y Office. Igual que el servidor: la extensión decide qué se
+// acepta y el servidor comprueba el contenido.
+export const ACEPTA_DOCUMENTO = '.pdf,.jpg,.jpeg,.png,.webp,.doc,.docx,.xls,.xlsx,.ppt,.pptx';
+export const esDocumentoValido = (archivo) => /\.(pdf|jpe?g|png|webp|docx?|xlsx?|pptx?)$/i.test(archivo?.name || '');
+/** PDF e imágenes se pueden ver en el CRM; Office solo se descarga. */
+export const seVeEnElCrm = (mime) => mime === 'application/pdf' || esImagen(mime);
+
 // ── Fechas ────────────────────────────────────────────────────────────────
 
 /** 'AAAA-MM-DD' de hoy en la zona del navegador (para los formularios). */
 export const hoyClave = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/** "octubre de 2026" en el idioma elegido (mes 1-12). */
+export const nombreMesAnio = (anio, mes, locale) => new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(new Date(anio, mes - 1, 1));
+
+/** { anio, mes } movido `delta` meses (negativo hacia atrás). */
+export const moverMes = ({ anio, mes }, delta) => {
+  const d = new Date(anio, mes - 1 + delta, 1);
+  return { anio: d.getFullYear(), mes: d.getMonth() + 1 };
 };
 
 /** Nombre del mes (1-12) en el idioma elegido. */

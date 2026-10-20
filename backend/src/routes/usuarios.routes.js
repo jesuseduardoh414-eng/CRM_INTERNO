@@ -1,8 +1,11 @@
 // Rutas de Usuarios — Gestión Administrativa
 const express = require('express');
-const { listar, listarParaProyectos, obtenerPerfil, actualizarPerfil, crear, editar, eliminar, toggleEstado, actividad } = require('../controllers/usuarios.controller');
+const {
+  listar, listarParaProyectos, obtenerPerfil, actualizarPerfil, crear, editar, eliminar, toggleEstado, actividad,
+  obtenerPermisos, guardarPermisos,
+} = require('../controllers/usuarios.controller');
 const { verificarToken } = require('../middlewares/auth.middleware');
-const { soloAdmin }      = require('../middlewares/roles.middleware');
+const { requiere }       = require('../middlewares/roles.middleware');
 const uploadProfile = require('../middlewares/uploadProfile.middleware');
 
 const router = express.Router();
@@ -16,11 +19,16 @@ router.get('/catalogo/proyectos', listarParaProyectos);
 router.get('/perfil', obtenerPerfil);
 router.put('/perfil', uploadProfile.single('fotoPerfil'), actualizarPerfil);
 
-// Operaciones de gestión (solo para administradores)
-router.post('/',           soloAdmin, crear);
-router.get('/:id/actividad', soloAdmin, actividad);
-router.put('/:id',         soloAdmin, editar);
-router.put('/:id/estado',  soloAdmin, toggleEstado);
-router.delete('/:id',      soloAdmin, eliminar);
+// Operaciones de gestión (permisos de la seccion Usuarios; el alcance por
+// area lo revisa el controlador)
+router.post('/',           requiere('usuarios.invitar'), crear);
+router.get('/:id/actividad', actividad);
+router.put('/:id',         requiere('usuarios.editar'), editar);
+router.put('/:id/estado',  requiere('usuarios.desactivar'), toggleEstado);
+router.delete('/:id',      requiere('usuarios.desactivar'), eliminar);
+
+// Ajustes de permisos por persona (solo el administrador general)
+router.get('/:id/permisos', obtenerPermisos);
+router.put('/:id/permisos', guardarPermisos);
 
 module.exports = router;

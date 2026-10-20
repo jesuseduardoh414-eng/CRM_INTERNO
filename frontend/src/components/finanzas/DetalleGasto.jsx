@@ -16,7 +16,7 @@ import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
 import { useConfirmacion } from '../ConfirmDialog';
-import { BADGE_ESTADO_GASTO, estadoVisibleGasto, puedeEditarFinanzas } from '../../utils/finanzas';
+import { BADGE_ESTADO_GASTO, estadoVisibleGasto, puedeFinanzas } from '../../utils/finanzas';
 
 const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado }) => {
   const { usuario } = useAuth();
@@ -92,18 +92,23 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
     }
   };
 
-  const puedeEditar = gasto ? puedeEditarFinanzas(usuario, `gastos.${gasto.categoria}`) : false;
+  // Permisos de su categoría: editar (y pagar, reabrir, anular), duplicar al
+  // mes siguiente pide "crear" y borrar, "eliminar".
+  const recurso = gasto ? `gastos.${gasto.categoria}` : null;
+  const puedeEditar = Boolean(recurso) && puedeFinanzas(usuario, recurso, 'editar');
+  const puedeDuplicar = Boolean(recurso) && puedeFinanzas(usuario, recurso, 'crear');
+  const puedeEliminar = Boolean(recurso) && puedeFinanzas(usuario, recurso, 'eliminar');
   const estado = gasto ? estadoVisibleGasto(gasto) : null;
   const anulado = gasto?.estado === 'ANULADO';
-  const acciones = gasto && puedeEditar ? [
+  const acciones = gasto && (puedeEditar || puedeDuplicar || puedeEliminar) ? [
     // Mientras una acción está en curso no se puede lanzar otra (doble clic).
-    !anulado && { label: t('edit'), icon: <Edit2 size={14} />, onSelect: () => onEditar(gasto), disabled: ocupado },
-    gasto.estado === 'PAGADO' && { label: tf('finVolverPendiente'), icon: <RotateCcw size={14} />, onSelect: reabrir, disabled: ocupado },
-    !anulado && { label: tf('finDuplicarMes'), icon: <Copy size={14} />, onSelect: duplicar, disabled: ocupado },
-    !anulado && { label: tf('finAnular'), icon: <Ban size={14} />, onSelect: anular, disabled: ocupado },
-    { separator: true },
-    { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: eliminar },
-  ] : [];
+    puedeEditar && !anulado && { label: t('edit'), icon: <Edit2 size={14} />, onSelect: () => onEditar(gasto), disabled: ocupado },
+    puedeEditar && gasto.estado === 'PAGADO' && { label: tf('finVolverPendiente'), icon: <RotateCcw size={14} />, onSelect: reabrir, disabled: ocupado },
+    puedeDuplicar && !anulado && { label: tf('finDuplicarMes'), icon: <Copy size={14} />, onSelect: duplicar, disabled: ocupado },
+    puedeEditar && !anulado && { label: tf('finAnular'), icon: <Ban size={14} />, onSelect: anular, disabled: ocupado },
+    puedeEliminar && (puedeEditar || puedeDuplicar) && { separator: true },
+    puedeEliminar && { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: eliminar },
+  ].filter(Boolean) : [];
 
   return (
     <Modal
@@ -144,7 +149,7 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
               </div>
             </div>
             <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
-              <Dato etiqueta={tf('finPartida')}>{gasto.partida ? <span className="inline-flex items-center gap-2"><PuntoPartida color={gasto.partida.color} />{gasto.partida.nombre}</span> : tf('finSinPartida')}</Dato>
+              {gasto.partida && <Dato etiqueta={tf('finPartidaAnterior')}><span className="inline-flex items-center gap-2"><PuntoPartida color={gasto.partida.color} />{gasto.partida.nombre}</span></Dato>}
               <Dato etiqueta={tf('finProveedor')}>{gasto.proveedorNombre || gasto.empresa?.nombre}</Dato>
               <Dato etiqueta={tf('finCuentaOrigen')}>{gasto.cuenta ? (gasto.cuenta.banco ? `${gasto.cuenta.nombre} · ${gasto.cuenta.banco}` : gasto.cuenta.nombre) : null}</Dato>
               <Dato etiqueta={tf('finMetodo')}>{gasto.metodo ? tf(`finMetodo${gasto.metodo}`) : null}{gasto.referencia ? ` · ${gasto.referencia}` : ''}</Dato>

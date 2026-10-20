@@ -154,7 +154,7 @@ const MisProyectos = ({ proyectos, abiertasPorProyecto }) => {
 const InicioMiembro = () => {
   const { t, locale } = usePreferences();
   const { usuario } = useAuth();
-  const { moduloActivo, puede } = useConfiguracion();
+  const { moduloActivo } = useConfiguracion();
   const {
     cargando, error, recargar, cambiarEstado, grupos, resumen, proyectos, proyectosAbiertos, abiertasPorProyecto,
   } = useMisTareas();
@@ -172,7 +172,6 @@ const InicioMiembro = () => {
     );
   }
 
-  const puedeEditar = puede(usuario, 'editarTareas');
   const proyectoDe = (tarea) => proyectos.find((p) => p.id === (tarea.proyectoId || tarea.proyecto?.id));
   const hayAlgo = GRUPOS_INICIO.some((g) => grupos[g.id].length > 0);
 
@@ -248,7 +247,7 @@ const InicioMiembro = () => {
                           key={tarea.id}
                           tarea={tarea}
                           onCambiarEstado={cambiarConAviso}
-                          puedeCambiar={puedeEditar && puedeGestionarTarea(tarea, usuario, proyectoDe(tarea))}
+                          puedeCambiar={puedeGestionarTarea(tarea, usuario, proyectoDe(tarea), 'tareas.editar')}
                         />
                       ))}
                     </div>

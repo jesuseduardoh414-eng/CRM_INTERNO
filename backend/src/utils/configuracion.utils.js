@@ -11,6 +11,7 @@
  */
 
 const { PLANTILLAS, CAMPOS_TEXTO, camposDe } = require('./plantillasCorreo');
+const { normalizarPermisosAreas } = require('./permisosArea.utils');
 
 // Areas de fabrica. ADMINISTRACION es el area general: sus administradores ven
 // todo el CRM, por eso no se puede quitar (si se puede renombrar).
@@ -29,7 +30,7 @@ const IDIOMAS = ['es', 'en'];
 const TEMAS = ['sistema', 'claro', 'oscuro'];
 // Modulos que se pueden apagar. Apagado = desaparece del menu y la API responde
 // 404 MODULO_DESACTIVADO.
-const MODULOS = ['contratos', 'clientes', 'portalClientes', 'agenda', 'plantillas', 'importar', 'reporteDiario', 'googleCalendar', 'adjuntos', 'comentarios', 'finanzas'];
+const MODULOS = ['contratos', 'clientes', 'portalClientes', 'agenda', 'plantillas', 'importar', 'reporteDiario', 'googleCalendar', 'adjuntos', 'comentarios', 'finanzas', 'conocimiento'];
 // Modulos retirados: siempre apagados, aunque la base guarde `true`. El portal
 // de clientes se desecho el 2026-10-12 (el CRM es solo de uso interno); sus
 // tablas y pantallas se conservan por si algun dia vuelve.
@@ -85,10 +86,14 @@ const DEFECTO = Object.freeze({
   },
   modulos: {
     contratos: true, clientes: true, portalClientes: false, agenda: true, plantillas: true, importar: true,
-    reporteDiario: true, googleCalendar: true, adjuntos: true, comentarios: true, finanzas: true,
+    reporteDiario: true, googleCalendar: true, adjuntos: true, comentarios: true, finanzas: true, conocimiento: true,
   },
-  // Permisos de los miembros. Los valores de fabrica son el comportamiento
-  // que el CRM tenia antes de poder configurarlo.
+  // Tabla de permisos de cada area: { CLAVE_AREA: { miembro: {...}, admin: {...} } }
+  // con solo las casillas que se cambiaron (utils/permisosArea.utils.js). Lo
+  // que falte toma el valor de fabrica.
+  permisosAreas: {},
+  // Interruptores anteriores de los miembros (antes de la tabla por area). Ya
+  // no se editan: solo dan los valores de fabrica de la columna "miembros".
   permisos: {
     crearProyectos: false,     // crear proyectos de su area
     verTodosProyectos: false,  // ver todos los proyectos, no solo en los que participa
@@ -423,6 +428,7 @@ const validar = (entrada = {}, base = DEFECTO) => {
       MODULOS_RETIRADOS.includes(clave) ? false : booleano(mo[clave], b.modulos?.[clave] ?? true),
     ])),
     permisos: Object.fromEntries(PERMISOS.map((clave) => [clave, booleano(pe[clave], bpe[clave])])),
+    permisosAreas: normalizarPermisosAreas(e.permisosAreas, validarAreas(r.areas, areasHeredadas(b.reglas)), b.permisosAreas),
     tareas: {
       estadoInicial: deLista(ta.estadoInicial, ['PENDIENTE', 'EN_PROGRESO'], bta.estadoInicial),
       prioridadDefecto: deLista(ta.prioridadDefecto, ['BAJA', 'MEDIA', 'ALTA'], bta.prioridadDefecto),

@@ -2,10 +2,13 @@
 
 Este repositorio esta organizado como monorepo con dos proyectos separados:
 
-- `frontend/`: app React + Vite (pensada para Vercel)
-- `backend/`: API Express + Prisma sobre **MySQL/MariaDB o PostgreSQL** (pensada
-  para Render, Vercel o cPanel; la base puede estar en Supabase, en XAMPP o en
-  la MySQL del cPanel)
+- `frontend/`: app React + Vite
+- `backend/`: API Express + Prisma sobre **MySQL/MariaDB o PostgreSQL**
+
+**Produccion: cPanel con MySQL**, en un subdominio del dominio que esta en
+Squarespace (`crm.tudominio.com`: frontend y API en el mismo sitio). Guia paso
+a paso en [DESPLIEGUE_CPANEL.md](DESPLIEGUE_CPANEL.md). Render, Vercel y
+Supabase siguen documentados mas abajo como alternativa.
 
 ## Marca (OMNIS)
 
@@ -140,7 +143,38 @@ existen se ignoran, y las tablas que el origen aun no tiene se copian vacias).
    `npm run db:migrate`.
 4. Commitea el esquema y las dos migraciones juntas.
 
-## Despliegue: Render (API) + Vercel (frontend) + Supabase (base)
+## Despliegue en cPanel (produccion)
+
+Todo en [DESPLIEGUE_CPANEL.md](DESPLIEGUE_CPANEL.md). En corto:
+
+- **DNS:** en Squarespace, un registro `A` `crm` → IP del cPanel (el sitio y
+  el correo del dominio no se tocan). En cPanel, el dominio `crm.tudominio.com`
+  con AutoSSL.
+- **Actualizaciones automaticas:** cada push a `master` despliega por SSH con
+  GitHub Actions (`.github/workflows/desplegar-cpanel.yml`: build del frontend,
+  rsync, `backend/scripts/tras_desplegar.sh` para npm install / generate /
+  migraciones / reinicio con `cloudlinux-selector`). Se activa con el secreto
+  `CPANEL_SSH_KEY` y la variable `CPANEL_USER`. Vercel ya no despliega en cada
+  push (`git.deploymentEnabled: false`).
+- **Paquetes (a mano):** `npm run empaquetar:cpanel` (desde `backend/`) deja en
+  `paquete_cpanel/` el frontend compilado con `VITE_API_URL=/api` y su
+  `.htaccess` (`frontend/cpanel/.htaccess`: rutas de la SPA, `/api` intacto,
+  HTTPS) y el backend sin `node_modules`, `.env` ni `storage/`. El build solo
+  del frontend es `npm run build:cpanel` (modo `cpanel`, `frontend/.env.cpanel`).
+- **Backend:** *Setup Node.js App* con *Application URL* = `crm.tudominio.com/api`
+  (Passenger le pasa la ruta completa, asi que las rutas `/api/...` no cambian),
+  *startup file* `src/server.js`, *Run NPM Install* (genera el cliente de
+  Prisma) y `db:migrate` con *Run JS script*.
+- **Base:** `DATABASE_URL=mysql://CUENTA_crm:CLAVE@localhost:3306/CUENTA_crm?connection_limit=5`
+  (el hosting limita las conexiones por usuario). Datos con `db:copiar` desde tu
+  PC por *MySQL remoto*, o volcado de solo datos importado en phpMyAdmin.
+- **Claves:** `AUTH_ENCRYPTION_KEY` (o `JWT_SECRET` si aquella estaba vacia) debe
+  ser la misma del entorno de donde vienen los datos: cifra el 2FA, la clave
+  SMTP del panel y los tokens de Google Calendar.
+- **Cron** cada 5 minutos a `/api/health`: cPanel duerme la app sin trafico y
+  con ella los avisos por correo.
+
+## Alternativa: Render (API) + Vercel (frontend) + Supabase (base)
 
 ### Backend en Render
 
@@ -194,44 +228,17 @@ serverless conviene `DATABASE_URL` con `?pgbouncer=true&connection_limit=1`
 desde tu maquina), el disco es de solo lectura (no se pueden subir adjuntos,
 contratos ni comprobantes de finanzas) y no corren los avisos programados por correo.
 
-### Produccion en cPanel (MySQL)
-
-1. **MySQL:** en *Bases de datos MySQL* crea la base y un usuario con todos los
-   privilegios. cPanel les antepone el prefijo de la cuenta
-   (`cuenta_crm`, `cuenta_usuario`).
-2. **Backend:** en *Setup Node.js App* crea una aplicacion con Node 22,
-   *Application root* = la carpeta donde subiste `backend/` y
-   *Application startup file* = `src/server.js`. En *Environment variables*
-   define las de `backend/.env.example`, con
-   `DATABASE_URL=mysql://cuenta_usuario:CLAVE@localhost:3306/cuenta_crm`
-   y `NODE_ENV=production`.
-3. Pulsa *Run NPM Install* y luego, desde la terminal de cPanel con el entorno
-   de la app activado (el panel muestra el comando `source .../activate`):
-   ```bash
-   cd backend
-   npm run db:migrate
-   npm run db:generate
-   ```
-   Para subir los datos, `npm run db:copiar -- --desde "..."` ahi mismo (o un
-   volcado con `mysqldump` importado en phpMyAdmin).
-4. **Frontend:** `npm run build` en `frontend/` y sube el contenido de `dist/`
-   a `public_html` (o un subdominio). `VITE_API_URL` debe apuntar a la URL
-   publica del backend con `/api` al final, y `FRONTEND_URL` del backend a la
-   del frontend.
-5. Si `prisma generate` falla en el servidor por el motor de consultas, agrega
-   el `binaryTargets` que indique el error al bloque `generator` de
-   `backend/prisma/schema.prisma` (en cPanel suele ser `rhel-openssl-3.0.x` o
-   `rhel-openssl-1.1.x`).
-
 > Las migraciones solo se aplican solas en Render (`start:render`). En el
 > resto de entornos: `npm run db:migrate` desde `backend/`.
 
 ## Archivos adjuntos y fotos de perfil
 
 Los adjuntos (tareas, proyectos, eventos), las fotos de perfil, los PDF de
-contratos y los comprobantes de finanzas se guardan en el **disco del
-servidor** (`ADJUNTOS_DIR`, `CONTRATOS_DIR` y `COMPROBANTES_DIR`, por defecto
-`backend/storage/`), asi que necesitan un servidor con disco propio: cPanel, o
+contratos, los comprobantes de finanzas, los archivos de las cotizaciones y
+los de la base de conocimiento se guardan en el **disco del servidor**
+(`ADJUNTOS_DIR`, `CONTRATOS_DIR`, `COMPROBANTES_DIR`, `COTIZACIONES_DIR` y
+`CONOCIMIENTO_DIR`, por defecto `backend/storage/`; las dos ultimas, si faltan,
+van junto a `COMPROBANTES_DIR` y `ADJUNTOS_DIR`), asi que necesitan un servidor con disco propio: cPanel, o
 Render con disco persistente. Los archivos antiguos que quedaron en Vercel
 Blob se siguen sirviendo por su URL y se borran con `BLOB_READ_WRITE_TOKEN` si
 se elimina el adjunto.
@@ -242,28 +249,118 @@ se elimina el adjunto.
 - Solo se aceptan tipos conocidos (PDF, imagenes, Office, texto, CSV, JSON,
   ZIP); HTML/SVG/JS quedan fuera a proposito. Los comprobantes solo admiten
   PDF, JPG, PNG y WEBP, y el tipo se comprueba por el contenido del archivo.
+  Cotizaciones y base de conocimiento: PDF, imagenes y Office (Word, Excel,
+  PowerPoint), tambien comprobados por contenido (`services/documentos.service.js`);
+  usan el limite de comprobantes y el de adjuntos respectivamente.
 
-## Finanzas (Ventas, Tesoreria y Gastos)
+### Google Drive (archivos y respaldo diario)
+
+Desde el 2026-10-16 se puede conectar una cuenta de Google Workspace de la
+empresa desde el panel de configuracion (**Google Drive y respaldos**, mismo
+cliente OAuth que Google Calendar, permiso `drive.file`). Con Drive conectado:
+
+- Adjuntos, comprobantes, contratos, cotizaciones y archivos de la base de
+  conocimiento se guardan en la carpeta "Archivos del CRM" de esa cuenta (una
+  subcarpeta por tipo) con su mismo nombre interno: la base no cambia. Las
+  fotos de perfil siguen en el disco. Al leer se busca en Drive y, si no esta,
+  en el disco; si Drive falla al guardar, el archivo va al disco y se sube
+  despues. Borrar manda a la papelera de Drive.
+- Cada noche (desde las 3:00) se suben los archivos que quedaron en el disco y
+  un respaldo completo de la base (`respaldo-AAAA-MM-DD-HHMM.json.gz`, JSON
+  portable entre MySQL y Postgres); se conservan 30. Se restaura con
+  `npm run db:copiar -- --desde-respaldo archivo.json.gz`.
+
+Codigo: `services/drive.service.js` (API de Drive sin dependencias),
+`services/almacenHibrido.service.js` (Drive o disco), `services/respaldo.service.js`
+y la tabla `conexion_drive` (migracion `20261018120000_conexion_drive`).
+Los pasos de Google Cloud estan en el panel (guia paso a paso en
+`components/configuracion/GuiaGoogleDrive.jsx`, con enlaces directos y valores
+para copiar) y resumidos en [DESPLIEGUE_CPANEL.md](DESPLIEGUE_CPANEL.md), paso 13.
+
+## Finanzas (Ventas, Tesoreria, Gastos y Cotizaciones)
 
 Modulo agregado el 2026-10-12 a partir de la "Carta a Santa Claus":
 
 - **Ventas**: pagos recibidos (cliente, cuenta destino, metodo, comprobante).
-- **Tesoreria**: la bolsa de ingresos (pagos registrados en MXN) se reparte en
-  partidas creadas libremente (Marketing, Caja chica, Ahorro…). Cada partida
-  muestra asignado, gastado, comprometido (gastos pendientes) y disponible.
+- **Tesoreria**: la bolsa de ingresos (pagos registrados en MXN) y el
+  **presupuesto mensual de cada categoria de gastos**, que sale de esa bolsa
+  (desde el 2026-10-14; antes eran partidas libres, que quedaron archivadas
+  como historial). Cada categoria muestra presupuesto, gastado, pendiente y
+  remanente. Reglas (`backend/src/services/presupuestos.service.js`): en un
+  mes abierto (el actual o uno futuro) la categoria aparta de la bolsa su
+  presupuesto, o lo ya gastado si se paso; al cerrar el mes solo cuenta lo
+  gastado y el remanente vuelve a la bolsa. No se puede presupuestar mas de lo
+  que hay sin asignar; un gasto sin presupuesto sale directo de la bolsa.
 - **Gastos**: seis categorias (Presupuesto General, Presupuesto Oficina,
-  Nomina, Gastos fijos, Gastos variables, Otros) con partida, fecha limite
-  (sale en la Agenda mientras este pendiente), comprobantes y "duplicar al
-  mes siguiente"; mas el **Informe** meses × partidas (o × categorias) con
-  Excel.
-- **Permisos por persona**: en Usuarios, el administrador global da a cada
-  cuenta un nivel (sin acceso / ver / editar) en Ventas, Tesoreria, cada
-  categoria de gastos y el Informe. Se guarda en `usuarios.permisos_finanzas`
-  y lo comprueba el servidor en cada peticion (`/api/finanzas`).
+  Nomina, Gastos fijos, Gastos variables, Otros) con fecha limite (sale en la
+  Agenda mientras este pendiente), comprobantes y "duplicar al mes
+  siguiente". Cada gasto descuenta del presupuesto de su categoria en el mes
+  de su fecha; la pantalla y el formulario muestran cuanto queda. El
+  **Informe** compara presupuesto contra gastado (un mes o el año, con
+  Excel) y tiene la tabla de lo gastado meses × categorias (y × partidas
+  anteriores, si las hubo).
+- **Permisos**: casillas `finanzas.*` de la tabla por area y de los ajustes
+  por persona (ver la seccion **Permisos** mas abajo): ventas y cada
+  categoria de gastos con ver / registrar / editar / eliminar, tesoreria con
+  ver / editar, el informe con ver. De fabrica nadie tiene nada salvo el
+  administrador general. Lo comprueba el servidor en cada peticion
+  (`/api/finanzas`). Los niveles por persona anteriores
+  (`usuarios.permisos_finanzas`) siguen contando hasta que se guardan los
+  nuevos.
 - El **portal de clientes se retiro** (el CRM es solo de uso interno): el
   modulo `portalClientes` queda apagado siempre, desaparece de Configuracion
   y las cuentas CLIENTE ya no pueden entrar. Sus tablas y pantallas se
   conservan en el codigo por si vuelve.
 
-Migraciones: `20261012160000_finanzas` (MySQL y Postgres). Solo agregan tablas
-y una columna.
+- **Cotizaciones** (2026-10-16): recibidas de proveedores o enviadas a
+  clientes, con estado (pendiente, aprobada, rechazada). Cada archivo es una
+  **version que no se reemplaza ni se borra**: la 1 es la original y los
+  cambios se suben como versiones nuevas con su monto y una nota de que
+  cambio. La ficha muestra cuanto cambio contra la original y la anterior, y
+  compara lado a lado la original con cualquier version. Permisos
+  `finanzas.cotizaciones.*`: ver, crear (subir cotizaciones y versiones),
+  editar (corregir datos), aprobar (cambiar el estado) y eliminar; de
+  fabrica solo el administrador general corrige, aprueba y elimina.
+
+Migraciones: `20261012160000_finanzas` (tablas y una columna),
+`20261014120000_presupuestos_categoria` (tabla `presupuestos_categoria` y
+archiva las partidas) y `20261016120000_cotizaciones_conocimiento`, en MySQL
+y Postgres.
+
+## Base de conocimiento
+
+Seccion del menu principal (modulo `conocimiento`, se apaga en el panel de
+configuracion): articulos con titulo, categoria, resumen, texto con formato
+basico tipo Markdown (titulos, negritas, cursivas, listas, citas, enlaces,
+codigo; se pinta como elementos de React, nunca como HTML) y archivos
+adjuntos, con buscador y filtro por categoria. De fabrica los
+**administradores** escriben, editan, destacan o dejan como borrador y **todo
+el equipo** lee (permisos `conocimiento.*`, configurables por area).
+Rutas: `/api/conocimiento` (`controllers/conocimiento.controller.js`).
+
+## Permisos (por area y por persona)
+
+Desde el 2026-10-16 lo que puede hacer cada persona se configura, no esta fijo
+en el codigo:
+
+- **Por area** (panel de configuracion → Roles y permisos): para cada area una
+  tabla con dos columnas, **Miembros** y **Administradores del area**, con
+  casillas si/no o de alcance (*no* / *los suyos* = donde participa / *su
+  area* / *todos*) en proyectos, tareas, agenda, clientes, contratos,
+  reportes, usuarios, base de conocimiento y finanzas. Se guarda en la
+  configuracion (`permisosAreas`, solo lo distinto de fabrica).
+- **Por persona** (Usuarios → menu de la persona → Permisos, solo el
+  administrador general): excepciones sobre lo que hereda de su area, en
+  `usuarios.permisos`.
+- El **administrador general** (ADMIN del area de Administracion) siempre puede
+  todo y no se configura. Solo el puede invitar o ascender administradores y
+  editar o desactivar a otros administradores.
+- **Valores de fabrica**: reproducen el comportamiento anterior a esta tabla
+  (los interruptores viejos del panel para miembros se toman como punto de
+  partida).
+
+Codigo: catalogo y resolucion en `backend/src/utils/permisosArea.utils.js`
+(`puede`, `alcanceDe`, `requiere(clave)` en las rutas); el servidor manda
+los permisos ya resueltos en `usuario.permisos` y el frontend los lee con
+`frontend/src/utils/permisos.js` para mostrar u ocultar menus y botones.
+Migracion: `20261017120000_permisos_por_area` (MySQL y Postgres).

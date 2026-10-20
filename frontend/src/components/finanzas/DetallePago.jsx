@@ -16,7 +16,7 @@ import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
 import { useConfirmacion } from '../ConfirmDialog';
 import { BADGE_ESTADO_PAGO } from '../../utils/finanzas';
 
-const DetallePago = ({ open, pagoId, puedeEditar, onClose, onEditar, onCambio }) => {
+const DetallePago = ({ open, pagoId, puedeEditar, puedeEliminar, onClose, onEditar, onCambio }) => {
   const { t } = usePreferences();
   const tf = useTextoFinanzas();
   const { monto, fecha, fechaHora } = useFormatoFinanzas();
@@ -67,12 +67,13 @@ const DetallePago = ({ open, pagoId, puedeEditar, onClose, onEditar, onCambio })
   };
 
   const anulado = pago?.estado === 'ANULADO';
-  const acciones = pago && puedeEditar ? [
-    !anulado && { label: t('edit'), icon: <Edit2 size={14} />, onSelect: () => onEditar(pago) },
-    !anulado && { label: tf('finAnular'), icon: <Ban size={14} />, onSelect: anular },
-    { separator: true },
-    { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: eliminar },
-  ] : [];
+  // Editar y anular piden "editar"; borrar, "eliminar".
+  const acciones = pago && (puedeEditar || puedeEliminar) ? [
+    puedeEditar && !anulado && { label: t('edit'), icon: <Edit2 size={14} />, onSelect: () => onEditar(pago) },
+    puedeEditar && !anulado && { label: tf('finAnular'), icon: <Ban size={14} />, onSelect: anular },
+    puedeEditar && puedeEliminar && { separator: true },
+    puedeEliminar && { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: eliminar },
+  ].filter(Boolean) : [];
 
   return (
     <Modal

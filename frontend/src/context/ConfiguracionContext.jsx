@@ -18,10 +18,6 @@ import { AREAS_FABRICA, CLAVE_TRADUCCION_AREA, nombreDesdeClave } from '../utils
 const MODULOS_RETIRADOS = ['portalClientes'];
 
 // Valores de fábrica mientras llega la configuración (iguales a los del backend).
-const PERMISOS_FABRICA = {
-  crearProyectos: false, verTodosProyectos: false, crearTareas: true, editarTareas: true,
-  borrarTareas: true, guardarPlantillas: false, subirAdjuntos: true,
-};
 const TAREAS_FABRICA = {
   estadoInicial: 'PENDIENTE', prioridadDefecto: 'MEDIA', exigirFechaLimite: false,
   exigirResponsable: false, asignarAlCreador: true, diasPorVencer: 2,
@@ -160,7 +156,6 @@ export const ConfiguracionProvider = ({ children }) => {
       nombre: a.nombre || (CLAVE_TRADUCCION_AREA[a.clave] ? t(CLAVE_TRADUCCION_AREA[a.clave]) : nombreDesdeClave(a.clave)),
     }));
     const porClave = new Map(areas.map((a) => [a.clave, a]));
-    const permisos = { ...PERMISOS_FABRICA, ...(config?.permisos || {}) };
     return {
       config,
       // Áreas configuradas, ya con nombre para mostrar.
@@ -168,9 +163,8 @@ export const ConfiguracionProvider = ({ children }) => {
       nombreArea: (clave) => porClave.get(clave)?.nombre
         || (CLAVE_TRADUCCION_AREA[clave] ? t(CLAVE_TRADUCCION_AREA[clave]) : nombreDesdeClave(clave)),
       colorArea: (clave) => porClave.get(clave)?.color || '#64748b',
-      // Permisos de los miembros; un administrador siempre puede.
-      permisos,
-      puede: (usuario, clave) => usuario?.rol === 'ADMIN' || permisos[clave] === true,
+      // Los permisos de cada persona vienen ya resueltos en usuario.permisos
+      // (utils/permisos.js).
       reglasTareas: { ...TAREAS_FABRICA, ...(config?.tareas || {}) },
       marca: config?.marca || { nombreSistema: 'OMNIS CRM', nombreCorto: 'OMNIS', nombreEmpresa: 'OMNIS Proyectos Globales' },
       login: config?.login || null,

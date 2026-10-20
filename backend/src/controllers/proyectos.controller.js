@@ -8,14 +8,19 @@ const { sortProyectos } = require('../utils/sort.utils');
 const { addDays, buildTemplateTasksFromProject } = require('../utils/plantillas.utils');
 const {
   esAdmin,
-  buildScopeProyectoParaAdmin,
+  esAdminGlobal,
+  buildFiltroAreaProyecto,
+  filtroProyectosVisibles,
+  proyectoCoincideConArea,
   puedeAdministrarProyecto,
-  puedeGestionarArea,
+  puedeEliminarProyecto,
   cargarProyectoVisible,
 } = require('../utils/permissions.utils');
+const { puede, alcanceDe } = require('../utils/permisosArea.utils');
 const { ESTADOS_PROYECTO, ESTADO_PROYECTO_DEFAULT, normalizarEstadoProyecto, esEstadoProyectoValido } = require('../utils/estados.utils');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere, contiene } = require('../utils/paginacion.utils');
 const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
+const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
 
 // Areas del enum `Area` del schema. `Proyecto.area` es texto con varias
 // separadas por coma, asi que cada una se valida contra esta lista.
@@ -113,7 +118,8 @@ const areasDeProyecto = (area) => String(area || 'DESARROLLO')
   .filter(Boolean);
 
 // Devuelve la lista de areas ya normalizada. Rechaza areas fuera del catalogo
-// (400) y, para un admin de area, cualquier area que no sea la suya (403).
+// (400) y, salvo al administrador general, cualquier area que no sea la propia
+// (403).
 const validarAreasProyecto = (area, usuario, mensajePermiso) => {
   const areas = areasDeProyecto(area);
   const validas = areasValidas();
@@ -121,7 +127,7 @@ const validarAreasProyecto = (area, usuario, mensajePermiso) => {
   if (invalidas.length > 0) {
     throw new ErrorValidacion(`Área inválida: ${invalidas.join(', ')}. Valores permitidos: ${validas.join(', ')}`);
   }
-  if (esAdmin(usuario) && !areas.every((item) => puedeGestionarArea(usuario, item))) {
+  if (!esAdminGlobal(usuario) && !areas.every((item) => item === usuario.area)) {
     throw new ErrorValidacion(mensajePermiso, 403);
   }
   return areas;
@@ -130,10 +136,10 @@ const validarAreasProyecto = (area, usuario, mensajePermiso) => {
 /**
  * Cliente del proyecto (directorio de clientes y proveedores). undefined si no
  * viene, null para quitarlo; solo admite fichas de tipo cliente o ambos. Lo
- * fija solo un administrador: el directorio es confidencial.
+ * fija quien puede ver el directorio ("clientes.ver"): es confidencial.
  */
 const resolverCliente = async (valor, usuario) => {
-  if (valor === undefined || !esAdmin(usuario)) return undefined;
+  if (valor === undefined || !puede(usuario, 'clientes.ver')) return undefined;
   if (valor === null || valor === '' || valor === 'null') return null;
   const id = Number.parseInt(valor, 10);
   const empresa = Number.isInteger(id)
@@ -295,25 +301,13 @@ const tareaEsDe = (tarea, usuarioId) => (
 );
 
 // €€ GET /api/proyectos €€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€
-// ADMIN: todos los proyectos
-// MIEMBRO: solo proyectos donde es miembro explícito
+// Los que alcanza "proyectos.ver": propios (miembro, creador o participa en
+// alguna tarea), los de su area o todos.
 const listar = async (req, res) => {
   try {
     const usuarioEsAdmin = esAdmin(req.usuario);
-    const scopeAdmin = buildScopeProyectoParaAdmin(req.usuario);
-
-    // "verTodosProyectos" (panel): los miembros ven todos, como un admin global.
-    const alcance = usuarioEsAdmin
-      ? scopeAdmin
-      : configEnCache().permisos.verTodosProyectos ? {} : {
-          OR: [
-            { miembros: { some: { id: req.usuario.id } } },
-            { creadorId: req.usuario.id },
-            { tareas: { some: { asignadoId: req.usuario.id } } },
-            { tareas: { some: { asignados: { some: { id: req.usuario.id } } } } },
-            { tareas: { some: { creadorId: req.usuario.id } } },
-          ],
-        };
+    const veClientes = puede(req.usuario, 'clientes.ver');
+    const alcance = filtroProyectosVisibles(req.usuario);
 
     // Filtros opcionales (?q= &estado= &area= &excluirEstado=). Sin ellos, se
     // comporta exactamente como antes.
@@ -373,9 +367,9 @@ const listar = async (req, res) => {
       const ultimaTareaCompletadaEn = cierres.length ? new Date(Math.max(...cierres)) : null;
 
       // Eliminamos el array de tareas para no sobrecargar la respuesta JSON.
-      // El cliente (directorio comercial) solo lo ve un administrador.
+      // El cliente (directorio comercial) solo lo ve quien ve el directorio.
       const { tareas, cliente, ...resto } = p;
-      if (usuarioEsAdmin) resto.cliente = cliente;
+      if (veClientes) resto.cliente = cliente;
       return {
         ...resto,
         progreso,
@@ -401,13 +395,12 @@ const listar = async (req, res) => {
 };
 
 // GET /api/proyectos/plantillas
-// `buildScopeProyectoParaAdmin` ya recorta por area para el admin de area
-// (filtro sobre `area`, que PlantillaProyecto tambien tiene) y deja pasar todo
-// al admin global; el miembro ve todas.
+// Quien ve los proyectos "de su area" ve las plantillas de su area (filtro
+// sobre `area`, que PlantillaProyecto tambien tiene); el resto, todas.
 const listarPlantillas = async (req, res) => {
   try {
     const plantillas = await prisma.plantillaProyecto.findMany({
-      where: esAdmin(req.usuario) ? buildScopeProyectoParaAdmin(req.usuario) : undefined,
+      where: alcanceDe(req.usuario, 'proyectos.ver') === 'area' ? buildFiltroAreaProyecto(req.usuario.area) : undefined,
       orderBy: [{ creadoEn: 'desc' }],
       include: INCLUDE_PLANTILLA,
     });
@@ -458,11 +451,11 @@ const guardarComoPlantilla = async (req, res) => {
 
     if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
-    const puede = puedeAdministrarProyecto(req.usuario, proyecto)
+    const permitido = puedeAdministrarProyecto(req.usuario, proyecto)
       || proyecto.creadorId === req.usuario.id
       || proyecto.miembros.some(m => m.id === req.usuario.id);
 
-    if (!puede) {
+    if (!permitido) {
       return res.status(403).json({ error: 'No tienes permiso para crear una plantilla de este proyecto' });
     }
 
@@ -589,13 +582,13 @@ const crear = async (req, res) => {
     const ids = normalizarIds(parseJsonArray(body.miembrosIds));
     const idsProyecto = ids.includes(req.usuario.id) ? ids : [...ids, req.usuario.id];
 
-    // Un miembro (con el permiso "crearProyectos") solo crea en su propia area.
-    const areas = esAdmin(req.usuario)
-      ? validarAreasProyecto(body.area, req.usuario, 'Solo puedes crear proyectos en tu propia área')
-      : validarAreasProyecto(body.area || req.usuario.area, req.usuario, '');
-    if (!esAdmin(req.usuario) && !areas.every((item) => item === req.usuario.area)) {
-      return res.status(403).json({ error: 'Solo puedes crear proyectos en tu propia área' });
-    }
+    // Fuera del administrador general, cada quien crea solo en su propia area
+    // (y sin indicarla, ahi va).
+    const areas = validarAreasProyecto(
+      body.area || (esAdminGlobal(req.usuario) ? undefined : req.usuario.area),
+      req.usuario,
+      'Solo puedes crear proyectos en tu propia área',
+    );
     const areaProyecto = areas.join(',');
 
     const { invalidos } = await validarMiembrosPorArea(ids);
@@ -623,7 +616,7 @@ const crear = async (req, res) => {
       return res.status(404).json({ error: 'La plantilla seleccionada no existe' });
     }
 
-    if (plantilla && esAdmin(req.usuario) && !puedeAdministrarProyecto(req.usuario, { area: plantilla.area })) {
+    if (plantilla && alcanceDe(req.usuario, 'proyectos.ver') === 'area' && !proyectoCoincideConArea(plantilla.area, req.usuario.area)) {
       return res.status(403).json({ error: 'No tienes permiso para usar plantillas de otra área' });
     }
 
@@ -635,7 +628,7 @@ const crear = async (req, res) => {
       const url = await subirArchivo(file, 'adjuntos');
       urlsSubidas.push(url);
       adjuntos.push({
-        nombre: file.originalname,
+        nombre: nombreUtf8(file.originalname),
         url,
         tipo: file.mimetype,
         tamano: file.size,
@@ -723,7 +716,7 @@ const editar = async (req, res) => {
     });
     if (!existente) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
-    if (esAdmin(req.usuario) && !puedeAdministrarProyecto(req.usuario, existente)) {
+    if (!puedeAdministrarProyecto(req.usuario, existente)) {
       return res.status(403).json({ error: 'No tienes permiso para editar este proyecto' });
     }
 
@@ -747,7 +740,7 @@ const editar = async (req, res) => {
       throw new ErrorValidacion(`Área inválida: ${areasInvalidas.join(', ')}. Valores permitidos: ${validas.join(', ')}`);
     }
     const cambiaArea = areas.join(',') !== areasActuales.join(',');
-    if (cambiaArea && esAdmin(req.usuario) && !areas.every((item) => puedeGestionarArea(req.usuario, item))) {
+    if (cambiaArea && !esAdminGlobal(req.usuario) && !areas.every((item) => item === req.usuario.area)) {
       throw new ErrorValidacion('Solo puedes mover el proyecto dentro de tu propia área', 403);
     }
 
@@ -816,19 +809,16 @@ const editar = async (req, res) => {
 // €€ DELETE /api/proyectos/:id €€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
-  if (!esAdmin(req.usuario)) {
-    return res.status(403).json({ error: 'Solo los administradores pueden eliminar proyectos' });
-  }
   if (isNaN(id)) return res.status(400).json({ error: 'ID inválido' });
 
   try {
     const existente = await prisma.proyecto.findUnique({
       where: { id },
-      select: { id: true, nombre: true, area: true, creadorId: true, _count: { select: { tareas: true } } },
+      select: { id: true, nombre: true, area: true, creadorId: true, miembros: { select: { id: true } }, _count: { select: { tareas: true } } },
     });
     if (!existente) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
-    if (!puedeAdministrarProyecto(req.usuario, existente)) {
+    if (!puedeEliminarProyecto(req.usuario, existente)) {
       return res.status(403).json({ error: 'No tienes permiso para eliminar este proyecto' });
     }
 

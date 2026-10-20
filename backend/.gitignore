@@ -10,3 +10,6 @@ plantilla_tareas_test.xlsx
 
 # PDF de contratos (fuera del repo: son documentos confidenciales)
 storage/
+
+# Credenciales para copiar datos entre bases (scripts/copiar_base.js); nunca al repositorio
+.env.migracion

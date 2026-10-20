@@ -1,11 +1,18 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": false
+  },
   "version": 2,
   "builds": [
     {
       "src": "src/server.js",
       "use": "@vercel/node",
-      "config": { "includeFiles": ["assets/**"] }
+      "config": {
+        "includeFiles": [
+          "assets/**"
+        ]
+      }
     }
   ],
   "routes": [

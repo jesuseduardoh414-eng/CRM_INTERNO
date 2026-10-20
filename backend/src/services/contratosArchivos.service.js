@@ -15,6 +15,8 @@
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
+const { crearAlmacenHibrido } = require('./almacenHibrido.service');
 
 const TAMANO_MAXIMO_MB = 25;
 
@@ -59,27 +61,30 @@ const esPdfValido = (buffer) => {
 
 const huella = (buffer) => crypto.createHash('sha256').update(buffer).digest('hex');
 
-/** Guarda el buffer y devuelve el nombre interno. `wx` falla si ya existiera. */
+// En Google Drive si esta conectado; si no, en el disco (almacenHibrido.service.js).
+const almacen = crearAlmacenHibrido({
+  clave: 'contratos',
+  rutaDe,
+  asegurarDirectorio,
+  directorio,
+  tipoDe: () => 'application/pdf',
+  esNombre: (nombre) => NOMBRE_INTERNO.test(nombre),
+});
+
+/** Guarda el buffer y devuelve el nombre interno. */
 const guardar = async (buffer) => {
-  await asegurarDirectorio();
   const nombreInterno = `${crypto.randomUUID()}.pdf`;
-  await fs.writeFile(rutaDe(nombreInterno), buffer, { flag: 'wx', mode: 0o600 });
+  await almacen.guardar(nombreInterno, buffer, 'application/pdf');
   return nombreInterno;
 };
 
-const leer = (nombreInterno) => fs.readFile(rutaDe(nombreInterno));
+const leer = (nombreInterno) => almacen.leer(nombreInterno);
 
-const borrar = async (nombreInterno) => {
-  try {
-    await fs.unlink(rutaDe(nombreInterno));
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
-  }
-};
+const borrar = (nombreInterno) => almacen.borrar(nombreInterno);
 
 /** Limpia el nombre original para mostrarlo y para Content-Disposition. */
 const limpiarNombre = (nombre) => {
-  const base = path.basename(String(nombre || 'contrato.pdf'))
+  const base = path.basename(nombreUtf8(nombre) || 'contrato.pdf')
     .normalize('NFC')
     .replace(/[\u0000-\u001f\u007f"\\/<>:|?*]+/g, '_')
     .trim()

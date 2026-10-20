@@ -12,10 +12,15 @@
  * aleatorio (uuid) imposible de adivinar, igual que hacia Vercel Blob: el
  * frontend los muestra con <img>/<iframe>, que no pueden mandar el token.
  * Nunca se usa el nombre que manda el cliente para construir rutas.
+ *
+ * Con Google Drive conectado, los adjuntos van a Drive (almacenHibrido); las
+ * fotos de perfil se quedan siempre en el disco (pesan poco y se cargan a
+ * cada rato). La URL guardada en la base no cambia.
  */
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { crearAlmacenHibrido } = require('./almacenHibrido.service');
 
 const CARPETAS = ['adjuntos', 'perfiles'];
 const PREFIJO_URL = '/api/archivos/';
@@ -70,14 +75,32 @@ const rutaDe = (carpeta, nombre) => {
   return path.join(directorio(), carpeta, nombre);
 };
 
+// Adjuntos: en Google Drive si esta conectado; si no, en el disco.
+const adjuntosHibrido = crearAlmacenHibrido({
+  clave: 'adjuntos',
+  rutaDe: (nombre) => {
+    const ruta = rutaDe('adjuntos', nombre);
+    if (!ruta) throw new Error('Nombre de archivo interno inválido');
+    return ruta;
+  },
+  asegurarDirectorio: () => asegurarCarpeta('adjuntos'),
+  directorio: () => path.join(directorio(), 'adjuntos'),
+  tipoDe: (nombre) => TIPOS_POR_EXTENSION[path.extname(nombre)] || 'application/octet-stream',
+  esNombre: (nombre) => Boolean(rutaDe('adjuntos', nombre)),
+});
+
 /** Guarda un archivo de multer (memoryStorage) y devuelve su URL relativa. */
 const guardar = async (file, carpeta = 'adjuntos') => {
   if (!CARPETAS.includes(carpeta)) throw new Error(`Carpeta de archivos no válida: ${carpeta}`);
   const ext = EXTENSIONES[file.mimetype];
   if (!ext) throw new Error('Tipo de archivo no permitido');
-  await asegurarCarpeta(carpeta);
   const nombre = `${crypto.randomUUID()}${ext}`;
-  await fs.writeFile(path.join(directorio(), carpeta, nombre), file.buffer, { flag: 'wx', mode: 0o600 });
+  if (carpeta === 'adjuntos') {
+    await adjuntosHibrido.guardar(nombre, file.buffer, TIPOS_POR_EXTENSION[ext]);
+  } else {
+    await asegurarCarpeta(carpeta);
+    await fs.writeFile(path.join(directorio(), carpeta, nombre), file.buffer, { flag: 'wx', mode: 0o600 });
+  }
   return `${PREFIJO_URL}${carpeta}/${nombre}`;
 };
 
@@ -93,8 +116,11 @@ const esLocal = (url) => desdeUrl(url) !== null;
 /** Borra archivos por URL. Nunca lanza: la fila en la base ya se borro. */
 const borrar = async (urls) => {
   const lista = (Array.isArray(urls) ? urls : [urls]).map(desdeUrl).filter(Boolean);
-  await Promise.all(lista.map(({ carpeta, nombre }) => fs.unlink(rutaDe(carpeta, nombre)).catch((error) => {
-    if (error.code !== 'ENOENT') console.error('No se pudo borrar un adjunto del disco:', error.message);
+  await Promise.all(lista.map(({ carpeta, nombre }) => (carpeta === 'adjuntos'
+    ? adjuntosHibrido.borrar(nombre)
+    : fs.unlink(rutaDe(carpeta, nombre))
+  ).catch((error) => {
+    if (error.code !== 'ENOENT') console.error('No se pudo borrar un adjunto:', error.message);
   })));
 };
 
@@ -103,7 +129,7 @@ const leer = async (carpeta, nombre) => {
   const ruta = rutaDe(carpeta, nombre);
   if (!ruta) return null;
   try {
-    const contenido = await fs.readFile(ruta);
+    const contenido = carpeta === 'adjuntos' ? await adjuntosHibrido.leer(nombre) : await fs.readFile(ruta);
     const ext = path.extname(nombre);
     return { contenido, tipo: TIPOS_POR_EXTENSION[ext], enLinea: SE_MUESTRAN.has(ext), ext };
   } catch (error) {

@@ -13,6 +13,7 @@ import { agendaService } from '../services/api';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { useTextoAgenda } from '../hooks/useTextoAgenda';
 import { aMinutosHora } from '../utils/horas';
 import { horarioDelDia, limpiarHorariosPorDia } from '../utils/horarioSemana';
@@ -98,9 +99,9 @@ const ModalConfiguracionAgenda = ({
   const tx = useTextoAgenda();
   const { moduloActivo } = useConfiguracion();
   const conGoogle = googleActivo && moduloActivo('googleCalendar');
-  // El calendario de la empresa solo lo ven y administran los administradores.
+  // El calendario de la empresa lo administra quien tiene "agenda.diasEmpresa".
   const { usuario } = useAuth();
-  const esAdmin = usuario?.rol === 'ADMIN';
+  const esAdmin = puede(usuario, 'agenda.diasEmpresa');
   const pestanas = PESTANAS.filter((p) => (p.id !== 'GOOGLE' || conGoogle) && (p.id !== 'EMPRESA' || esAdmin));
   const [tab, setTab] = useState(() => (pestanas.some((p) => p.id === tabInicial) ? tabInicial : 'HORARIO'));
   const [cargando, setCargando] = useState(false);

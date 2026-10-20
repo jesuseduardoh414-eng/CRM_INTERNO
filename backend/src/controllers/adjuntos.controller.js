@@ -1,7 +1,8 @@
 const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
-const { esAdmin, puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
 const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
+const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
 
 const getEntityType = (req) => {
   if (req.baseUrl.includes('agenda')) return 'agenda';
@@ -172,7 +173,7 @@ const subir = async (req, res) => {
 
       const adjunto = await prisma.adjunto.create({
         data: {
-          nombre: file.originalname,
+          nombre: nombreUtf8(file.originalname),
           url,
           tipo: file.mimetype,
           tamano: file.size,
@@ -236,16 +237,17 @@ const eliminar = async (req, res) => {
     if (adjunto.tarea) {
       proyectoScope = await prisma.proyecto.findUnique({
         where: { id: adjunto.tarea.proyectoId },
-        select: { area: true },
+        select: { area: true, creadorId: true, miembros: { select: { id: true } } },
       });
     } else if (adjunto.proyectoId) {
       proyectoScope = await prisma.proyecto.findUnique({
         where: { id: adjunto.proyectoId },
-        select: { area: true },
+        select: { area: true, creadorId: true, miembros: { select: { id: true } } },
       });
     }
 
-    const adminPuedeBorrar = esAdmin(req.usuario) && proyectoScope && puedeAdministrarProyecto(req.usuario, proyectoScope);
+    // Modera quien puede editar el proyecto ("proyectos.editar").
+    const adminPuedeBorrar = proyectoScope && puedeAdministrarProyecto(req.usuario, proyectoScope);
     const puedeBorrarEvento = adjunto.evento && canManageEvento(adjunto.evento, req.usuario.id);
 
     if (adjunto.usuarioId !== req.usuario.id && !adminPuedeBorrar && !puedeBorrarEvento) {

@@ -19,6 +19,7 @@ const archivosContratos = require('../services/contratosArchivos.service');
 const archivosComprobantes = require('../services/comprobantes.service');
 const correo = require('../services/email.service');
 const almacenamiento = require('../services/almacenamiento.service');
+const drive = require('../services/drive.service');
 
 const urlFrontend = (req) => String(process.env.FRONTEND_URL || req.headers.origin || '').replace(/\/+$/, '');
 const leerId = (valor) => { const n = Number.parseInt(valor, 10); return Number.isInteger(n) && n > 0 ? n : null; };
@@ -293,6 +294,10 @@ const estadoSistema = async (_req, res) => {
     comprobantes: { ok: comprobantesEscribible, ruta: archivosComprobantes.directorio() },
     marca: { ok: true, proveedor: 'Base de datos' },
   };
+  // Google Drive (sin consultar a Google: solo lo guardado aqui).
+  try {
+    resultado.drive = await drive.estado({ detalle: false });
+  } catch (_e) { /* sin la tabla o sin base: no se muestra */ }
 
   const zona = zonaHoraria();
   resultado.servidor = {

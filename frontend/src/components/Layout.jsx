@@ -14,13 +14,16 @@ import { useMisTareas } from '../hooks/useMisTareas';
 import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
 import { getEstadoProyecto } from '../utils/estadosProyecto';
 import { RUTA_INFORME, categoriasVisibles, puedeVerFinanzas, rutaCategoria, tieneAccesoFinanzas } from '../utils/finanzas';
+import { puede } from '../utils/permisos';
 import {
   BarChart3,
+  BookOpen,
   Building2,
   Calendar,
   ChevronsLeft,
   ChevronsRight,
   FileSignature,
+  FileStack,
   FolderKanban,
   LayoutDashboard,
   Menu,
@@ -44,22 +47,22 @@ const GRUPOS_MENU = [
       { to: '/dashboard', labelKey: 'home', Icono: LayoutDashboard },
       { to: '/proyectos', labelKey: 'projects', Icono: FolderKanban },
       { to: '/agenda', labelKey: 'agenda', Icono: Calendar, modulo: 'agenda' },
+      { to: '/conocimiento', labelKey: 'menuKnowledge', Icono: BookOpen, modulo: 'conocimiento', permiso: 'conocimiento.ver' },
     ],
   },
   {
     tituloKey: 'menuGroupBusiness',
-    soloAdmin: true,
     enlaces: [
-      { to: '/clientes', labelKey: 'menuClients', Icono: Building2, modulo: 'clientes' },
-      { to: '/contratos', labelKey: 'contracts', Icono: FileSignature, modulo: 'contratos' },
+      { to: '/clientes', labelKey: 'menuClients', Icono: Building2, modulo: 'clientes', permiso: 'clientes.ver' },
+      { to: '/contratos', labelKey: 'contracts', Icono: FileSignature, modulo: 'contratos', permiso: 'contratos.ver' },
     ],
   },
   {
     tituloKey: 'administration',
-    soloAdmin: true,
     enlaces: [
-      { to: '/reportes', labelKey: 'menuReports', Icono: BarChart3 },
-      { to: '/usuarios', labelKey: 'users', Icono: Users },
+      { to: '/reportes', labelKey: 'menuReports', Icono: BarChart3, permiso: 'reportes.ver' },
+      // Usuarios: quien gestiona personas o puede invitar.
+      { to: '/usuarios', labelKey: 'users', Icono: Users, permiso: ['usuarios.ver', 'usuarios.invitar'] },
     ],
   },
 ];
@@ -75,7 +78,7 @@ const Layout = ({ children }) => {
   const tf = useTextoFinanzas();
   const agendaActiva = moduloActivo('agenda');
   const esMiembro = Boolean(usuario) && usuario.rol !== 'ADMIN';
-  // Finanzas: el grupo sale solo con lo que la persona puede ver (usuario.finanzas).
+  // Finanzas: el grupo sale solo con lo que la persona puede ver (usuario.permisos).
   const finanzasActivas = moduloActivo('finanzas') && tieneAccesoFinanzas(usuario);
   const categoriasGasto = finanzasActivas ? categoriasVisibles(usuario) : [];
   const veInforme = finanzasActivas && puedeVerFinanzas(usuario, 'informe');
@@ -88,6 +91,7 @@ const Layout = ({ children }) => {
     finanzasActivas && puedeVerFinanzas(usuario, 'tesoreria') && { to: '/tesoreria', etiqueta: tf('finTesoreriaTitulo'), Icono: PiggyBank },
     // /gastos lleva a la primera categoría visible (colapsado, el icono es un enlace directo).
     subGastos.length > 0 && { to: '/gastos', etiqueta: tf('finGastosTitulo'), Icono: ReceiptText, sub: subGastos, raiz: '/gastos' },
+    finanzasActivas && puedeVerFinanzas(usuario, 'cotizaciones') && { to: '/cotizaciones', etiqueta: tf('finCotizacionesTitulo'), Icono: FileStack },
   ].filter(Boolean);
   // Accesos a sus proyectos. El Layout siempre está montado, así que es quien
   // recarga cuando otra pantalla cambia una tarea.
@@ -352,8 +356,10 @@ const Layout = ({ children }) => {
         </div>
 
         <nav className="flex flex-1 flex-col overflow-y-auto px-3 pb-3" aria-label={t('mainMenu')}>
-          {GRUPOS_MENU.filter((grupo) => !grupo.soloAdmin || usuario?.rol === 'ADMIN').map((grupo) => {
-            const enlaces = grupo.enlaces.filter(({ modulo }) => !modulo || moduloActivo(modulo));
+          {GRUPOS_MENU.map((grupo) => {
+            // Cada enlace sale con su módulo activo y el permiso de la persona.
+            const enlaces = grupo.enlaces.filter(({ modulo, permiso }) => (!modulo || moduloActivo(modulo))
+              && (!permiso || [].concat(permiso).some((clave) => puede(usuario, clave))));
             if (!enlaces.length) return null;
             return (
               <div key={grupo.tituloKey}>

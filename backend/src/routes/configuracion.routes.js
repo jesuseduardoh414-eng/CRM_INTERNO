@@ -4,11 +4,13 @@
 //                     POST /archivos/:clave, DELETE /archivos/:clave,
 //                     /administradores (listar, invitar, acciones),
 //                     POST /correo/prueba, POST /correo/verificar, GET /estado,
-//                     GET /correo/plantillas, POST /correo/vista-previa
+//                     GET /correo/plantillas, POST /correo/vista-previa,
+//                     /drive (Google Drive y respaldos)
 const express = require('express');
 const multer = require('multer');
 const ctrl = require('../controllers/configuracion.controller');
 const sistema = require('../controllers/configuracionSistema.controller');
+const drive = require('../controllers/configuracionDrive.controller');
 const { verificarToken } = require('../middlewares/auth.middleware');
 const { soloConfigurador } = require('../middlewares/roles.middleware');
 const { limiteAccionSensible } = require('../middlewares/rateLimit.middleware');
@@ -43,5 +45,12 @@ router.post('/correo/verificar', limiteAccionSensible, sistema.verificarCorreo);
 router.get('/correo/plantillas', sistema.plantillasCorreo);
 router.post('/correo/vista-previa', sistema.vistaPreviaCorreo);
 router.get('/estado', sistema.estadoSistema);
+
+// Google Drive: archivos del CRM y respaldo diario de la base
+router.get('/drive', drive.estado);
+router.post('/drive/conectar', limiteAccionSensible, drive.conectar);
+router.delete('/drive', limiteAccionSensible, drive.desconectar);
+router.post('/drive/respaldo', limiteAccionSensible, drive.respaldarAhora);
+router.post('/drive/pendientes', limiteAccionSensible, drive.subirPendientes);
 
 module.exports = router;

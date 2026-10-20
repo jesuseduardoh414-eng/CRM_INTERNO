@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import useSWR from 'swr';
 import { comentariosService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { usePreferences } from '../context/PreferencesContext';
 import { useToast } from '../context/ToastContext';
 import { MessageSquare, Trash2, Send } from 'lucide-react';
@@ -92,7 +93,8 @@ const TaskComments = ({ tareaId, type = 'tareas', onCommentsChange }) => {
         ) : (
           lista.map(c => {
             const esMio = c.autorId === usuario?.id;
-            const puedeBorrar = esMio || usuario?.rol === 'ADMIN';
+            // Autor o quien edita proyectos (el servidor revisa el alcance).
+            const puedeBorrar = esMio || puede(usuario, 'proyectos.editar');
             return (
               <div key={c.id} className={`group flex gap-2.5 ${esMio ? 'flex-row-reverse' : ''}`}>
                 <UserAvatar

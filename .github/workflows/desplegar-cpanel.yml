@@ -1,0 +1,143 @@
+name: Desplegar en cPanel
+
+# Cada push a master revisa y compila el frontend, sube backend y frontend al
+# cPanel por SSH y reinicia la aplicación Node.js. Si cambiaron dependencias,
+# esquema o migraciones, también corre npm install, prisma generate y
+# db:migrate en el servidor (backend/scripts/tras_desplegar.sh).
+#
+# No hace nada hasta que exista la variable CPANEL_USER en GitHub
+# (Settings → Secrets and variables → Actions). Configuración completa en
+# DESPLIEGUE_CPANEL.md, "Actualizar a una versión nueva".
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      todo:
+        description: Correr npm install, prisma generate y migraciones aunque no hayan cambiado
+        type: boolean
+        default: false
+
+concurrency:
+  group: cpanel-produccion
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  desplegar:
+    if: vars.CPANEL_USER != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HOST: ${{ vars.CPANEL_HOST || 'crm.omnispg.com' }}
+      PUERTO: ${{ vars.CPANEL_PORT || '22' }}
+      USUARIO: ${{ vars.CPANEL_USER }}
+      APP: ${{ vars.CPANEL_APP_ROOT || 'crm_backend' }}
+      SITIO: ${{ vars.CPANEL_SITIO || 'public_html' }}
+      URL: ${{ vars.CPANEL_URL || 'https://crm.omnispg.com' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Frontend (lint y build para cPanel)
+        working-directory: frontend
+        run: |
+          npm ci
+          npx eslint src
+          npm run build:cpanel
+          test -f dist/index.html && test -f dist/.htaccess
+
+      - name: Backend (sintaxis)
+        working-directory: backend
+        run: find src scripts -name '*.js' -print0 | xargs -0 -n1 node --check
+
+      - name: Conexión SSH
+        env:
+          LLAVE: ${{ secrets.CPANEL_SSH_KEY }}
+          CONOCIDOS: ${{ vars.CPANEL_KNOWN_HOSTS }}
+        run: |
+          test -n "$LLAVE" || { echo "::error::Falta el secreto CPANEL_SSH_KEY"; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$LLAVE" > ~/.ssh/cpanel
+          chmod 600 ~/.ssh/cpanel
+          # La huella del servidor va fija: si cambia, el despliegue se detiene.
+          if [ -n "$CONOCIDOS" ]; then printf '%s\n' "$CONOCIDOS"; else cat .github/cpanel_known_hosts; fi > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host cpanel
+            HostName $HOST
+            Port $PUERTO
+            User $USUARIO
+            IdentityFile ~/.ssh/cpanel
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+          EOF
+          ssh cpanel 'echo "Conectado como $(whoami)"; command -v rsync >/dev/null || { echo "::error::El servidor no tiene rsync"; exit 1; }'
+
+      - name: Qué cambió desde el último despliegue
+        id: cambios
+        env:
+          TODO: ${{ inputs.todo == true }}
+        run: |
+          desde=$(ssh cpanel "cat '$APP/.commit_desplegado' 2>/dev/null" || true)
+          if [ "$TODO" = true ] || [ -z "$desde" ] || ! git cat-file -e "$desde^{commit}" 2>/dev/null; then
+            echo "Sin despliegue anterior conocido (o pedido a mano): se corre todo."
+            desde=""
+          else
+            echo "Último despliegue: $desde"
+          fi
+          cambio() { [ -z "$desde" ] || ! git diff --quiet "$desde" HEAD -- "$@"; }
+          opciones=""
+          if cambio backend/package.json backend/package-lock.json; then opciones="$opciones --instalar"; fi
+          if cambio backend/package.json backend/package-lock.json backend/prisma/schema.prisma backend/prisma/postgres/schema.prisma; then opciones="$opciones --generar"; fi
+          if cambio backend/prisma/migrations backend/prisma/postgres/migrations; then opciones="$opciones --migrar"; fi
+          echo "Opciones:${opciones:- ninguna}"
+          echo "opciones=$opciones" >> "$GITHUB_OUTPUT"
+
+      # Solo lo que usa el servidor; node_modules, tmp/, .commit_desplegado y
+      # lo demás que ya esté en el servidor no se toca (fuera de los --include).
+      - name: Subir el backend
+        run: |
+          rsync -rlcz --chmod=D755,F644 --delete-after --itemize-changes \
+            --include='/src/***' --include='/prisma/***' --include='/scripts/***' --include='/assets/***' \
+            --include='/package.json' --include='/package-lock.json' --include='/.env.example' \
+            --exclude='*' \
+            backend/ "cpanel:$APP/"
+
+      - name: Instalar, migrar y reiniciar en el servidor
+        run: ssh cpanel "bash '$APP/scripts/tras_desplegar.sh' ${{ steps.cambios.outputs.opciones }} '${{ github.sha }}'"
+
+      - name: Comprobar la API
+        run: curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "$URL/api/health"
+
+      # Primero assets/ (archivos con hash, nuevos) y al final index.html, para
+      # que nadie reciba un index.html que apunte a archivos que aún no están.
+      # La carpeta api/ es de la aplicación Node.js y nunca se toca.
+      - name: Subir el frontend
+        run: |
+          rsync -rlcz --chmod=D755,F644 frontend/dist/assets/ "cpanel:$SITIO/assets/"
+          rsync -rlcz --chmod=D755,F644 --exclude='/assets/' --exclude='/api/' frontend/dist/ "cpanel:$SITIO/"
+
+      # Los assets de versiones anteriores se dejan 7 días (pestañas abiertas).
+      - name: Limpiar assets viejos
+        run: |
+          (cd frontend/dist/assets && find . -type f | sed 's#^\./##' | sort) > actuales.txt
+          ssh cpanel "cd '$SITIO/assets' && find . -type f -mtime +7 | sed 's#^\./##' | sort" > viejos.txt
+          comm -13 actuales.txt viejos.txt > borrar.txt
+          echo "Se borran $(wc -l < borrar.txt) assets viejos"
+          if [ -s borrar.txt ]; then ssh cpanel "cd '$SITIO/assets' && xargs -d '\n' rm -f --" < borrar.txt; fi
+
+      - name: Comprobar el sitio
+        run: |
+          js=$(grep -o 'assets/index-[^"]*\.js' frontend/dist/index.html | head -1)
+          curl -fsS "$URL/" | grep -q "$js" || { echo "::error::$URL no sirve el index.html nuevo ($js)"; exit 1; }
+          echo "En línea: $URL ($js)"

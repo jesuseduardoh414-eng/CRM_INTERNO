@@ -1,7 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const { configEnCache } = require('../services/configuracion.service');
-const { esAdmin } = require('../utils/permissions.utils');
+const { puede } = require('../utils/permisosArea.utils');
 
 // Adjuntos de tareas, proyectos y eventos.
 //
@@ -46,7 +46,7 @@ const fileFilter = (req, file, cb) => {
     return cb(errorCliente('Los archivos adjuntos están desactivados en esta instalación.', 403), false);
   }
   const esAgenda = String(req.baseUrl || '').startsWith('/api/agenda');
-  if (!esAgenda && !esAdmin(req.usuario) && configEnCache().permisos?.subirAdjuntos !== true) {
+  if (!esAgenda && !puede(req.usuario, 'tareas.adjuntos')) {
     return cb(errorCliente('Tu cuenta no tiene permiso para subir archivos.', 403), false);
   }
   const permitidas = tiposPermitidos();

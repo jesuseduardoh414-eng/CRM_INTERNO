@@ -3,7 +3,10 @@
 // área solo ve a su gente y sus proyectos; el general ve todo.
 const XLSX = require('xlsx');
 const prisma = require('../lib/prisma');
-const { buildScopeProyectoParaAdmin, esAdminDeArea } = require('../utils/permissions.utils');
+const { esAdminGlobal, buildFiltroAreaProyecto } = require('../utils/permissions.utils');
+
+// Alcance de los reportes: el administrador general ve todo; el resto, su area.
+const scopeReporte = (usuario) => (esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(usuario.area));
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { rangoDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
 const { configEnCache } = require('../services/configuracion.service');
@@ -52,9 +55,9 @@ const personas = async (req, res) => {
   const rango = leerRango(req.query);
   if (rango.error) return res.status(400).json({ error: rango.error });
   try {
-    const scope = buildScopeProyectoParaAdmin(req.usuario);
+    const scope = scopeReporte(req.usuario);
     const miembros = await prisma.usuario.findMany({
-      where: { rol: { in: ['MIEMBRO', 'ADMIN'] }, OR: [{ estado: 'activo' }, { estado: null }], ...(esAdminDeArea(req.usuario) ? { area: req.usuario.area } : {}) },
+      where: { rol: { in: ['MIEMBRO', 'ADMIN'] }, OR: [{ estado: 'activo' }, { estado: null }], ...(esAdminGlobal(req.usuario) ? {} : { area: req.usuario.area }) },
       orderBy: { nombre: 'asc' },
       select: { id: true, nombre: true, area: true, rol: true, fotoPerfilUrl: true },
     });
@@ -125,7 +128,7 @@ const personas = async (req, res) => {
 // ---------------------------------------------------------------------------
 const clientes = async (req, res) => {
   try {
-    const scope = buildScopeProyectoParaAdmin(req.usuario);
+    const scope = scopeReporte(req.usuario);
     const empresas = await prisma.empresa.findMany({
       where: { tipo: { in: ['CLIENTE', 'AMBOS'] } },
       orderBy: { nombre: 'asc' },

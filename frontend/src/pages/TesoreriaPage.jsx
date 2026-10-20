@@ -1,147 +1,75 @@
-// Tesorería: la bolsa de ingresos (pagos registrados) y cómo se reparte en
-// partidas. Cada partida muestra lo asignado, lo gastado, lo comprometido
-// (gastos pendientes) y lo disponible. Permiso `tesoreria` (ver / editar).
+// Tesorería: la bolsa de ingresos (pagos registrados) y el presupuesto de cada
+// mes por categoría de gastos, que sale de esa bolsa. Cada categoría muestra
+// presupuesto, gastado, pendiente y remanente; al cerrar el mes, lo que no se
+// gastó vuelve a la bolsa. Permiso `tesoreria` (ver / editar).
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Link, Navigate } from 'react-router-dom';
-import { Archive, ArrowDownToLine, FolderPlus, Landmark, Pencil, PiggyBank, Plus, Trash2, Wallet } from 'lucide-react';
+import { CalendarCheck, ChevronLeft, ChevronRight, Landmark, PiggyBank, SlidersHorizontal, Wallet } from 'lucide-react';
 import { finanzasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
-import { useToast } from '../context/ToastContext';
 import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
-import { useConfirmacion } from '../components/ConfirmDialog';
 import { ListSkeleton } from '../components/Skeleton';
 import CampoFiltro from '../components/CampoFiltro';
-import ActionMenu from '../components/ActionMenu';
 import { Button } from '../components/ui/button';
-import FormularioPartida from '../components/finanzas/FormularioPartida';
-import FormularioAsignacion from '../components/finanzas/FormularioAsignacion';
-import { Cifras, ErrorCarga, Panel, PuntoPartida, SelectorAnio, Vacio } from '../components/finanzas/piezas';
+import FormularioPresupuesto from '../components/finanzas/FormularioPresupuesto';
+import { Cifras, ErrorCarga, Panel, SelectorAnio, TarjetaPresupuesto, Vacio } from '../components/finanzas/piezas';
 import { useFormatoFinanzas } from '../hooks/useFormatoFinanzas';
 import {
-  OPCIONES_SWR_FINANZAS, aniosSelector, nivelFinanzas, nombreMes, puedeVerFinanzas, recargarFinanzas, tieneAccesoGastos,
+  OPCIONES_SWR_FINANZAS, aniosSelector, moverMes, nombreMes, nombreMesAnio, puedeFinanzas, puedeVerFinanzas, recargarFinanzas, rutaCategoria,
 } from '../utils/finanzas';
 import GestionCuentas from '../components/finanzas/GestionCuentas';
-
-// Tarjeta de una partida: disponible, barra de gastado / comprometido y cifras.
-const TarjetaPartida = ({ p, acciones, tf, monto }) => {
-  const base = Math.max(p.asignado, p.gastado + p.comprometido, 0.01);
-  const pctGastado = Math.min(100, (p.gastado / base) * 100);
-  const pctComprometido = Math.min(100 - pctGastado, (p.comprometido / base) * 100);
-  return (
-    <li className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-[14px] font-semibold text-[var(--color-text)]">
-            <PuntoPartida color={p.color} size={10} />
-            <span className="truncate">{p.nombre}</span>
-            {!p.activa && <span className="badge-neutral">{tf('finArchivada')}</span>}
-          </div>
-          {p.descripcion && <p className="mt-0.5 truncate text-[12px] text-[var(--color-text-muted)]">{p.descripcion}</p>}
-        </div>
-        {acciones.length > 0 && <ActionMenu size={16} className="-mr-2 -mt-1 h-9 w-9" items={acciones} />}
-      </div>
-      <div className={`mt-3 text-[22px] font-semibold tabular-nums ${p.disponible < 0 ? 'text-[var(--color-error)]' : 'text-[var(--color-text)]'}`}>{monto(p.disponible)}</div>
-      <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">{tf('finDisponible')}</div>
-      <div className="mt-3 flex h-2 overflow-hidden rounded-full bg-[var(--color-surface-3)]" role="img" aria-label={tf('finBarraPartida', { gastado: monto(p.gastado), comprometido: monto(p.comprometido), asignado: monto(p.asignado) })}>
-        <span style={{ width: `${pctGastado}%`, background: p.color || 'var(--color-primary)' }} />
-        <span style={{ width: `${pctComprometido}%`, background: p.color || 'var(--color-primary)', opacity: 0.45 }} />
-      </div>
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
-        <div><dt className="text-[var(--color-text-muted)]">{tf('finAsignado')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(p.asignado)}</dd></div>
-        <div><dt className="text-[var(--color-text-muted)]">{tf('finGastado')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(p.gastado)}</dd></div>
-        <div><dt className="text-[var(--color-text-muted)]">{tf('finComprometido')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(p.comprometido)}</dd></div>
-      </dl>
-    </li>
-  );
-};
-
 
 const TesoreriaPage = () => {
   const { usuario } = useAuth();
   const { t } = usePreferences();
   const tf = useTextoFinanzas();
-  const { monto, fecha, locale } = useFormatoFinanzas();
-  const { showToast } = useToast();
-  const { confirmar, dialogo } = useConfirmacion();
-  const [anio, setAnio] = useState(() => new Date().getFullYear());
-  const [formPartida, setFormPartida] = useState(null);
-  const [formAsignacion, setFormAsignacion] = useState(null);
-  const [verArchivadas, setVerArchivadas] = useState(false);
+  const { monto, locale } = useFormatoFinanzas();
+  // null = el mes actual (lo decide el servidor, en la zona de la empresa).
+  const [periodo, setPeriodo] = useState(null);
+  const [formAbierto, setFormAbierto] = useState(false);
   const [cuentasAbiertas, setCuentasAbiertas] = useState(false);
-  const nivel = nivelFinanzas(usuario, 'tesoreria');
-  const puedeVer = nivel !== 'ninguno';
-  const puedeEditar = nivel === 'editar';
+  const puedeVer = puedeFinanzas(usuario, 'tesoreria');
+  const puedeEditar = puedeFinanzas(usuario, 'tesoreria', 'editar');
 
-  const { data, error, isLoading, mutate } = useSWR(puedeVer ? ['finanzas-tesoreria', anio] : null, () => finanzasService.tesoreria.resumen({ anio }), OPCIONES_SWR_FINANZAS);
+  const { data, error, isLoading, mutate } = useSWR(
+    puedeVer ? ['finanzas-tesoreria', periodo?.anio ?? 'actual', periodo?.mes ?? 'actual'] : null,
+    () => finanzasService.tesoreria.resumen(periodo || {}),
+    { ...OPCIONES_SWR_FINANZAS, keepPreviousData: true },
+  );
 
   if (!puedeVer) return <Navigate to="/dashboard" replace />;
 
-  const partidas = data?.partidas || [];
-  const activas = partidas.filter((p) => p.activa);
-  const archivadas = partidas.filter((p) => !p.activa);
   const negativo = (data?.sinAsignar ?? 0) < 0;
-
-  const archivarPartida = async (p) => {
-    const archivar = conMovimientos(p);
-    const ok = await confirmar({
-      titulo: archivar ? tf('finPartidaArchivarConfirm', { nombre: p.nombre }) : tf('finPartidaEliminarConfirm', { nombre: p.nombre }),
-      descripcion: archivar ? tf('finPartidaArchivarTexto') : tf('finPartidaEliminarTexto'),
-      textoConfirmar: archivar ? tf('finArchivar') : t('delete'),
-      peligro: !archivar,
-    });
-    if (!ok) return;
-    try {
-      const res = await finanzasService.partidas.eliminar(p.id);
-      showToast(res.archivada ? tf('finPartidaArchivada') : tf('finPartidaEliminada'), 'success');
-      recargarFinanzas();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  };
-
-  const reactivarPartida = async (p) => {
-    try {
-      await finanzasService.partidas.editar(p.id, { activa: true });
-      showToast(tf('finPartidaReactivada'), 'success');
-      recargarFinanzas();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  };
-
-  const eliminarAsignacion = async (a) => {
-    const ok = await confirmar({ titulo: tf('finAsignacionEliminarConfirm', { monto: monto(a.monto), partida: a.partida?.nombre || '' }), textoConfirmar: t('delete'), peligro: true });
-    if (!ok) return;
-    try {
-      await finanzasService.tesoreria.eliminarAsignacion(a.id);
-      showToast(tf('finAsignacionEliminada'), 'success');
-      recargarFinanzas();
-    } catch (err) {
-      showToast(err.message, 'error');
-    }
-  };
-
-  const conMovimientos = (p) => p.totalAsignaciones > 0 || p.totalGastos > 0;
-  const accionesDe = (p) => (puedeEditar ? [
-    p.activa && { label: tf('finAsignar'), icon: <ArrowDownToLine size={14} />, onSelect: () => setFormAsignacion({ asignacion: null, partidaId: p.id, clave: Date.now() }) },
-    { label: t('edit'), icon: <Pencil size={14} />, onSelect: () => setFormPartida({ partida: p, clave: Date.now() }) },
-    !p.activa && { label: tf('finReactivar'), icon: <FolderPlus size={14} />, onSelect: () => reactivarPartida(p) },
-    p.activa && { separator: true },
-    p.activa && { label: conMovimientos(p) ? tf('finArchivar') : t('delete'), icon: conMovimientos(p) ? <Archive size={14} /> : <Trash2 size={14} />, danger: true, onSelect: () => archivarPartida(p) },
-  ] : []);
+  const presupuesto = data?.presupuesto;
+  const nombre = data ? nombreMesAnio(data.anio, data.mes, locale) : '';
+  const esMesActual = data && data.anio === data.mesActual.anio && data.mes === data.mesActual.mes;
+  const conMovimientos = presupuesto?.categorias.some((c) => c.presupuesto > 0 || c.gastado > 0 || c.comprometido > 0);
+  const irA = (delta) => data && setPeriodo(moverMes({ anio: data.anio, mes: data.mes }, delta));
+  const celda = (valor, { signo = false } = {}) => (valor
+    ? <span className={`tabular-nums ${signo && valor < 0 ? 'text-[var(--color-error)]' : ''}`}>{monto(valor)}</span>
+    : <span className="text-[var(--color-text-muted)]">—</span>);
 
   const cifras = data ? [
     { clave: 'ingresos', etiqueta: tf('finKpiBolsa'), valor: monto(data.ingresos), sub: tf('finKpiBolsaSub') },
-    { clave: 'asignado', etiqueta: tf('finKpiAsignado'), valor: monto(data.asignado), sub: tf('finKpiAsignadoSub', { n: activas.length }) },
-    { clave: 'sinAsignar', etiqueta: tf('finKpiSinAsignar'), valor: monto(data.sinAsignar), alerta: negativo ? 'error' : undefined, sub: negativo ? tf('finKpiSinAsignarNeg') : undefined },
-    { clave: 'gastado', etiqueta: tf('finKpiGastadoPartidas'), valor: monto(partidas.reduce((s, p) => s + p.gastado, 0)), sub: tf('finKpiComprometidoSub', { monto: monto(partidas.reduce((s, p) => s + p.comprometido, 0)) }) },
+    { clave: 'gastado', etiqueta: tf('finKpiGastadoTotal'), valor: monto(data.gastado), sub: tf('finKpiGastadoTotalSub', { monto: monto(data.comprometido) }) },
+    { clave: 'apartado', etiqueta: tf('finKpiApartado'), valor: monto(data.apartado), sub: tf('finKpiApartadoSub') },
+    { clave: 'sinAsignar', etiqueta: tf('finKpiSinAsignar'), valor: monto(data.sinAsignar), alerta: negativo ? 'error' : undefined, sub: negativo ? tf('finKpiSinAsignarNeg') : tf('finKpiSinAsignarSub') },
   ] : [];
+
+  const navegador = data && (
+    <div className="flex items-center gap-1">
+      <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => irA(-1)} aria-label={tf('finMesAnterior')} title={tf('finMesAnterior')}><ChevronLeft size={16} /></Button>
+      {!esMesActual && (
+        <Button variant="ghost" className="h-9 px-2.5 text-[12.5px]" onClick={() => setPeriodo(null)}><CalendarCheck size={14} /> {tf('finIrMesActual')}</Button>
+      )}
+      <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => irA(1)} aria-label={tf('finMesSiguiente')} title={tf('finMesSiguiente')}><ChevronRight size={16} /></Button>
+    </div>
+  );
 
   return (
     <div className="mx-auto max-w-7xl">
-      {dialogo}
       <div className="mb-6 flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{tf('finTesoreriaTitulo')}</h1>
@@ -150,8 +78,9 @@ const TesoreriaPage = () => {
         {puedeEditar && (
           <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
             <Button variant="outline" className="w-full md:w-auto" onClick={() => setCuentasAbiertas(true)}><Landmark size={16} /> {tf('finCuentas')}</Button>
-            <Button variant="outline" className="w-full md:w-auto" onClick={() => setFormPartida({ partida: null, clave: Date.now() })}><FolderPlus size={16} /> {tf('finPartidaNueva')}</Button>
-            <Button className="w-full md:w-auto" onClick={() => setFormAsignacion({ asignacion: null, partidaId: null, clave: Date.now() })} disabled={activas.length === 0}><ArrowDownToLine size={16} /> {tf('finAsignar')}</Button>
+            <Button className="w-full md:w-auto" onClick={() => setFormAbierto(true)} disabled={!data}>
+              <SlidersHorizontal size={16} /> {conMovimientos ? tf('finEditarPresupuesto') : tf('finFijarPresupuesto')}
+            </Button>
           </div>
         )}
       </div>
@@ -168,123 +97,109 @@ const TesoreriaPage = () => {
           )}
 
           <Panel
-            titulo={tf('finPartidas')}
+            titulo={tf('finPresupuestoDe', { mes: nombre })}
             icono={<Wallet size={14} aria-hidden="true" />}
-            conteo={activas.length}
             className="mb-6"
-            extra={archivadas.length > 0 && (
-              <button type="button" className="cli-enlace" onClick={() => setVerArchivadas((v) => !v)}>
-                {verArchivadas ? tf('finOcultarArchivadas') : tf('finVerArchivadas', { n: archivadas.length })}
-              </button>
-            )}
+            extra={navegador}
           >
-            {partidas.length === 0 ? (
+            {presupuesto.cerrado && (
+              <p className="border-b border-[var(--color-border)] px-4 py-2.5 text-[12.5px] text-[var(--color-text-muted)]">
+                <span className="badge-neutral mr-2">{tf('finMesCerrado')}</span>{tf('finMesCerradoHint')}
+              </p>
+            )}
+            {!conMovimientos ? (
               <Vacio
                 icono={<PiggyBank size={28} className="mb-1 text-[var(--color-text-muted)]" aria-hidden="true" />}
-                titulo={tf('finPartidasVacio')}
-                texto={tf('finPartidasVacioHint')}
-                accion={puedeEditar && <Button onClick={() => setFormPartida({ partida: null, clave: Date.now() })}><Plus size={16} /> {tf('finPartidaNueva')}</Button>}
+                titulo={tf('finPresupuestoVacio', { mes: nombre })}
+                texto={tf('finPresupuestoVacioHint')}
+                accion={puedeEditar && <Button onClick={() => setFormAbierto(true)}><SlidersHorizontal size={16} /> {tf('finFijarPresupuesto')}</Button>}
               />
             ) : (
-              <ul className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-                {activas.map((p) => <TarjetaPartida key={p.id} p={p} acciones={accionesDe(p)} tf={tf} monto={monto} />)}
-                {verArchivadas && archivadas.map((p) => <TarjetaPartida key={p.id} p={p} acciones={accionesDe(p)} tf={tf} monto={monto} />)}
-              </ul>
-            )}
-            {(data.sinPartida.gastado > 0 || data.sinPartida.comprometido > 0) && (
-              <p className="border-t border-[var(--color-border)] px-4 py-2.5 text-[12.5px] text-[var(--color-text-muted)]">
-                {tf('finSinPartidaResumen', { gastado: monto(data.sinPartida.gastado), comprometido: monto(data.sinPartida.comprometido) })}
-              </p>
+              <>
+                <ul className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {presupuesto.categorias.map((c) => (
+                    <TarjetaPresupuesto
+                      key={c.categoria}
+                      fila={c}
+                      titulo={tf(`finCat${c.categoria}`)}
+                      tf={tf}
+                      monto={monto}
+                      extra={puedeVerFinanzas(usuario, `gastos.${c.categoria}`) && (
+                        <Link to={rutaCategoria(c.categoria)} className="cli-enlace shrink-0 text-[12.5px]">{tf('finVerGastos')}</Link>
+                      )}
+                    />
+                  ))}
+                </ul>
+                <dl className="flex flex-wrap gap-x-6 gap-y-1 border-t border-[var(--color-border)] px-4 py-2.5 text-[12.5px] text-[var(--color-text-muted)]">
+                  <div className="font-medium text-[var(--color-text)]">{tf('finTotalMes')}</div>
+                  <div>{tf('finPresupuesto')}: <strong className="tabular-nums text-[var(--color-text)]">{monto(presupuesto.totales.presupuesto)}</strong></div>
+                  <div>{tf('finGastado')}: <strong className="tabular-nums text-[var(--color-text)]">{monto(presupuesto.totales.gastado)}</strong></div>
+                  <div>{tf('finPendientePago')}: <strong className="tabular-nums text-[var(--color-text)]">{monto(presupuesto.totales.comprometido)}</strong></div>
+                  <div>{tf('finRemanente')}: <strong className={`tabular-nums ${presupuesto.totales.remanente < 0 ? 'text-[var(--color-error)]' : 'text-[var(--color-text)]'}`}>{monto(presupuesto.totales.remanente)}</strong></div>
+                </dl>
+              </>
             )}
           </Panel>
 
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-            <Panel
-              titulo={tf('finPorMes', { anio })}
-              extra={(
-                <CampoFiltro label={tf('finAnio')}>
-                  <SelectorAnio anio={anio} anios={aniosSelector()} onCambio={setAnio} etiqueta={tf('finAnio')} />
-                </CampoFiltro>
-              )}
-            >
-              <div className="rep-tabla-envoltura">
-                <table className="rep-tabla">
-                  <thead>
-                    <tr>
-                      <th>{tf('finInfMes')}</th>
-                      <th className="rep-num">{tf('finIngresos')}</th>
-                      <th className="rep-num">{tf('finAsignado')}</th>
-                      <th className="rep-num">{tf('finGastadoConPartidaOSin')}</th>
+          <Panel
+            titulo={tf('finPorMes', { anio: data.anio })}
+            extra={(
+              <CampoFiltro label={tf('finAnio')}>
+                <SelectorAnio anio={data.anio} anios={aniosSelector()} onCambio={(a) => setPeriodo({ anio: a, mes: data.mes })} etiqueta={tf('finAnio')} />
+              </CampoFiltro>
+            )}
+          >
+            <div className="rep-tabla-envoltura">
+              <table className="rep-tabla fin-informe">
+                <thead>
+                  <tr>
+                    <th>{tf('finInfMes')}</th>
+                    <th className="rep-num">{tf('finIngresos')}</th>
+                    <th className="rep-num">{tf('finPresupuesto')}</th>
+                    <th className="rep-num">{tf('finGastado')}</th>
+                    <th className="rep-num">{tf('finPendientePago')}</th>
+                    <th className="rep-num">{tf('finRemanente')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.porMes.map((m) => (
+                    <tr key={m.mes} className={m.mes === data.mes ? 'fin-mes-actual' : undefined}>
+                      <td>
+                        <button type="button" className="cli-enlace capitalize" onClick={() => setPeriodo({ anio: data.anio, mes: m.mes })} aria-current={m.mes === data.mes ? 'true' : undefined}>
+                          {nombreMes(m.mes, locale)}
+                        </button>
+                      </td>
+                      <td className="rep-num">{celda(m.ingresos)}</td>
+                      <td className="rep-num">{celda(m.presupuesto)}</td>
+                      <td className="rep-num">{celda(m.gastado)}</td>
+                      <td className="rep-num">{celda(m.comprometido)}</td>
+                      <td className="rep-num">{celda(m.remanente, { signo: true })}</td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {data.porMes.map((m) => (
-                      <tr key={m.mes}>
-                        <td className="capitalize">{nombreMes(m.mes, locale)}</td>
-                        <td className="rep-num tabular-nums">{m.ingresos ? monto(m.ingresos) : <span className="text-[var(--color-text-muted)]">—</span>}</td>
-                        <td className="rep-num tabular-nums">{m.asignado ? monto(m.asignado) : <span className="text-[var(--color-text-muted)]">—</span>}</td>
-                        <td className="rep-num tabular-nums">{m.gastado ? monto(m.gastado) : <span className="text-[var(--color-text-muted)]">—</span>}</td>
-                      </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td>{tf('finTotal')}</td>
+                    {['ingresos', 'presupuesto', 'gastado', 'comprometido', 'remanente'].map((campo) => (
+                      <td key={campo} className="rep-num">{celda(Math.round(data.porMes.reduce((s, m) => s + m[campo], 0) * 100) / 100, { signo: campo === 'remanente' })}</td>
                     ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td>{tf('finTotal')}</td>
-                      <td className="rep-num tabular-nums">{monto(data.porMes.reduce((s, m) => s + m.ingresos, 0))}</td>
-                      <td className="rep-num tabular-nums">{monto(data.porMes.reduce((s, m) => s + m.asignado, 0))}</td>
-                      <td className="rep-num tabular-nums">{monto(data.porMes.reduce((s, m) => s + m.gastado, 0))}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </Panel>
-
-            <Panel titulo={tf('finUltimasAsignaciones')} conteo={data.ultimasAsignaciones.length}>
-              {data.ultimasAsignaciones.length === 0
-                ? <p className="px-4 py-8 text-center text-[13px] text-[var(--color-text-muted)]">{tf('finAsignacionesVacio')}</p>
-                : (
-                  <ul className="divide-y divide-[var(--color-border)]">
-                    {data.ultimasAsignaciones.map((a) => (
-                      <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
-                        <PuntoPartida color={a.partida?.color} />
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-[13px] font-medium text-[var(--color-text)]">{a.partida?.nombre}{a.nota ? <span className="font-normal text-[var(--color-text-muted)]"> · {a.nota}</span> : null}</div>
-                          <div className="text-[12px] text-[var(--color-text-muted)]">{fecha(a.fecha)} · {a.creadoPor?.nombre || '—'}</div>
-                        </div>
-                        <span className="shrink-0 text-[13px] font-semibold tabular-nums text-[var(--color-text)]">{monto(a.monto)}</span>
-                        {puedeEditar && (
-                          <ActionMenu size={15} className="-mr-2 h-9 w-9" items={[
-                            { label: t('edit'), icon: <Pencil size={14} />, onSelect: () => setFormAsignacion({ asignacion: a, partidaId: null, clave: Date.now() }) },
-                            { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: () => eliminarAsignacion(a) },
-                          ]} />
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              {activas.length > 0 && tieneAccesoGastos(usuario) && (
-                <p className="border-t border-[var(--color-border)] px-4 py-2.5 text-[12.5px] text-[var(--color-text-muted)]">
-                  {tf('finVerGastosPartidaHint')} <Link to="/gastos" className="cli-enlace">{tf('finIrGastos')}</Link>
-                </p>
-              )}
-            </Panel>
-          </div>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </Panel>
         </>
       )}
 
-      {formPartida && (
-        <FormularioPartida key={formPartida.clave} open partida={formPartida.partida} onClose={() => setFormPartida(null)} onGuardado={() => { setFormPartida(null); recargarFinanzas(); }} />
-      )}
-      {formAsignacion && (
-        <FormularioAsignacion
-          key={formAsignacion.clave}
+      {formAbierto && data && (
+        <FormularioPresupuesto
+          key={`${data.anio}-${data.mes}`}
           open
-          asignacion={formAsignacion.asignacion}
-          partidas={partidas}
-          partidaInicial={formAsignacion.partidaId}
-          sinAsignar={data?.sinAsignar ?? 0}
-          onClose={() => setFormAsignacion(null)}
-          onGuardado={() => { setFormAsignacion(null); recargarFinanzas(); }}
+          presupuesto={data.presupuesto}
+          anterior={data.anterior}
+          sinAsignar={data.sinAsignar}
+          onClose={() => setFormAbierto(false)}
+          onGuardado={() => { setFormAbierto(false); recargarFinanzas(); }}
         />
       )}
       {cuentasAbiertas && <GestionCuentas open onClose={() => setCuentasAbiertas(false)} onCambio={recargarFinanzas} />}

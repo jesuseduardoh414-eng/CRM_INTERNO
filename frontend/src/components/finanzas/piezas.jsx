@@ -97,6 +97,63 @@ export const Dato = ({ etiqueta, children, ancho = false }) => (
   </div>
 );
 
+/**
+ * Barra de un presupuesto: lo gastado (lleno) y lo pendiente (tenue) sobre lo
+ * presupuestado. Si se pasó, la barra se llena en rojo.
+ */
+export const BarraPresupuesto = ({ fila, etiqueta }) => {
+  const usado = fila.gastado + fila.comprometido;
+  const base = Math.max(fila.presupuesto, usado, 0.01);
+  const color = fila.remanente < 0 ? 'var(--color-error)' : 'var(--color-primary)';
+  const pctGastado = Math.min(100, (fila.gastado / base) * 100);
+  const pctPendiente = Math.min(100 - pctGastado, (fila.comprometido / base) * 100);
+  return (
+    <div className="flex h-2 overflow-hidden rounded-full bg-[var(--color-surface-3)]" role="img" aria-label={etiqueta}>
+      <span style={{ width: `${pctGastado}%`, background: color }} />
+      <span style={{ width: `${pctPendiente}%`, background: color, opacity: 0.45 }} />
+    </div>
+  );
+};
+
+/**
+ * Tarjeta del presupuesto de una categoría en un mes (Tesorería y Gastos).
+ * `fila`: { presupuesto, gastado, comprometido, remanente } del servidor (el
+ * remanente viene calculado en centavos: su signo decide si se pasó).
+ */
+export const TarjetaPresupuesto = ({ fila, titulo, extra, nota, tf, monto, as: Etiqueta = 'li', className = '' }) => {
+  const usado = fila.gastado + fila.comprometido;
+  const sinPresupuesto = !(fila.presupuesto > 0);
+  const pasado = fila.remanente < 0;
+  const pct = sinPresupuesto ? null : Math.round((usado / fila.presupuesto) * 100);
+  return (
+    <Etiqueta className={`rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 ${className}`}>
+      <div className="flex items-start justify-between gap-2">
+        <h3 className="min-w-0 truncate text-[14px] font-semibold text-[var(--color-text)]">{titulo}</h3>
+        {extra}
+      </div>
+      {sinPresupuesto && usado === 0 ? (
+        <div className="mt-3 text-[15px] font-medium text-[var(--color-text-muted)]">{tf('finSinPresupuesto')}</div>
+      ) : (
+        <>
+          <div className={`mt-3 text-[22px] font-semibold tabular-nums ${pasado ? 'text-[var(--color-error)]' : 'text-[var(--color-text)]'}`}>{monto(fila.remanente)}</div>
+          <div className="text-[11.5px] uppercase tracking-wider text-[var(--color-text-muted)]">{sinPresupuesto ? tf('finSinPresupuesto') : tf('finRemanente')}</div>
+        </>
+      )}
+      <div className="mt-3">
+        <BarraPresupuesto fila={fila} etiqueta={tf('finBarraPresupuesto', { gastado: monto(fila.gastado), pendiente: monto(fila.comprometido), presupuesto: monto(fila.presupuesto) })} />
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
+        <div><dt className="text-[var(--color-text-muted)]">{tf('finPresupuesto')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(fila.presupuesto)}</dd></div>
+        <div><dt className="text-[var(--color-text-muted)]">{tf('finGastado')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(fila.gastado)}</dd></div>
+        <div><dt className="text-[var(--color-text-muted)]">{tf('finPendientePago')}</dt><dd className="font-medium tabular-nums text-[var(--color-text)]">{monto(fila.comprometido)}</dd></div>
+      </dl>
+      {pasado && !sinPresupuesto && <p className="mt-2 text-[12px] font-medium text-[var(--color-error)]">{tf('finSePaso', { monto: monto(-fila.remanente) })}</p>}
+      {!pasado && pct !== null && <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">{tf('finUsadoPct', { pct })}</p>}
+      {nota && <p className="mt-2 text-[12px] text-[var(--color-text-muted)]">{nota}</p>}
+    </Etiqueta>
+  );
+};
+
 /** Punto de color de una partida (o gris si no tiene). */
 export const PuntoPartida = ({ color, size = 8 }) => (
   <span aria-hidden="true" className="inline-block shrink-0 rounded-full" style={{ width: size, height: size, background: color || 'var(--color-text-muted)' }} />

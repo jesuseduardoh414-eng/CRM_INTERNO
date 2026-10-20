@@ -1,23 +1,37 @@
 // Finanzas: catalogos cerrados, permisos por usuario y validadores comunes de
-// Ventas (pagos), Tesoreria (partidas) y Gastos.
+// Ventas (pagos), Tesoreria (presupuestos por categoria), Gastos y Cotizaciones.
 //
 // El espejo del frontend es frontend/src/utils/finanzas.js: si cambia una
 // lista o una regla aqui, hay que cambiarla alla.
 //
-// Permisos: cada usuario lleva en `usuarios.permisos_finanzas` un JSON con el
-// nivel (ninguno | ver | editar) de cada recurso:
-//   { ventas, tesoreria, informe, gastos: { PRESUPUESTO_GENERAL, ..., OTROS } }
-// El administrador global (ADMIN del area ADMINISTRACION) siempre tiene
-// `editar` en todo y no se le consulta el JSON. El resto (admins de area,
-// miembros) solo ve lo que se le dio. Se comprueba en el servidor: ocultar el
-// menu en el frontend no basta.
-const { esAdminGlobal } = require('./permissions.utils');
+// Permisos: casillas finanzas.* de la tabla de permisos por area y de los
+// ajustes de cada persona (utils/permisosArea.utils.js):
+//   finanzas.ventas.{ver,crear,editar,eliminar}
+//   finanzas.tesoreria.{ver,editar}
+//   finanzas.gastos.<CATEGORIA>.{ver,crear,editar,eliminar}
+//   finanzas.informe.ver
+//   finanzas.cotizaciones.{ver,crear,editar,aprobar,eliminar}
+// En cotizaciones, crear es subir cotizaciones y versiones nuevas; editar es
+// corregir datos y aprobar, cambiar el estado. La version original nunca se
+// reemplaza. De fabrica nadie tiene nada: el administrador general (ADMIN del
+// area ADMINISTRACION) siempre puede todo. Se comprueba en el servidor:
+// ocultar el menu en el frontend no basta.
+const { puede: puedeClave, POR_CLAVE, CATEGORIAS_GASTO } = require('./permisosArea.utils');
 const { partesDiaMexico } = require('./fechas.utils');
 
-const CATEGORIAS_GASTO = ['PRESUPUESTO_GENERAL', 'PRESUPUESTO_OFICINA', 'NOMINA', 'FIJOS', 'VARIABLES', 'OTROS'];
-const NIVELES = ['ninguno', 'ver', 'editar'];
-const RECURSOS_BASE = ['ventas', 'tesoreria', 'informe'];
+// Para el Excel y la bitacora (las pantallas usan sus propios textos).
+const NOMBRES_CATEGORIA = {
+  PRESUPUESTO_GENERAL: 'Presupuesto de gastos – General',
+  PRESUPUESTO_OFICINA: 'Presupuesto de gastos – Oficina',
+  NOMINA: 'Nómina',
+  FIJOS: 'Gastos fijos',
+  VARIABLES: 'Gastos variables',
+  OTROS: 'Otros',
+};
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+const RECURSOS_BASE = ['ventas', 'tesoreria', 'informe', 'cotizaciones'];
 const RECURSOS = [...RECURSOS_BASE, ...CATEGORIAS_GASTO.map((c) => `gastos.${c}`)];
+const ACCIONES = ['ver', 'crear', 'editar', 'eliminar', 'aprobar'];
 
 const MONEDAS = ['MXN', 'USD', 'EUR'];
 // La tesoreria y el informe trabajan en esta moneda; los movimientos en otra
@@ -27,7 +41,11 @@ const METODOS_PAGO = ['TRANSFERENCIA', 'EFECTIVO', 'TARJETA', 'CHEQUE', 'DEPOSIT
 const TIPOS_CUENTA = ['BANCO', 'EFECTIVO', 'PASARELA', 'OTRA'];
 const ESTADOS_PAGO = ['REGISTRADO', 'ANULADO'];
 const ESTADOS_GASTO = ['PENDIENTE', 'PAGADO', 'ANULADO'];
-const ENTIDADES_LOG = ['pago', 'gasto', 'partida', 'asignacion', 'cuenta'];
+// RECIBIDA: la cotiza un proveedor. ENVIADA: la cotizamos a un cliente.
+const TIPOS_COTIZACION = ['RECIBIDA', 'ENVIADA'];
+const ESTADOS_COTIZACION = ['PENDIENTE', 'APROBADA', 'RECHAZADA'];
+// 'partida' y 'asignacion' solo quedan como historial (antes del 2026-10-14).
+const ENTIDADES_LOG = ['pago', 'gasto', 'presupuesto', 'cotizacion', 'partida', 'asignacion', 'cuenta'];
 const MONTO_MAXIMO = 999999999999; // cabe en Decimal(14,2)
 const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const REGEX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -37,49 +55,22 @@ const REGEX_COLOR = /^#[0-9a-f]{6}$/i;
 // Permisos
 // ---------------------------------------------------------------------------
 
-const nivelValido = (valor) => (NIVELES.includes(valor) ? valor : 'ninguno');
-
 /**
- * Deja el JSON de permisos con todas las claves y niveles validos. Devuelve
- * null si no concede nada (asi la columna queda vacia). Acepta undefined/null.
+ * ¿Puede la accion sobre el recurso? recurso: 'ventas', 'tesoreria',
+ * 'informe', 'cotizaciones' o 'gastos.FIJOS'; accion: ver, crear, editar,
+ * eliminar o aprobar. Una combinacion que no existe (p. ej. eliminar en
+ * tesoreria) es false.
  */
-const normalizarPermisos = (entrada) => {
-  const e = entrada && typeof entrada === 'object' ? entrada : {};
-  const g = e.gastos && typeof e.gastos === 'object' ? e.gastos : {};
-  const permisos = {
-    ventas: nivelValido(e.ventas),
-    tesoreria: nivelValido(e.tesoreria),
-    informe: nivelValido(e.informe),
-    gastos: Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c, nivelValido(g[c])])),
-  };
-  const concedeAlgo = RECURSOS_BASE.some((r) => permisos[r] !== 'ninguno')
-    || CATEGORIAS_GASTO.some((c) => permisos.gastos[c] !== 'ninguno');
-  return concedeAlgo ? permisos : null;
+const puedeFin = (usuario, recurso, accion = 'ver') => {
+  const clave = `finanzas.${recurso}.${accion}`;
+  return POR_CLAVE.has(clave) && puedeClave(usuario, clave);
 };
-
-/** Nivel de un usuario sobre un recurso ('ventas', 'tesoreria', 'informe', 'gastos.FIJOS'). */
-const nivelDe = (usuario, recurso) => {
-  if (esAdminGlobal(usuario)) return 'editar';
-  const p = usuario?.permisosFinanzas;
-  if (!p || typeof p !== 'object') return 'ninguno';
-  if (recurso.startsWith('gastos.')) return nivelValido(p.gastos?.[recurso.slice(7)]);
-  return nivelValido(p[recurso]);
-};
-
-const puedeVer = (usuario, recurso) => nivelDe(usuario, recurso) !== 'ninguno';
-const puedeEditar = (usuario, recurso) => nivelDe(usuario, recurso) === 'editar';
-const nivelGasto = (usuario, categoria) => nivelDe(usuario, `gastos.${categoria}`);
-const categoriasVisibles = (usuario) => CATEGORIAS_GASTO.filter((c) => nivelGasto(usuario, c) !== 'ninguno');
-const categoriasEditables = (usuario) => CATEGORIAS_GASTO.filter((c) => nivelGasto(usuario, c) === 'editar');
+const puedeVer = (usuario, recurso) => puedeFin(usuario, recurso, 'ver');
+const puedeGasto = (usuario, categoria, accion = 'ver') => puedeFin(usuario, `gastos.${categoria}`, accion);
+const categoriasCon = (usuario, accion = 'ver') => CATEGORIAS_GASTO.filter((c) => puedeGasto(usuario, c, accion));
+const categoriasVisibles = (usuario) => categoriasCon(usuario, 'ver');
 const tieneAccesoFinanzas = (usuario) => RECURSOS.some((r) => puedeVer(usuario, r));
 
-/** Lo que se manda al frontend para armar el menu: el nivel de cada recurso. */
-const resumenPermisos = (usuario) => ({
-  ventas: nivelDe(usuario, 'ventas'),
-  tesoreria: nivelDe(usuario, 'tesoreria'),
-  informe: nivelDe(usuario, 'informe'),
-  gastos: Object.fromEntries(CATEGORIAS_GASTO.map((c) => [c, nivelGasto(usuario, c)])),
-});
 
 const sinPermiso = (res) => res.status(403).json({
   error: 'Tu cuenta no tiene permiso para esta sección de finanzas. Pídeselo al administrador.',
@@ -142,6 +133,12 @@ const sumarMeses = (fecha, meses) => {
 /** Rango [inicio, fin) de un mes (0-11) o de un año entero en UTC, para columnas @db.Date. */
 const rangoMes = (anio, mes) => ({ inicio: new Date(Date.UTC(anio, mes, 1)), fin: new Date(Date.UTC(anio, mes + 1, 1)) });
 const rangoAnio = (anio) => ({ inicio: new Date(Date.UTC(anio, 0, 1)), fin: new Date(Date.UTC(anio + 1, 0, 1)) });
+
+/** Mes (1-12) o null si no es valido. */
+const leerMes = (valor) => {
+  const n = Number.parseInt(valor, 10);
+  return Number.isInteger(n) && n >= 1 && n <= 12 ? n : null;
+};
 
 /** Numero con dos decimales o false si no es un importe valido. */
 // Solo cifras con hasta dos decimales (ni "1e3", ni "0x10", ni true).
@@ -213,7 +210,8 @@ const registrarFinanzas = async (usuario, entidad, entidadId, accion, descripcio
 
 module.exports = {
   CATEGORIAS_GASTO,
-  NIVELES,
+  NOMBRES_CATEGORIA,
+  MESES,
   RECURSOS,
   MONEDAS,
   MONEDA_BASE,
@@ -221,18 +219,18 @@ module.exports = {
   TIPOS_CUENTA,
   ESTADOS_PAGO,
   ESTADOS_GASTO,
+  TIPOS_COTIZACION,
+  ESTADOS_COTIZACION,
   ENTIDADES_LOG,
   REGEX_UUID,
   REGEX_COLOR,
-  normalizarPermisos,
-  nivelDe,
+  ACCIONES,
+  puedeFin,
   puedeVer,
-  puedeEditar,
-  nivelGasto,
+  puedeGasto,
+  categoriasCon,
   categoriasVisibles,
-  categoriasEditables,
   tieneAccesoFinanzas,
-  resumenPermisos,
   sinPermiso,
   textoOpcional,
   leerId,
@@ -247,6 +245,7 @@ module.exports = {
   centavos,
   sumar,
   leerAnio,
+  leerMes,
   folio,
   selectUsuarioCorto,
   selectEmpresaCorta,

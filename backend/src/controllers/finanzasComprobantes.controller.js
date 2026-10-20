@@ -7,11 +7,11 @@ const F = require('../utils/finanzas.utils');
 
 const selectRegistro = { id: true, nombreOriginal: true, mime: true, tamano: true, creadoEn: true, subidoPor: { select: F.selectUsuarioCorto } };
 
-/** Nivel del usuario sobre el pago o gasto dueño del comprobante. */
-const nivelSobre = (usuario, registro) => {
-  if (registro.pagoId) return F.nivelDe(usuario, 'ventas');
-  if (registro.gasto) return F.nivelGasto(usuario, registro.gasto.categoria);
-  return 'ninguno';
+/** ¿Puede la accion sobre el pago o gasto dueño del comprobante? */
+const puedeSobre = (usuario, registro, accion) => {
+  if (registro.pagoId) return F.puedeFin(usuario, 'ventas', accion);
+  if (registro.gasto) return F.puedeGasto(usuario, registro.gasto.categoria, accion);
+  return false;
 };
 
 // ---------------------------------------------------------------------------
@@ -32,11 +32,11 @@ const subir = (tipo) => async (req, res) => {
     if (tipo === 'pago') {
       padre = await prisma.pago.findUnique({ where: { id }, select: { id: true, folio: true } });
       if (!padre) return res.status(404).json({ error: 'Pago no encontrado' });
-      if (!F.puedeEditar(req.usuario, 'ventas')) return F.sinPermiso(res);
+      if (!F.puedeFin(req.usuario, 'ventas', 'crear') && !F.puedeFin(req.usuario, 'ventas', 'editar')) return F.sinPermiso(res);
     } else {
       padre = await prisma.gasto.findUnique({ where: { id }, select: { id: true, folio: true, categoria: true } });
       if (!padre) return res.status(404).json({ error: 'Gasto no encontrado' });
-      if (!F.puedeEditar(req.usuario, `gastos.${padre.categoria}`)) return F.sinPermiso(res);
+      if (!F.puedeGasto(req.usuario, padre.categoria, 'crear') && !F.puedeGasto(req.usuario, padre.categoria, 'editar')) return F.sinPermiso(res);
     }
     const campoPadre = tipo === 'pago' ? 'pagoId' : 'gastoId';
 
@@ -83,7 +83,7 @@ const ver = async (req, res) => {
   try {
     const registro = await prisma.comprobanteFinanciero.findUnique({ where: { id }, include: { gasto: { select: { categoria: true } } } });
     if (!registro) return res.status(404).json({ error: 'Comprobante no encontrado' });
-    if (nivelSobre(req.usuario, registro) === 'ninguno') return F.sinPermiso(res);
+    if (!puedeSobre(req.usuario, registro, 'ver')) return F.sinPermiso(res);
 
     let contenido;
     try {
@@ -118,7 +118,8 @@ const eliminar = async (req, res) => {
   try {
     const registro = await prisma.comprobanteFinanciero.findUnique({ where: { id }, include: { gasto: { select: { categoria: true, folio: true } }, pago: { select: { folio: true } } } });
     if (!registro) return res.status(404).json({ error: 'Comprobante no encontrado' });
-    if (nivelSobre(req.usuario, registro) !== 'editar') return F.sinPermiso(res);
+    // Quitar un comprobante es corregir el pago o gasto
+    if (!puedeSobre(req.usuario, registro, 'editar')) return F.sinPermiso(res);
     await prisma.comprobanteFinanciero.delete({ where: { id } });
     // La fila ya no existe: si el disco no deja borrar (archivo en uso en
     // Windows), se anota y se responde bien igual.

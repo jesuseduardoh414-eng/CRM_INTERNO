@@ -12,6 +12,8 @@ import { empresasService } from '../../services/api';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import { puede } from '../../utils/permisos';
 import { useConfirmacion } from '../ConfirmDialog';
 import { PanelSkeleton } from '../Skeleton';
 import ActionMenu from '../ActionMenu';
@@ -57,6 +59,10 @@ const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
   const { showToast } = useToast();
   const { confirmar, dialogo } = useConfirmacion();
   const { nombreArea, colorArea, moduloActivo } = useConfiguracion();
+  const { usuario } = useAuth();
+  // Editar (datos, estado y contactos) y eliminar son permisos aparte.
+  const puedeEditar = puede(usuario, 'clientes.editar');
+  const puedeEliminar = puede(usuario, 'clientes.eliminar');
   const conContratos = moduloActivo('contratos');
   const [editando, setEditando] = useState(null); // clave del formulario abierto
   const [contactoForm, setContactoForm] = useState(null); // { contacto?, clave }
@@ -182,19 +188,23 @@ const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Button variant="outline" onClick={() => setEditando(Date.now())}>
-            <Pencil size={15} /> {t('edit')}
-          </Button>
-          <ActionMenu
-            className="h-10 w-10 border border-[var(--color-border)]"
-            items={[
-              inactiva
-                ? { label: tc('cliActivar'), icon: <RotateCcw size={15} />, onSelect: () => cambiarEstado('ACTIVO') }
-                : { label: tc('cliDesactivar'), icon: <Ban size={15} />, onSelect: () => cambiarEstado('INACTIVO') },
-              { separator: true },
-              { label: tc('cliEliminar'), icon: <Trash2 size={15} />, onSelect: eliminar, danger: true },
-            ]}
-          />
+          {puedeEditar && (
+            <Button variant="outline" onClick={() => setEditando(Date.now())}>
+              <Pencil size={15} /> {t('edit')}
+            </Button>
+          )}
+          {(puedeEditar || puedeEliminar) && (
+            <ActionMenu
+              className="h-10 w-10 border border-[var(--color-border)]"
+              items={[
+                puedeEditar && (inactiva
+                  ? { label: tc('cliActivar'), icon: <RotateCcw size={15} />, onSelect: () => cambiarEstado('ACTIVO') }
+                  : { label: tc('cliDesactivar'), icon: <Ban size={15} />, onSelect: () => cambiarEstado('INACTIVO') }),
+                puedeEditar && puedeEliminar && { separator: true },
+                puedeEliminar && { label: tc('cliEliminar'), icon: <Trash2 size={15} />, onSelect: eliminar, danger: true },
+              ].filter(Boolean)}
+            />
+          )}
         </div>
       </div>
 
@@ -332,7 +342,7 @@ const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
           <Panel
             titulo={tc('cliContactos')}
             conteo={empresa.contactos.length}
-            accion={(
+            accion={puedeEditar && (
               <button type="button" className="cli-enlace -my-2 min-h-[40px]" onClick={() => setContactoForm({ contacto: null, clave: Date.now() })}>
                 <Plus size={14} /> {tc('cliNuevoContacto')}
               </button>
@@ -357,16 +367,18 @@ const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
                       )}
                       {c.notas && <p className="mt-1 whitespace-pre-line text-[12px] text-[var(--color-text-muted)]">{c.notas}</p>}
                     </div>
-                    <ActionMenu
-                      size={15}
-                      className="-mr-1 shrink-0"
-                      items={[
-                        { label: t('edit'), icon: <Pencil size={15} />, onSelect: () => setContactoForm({ contacto: c, clave: Date.now() }) },
-                        !c.principal && { label: tc('cliMarcarPrincipal'), icon: <Star size={15} />, onSelect: () => marcarPrincipal(c) },
-                        { separator: true },
-                        { label: t('delete'), icon: <Trash2 size={15} />, onSelect: () => eliminarContacto(c), danger: true },
-                      ]}
-                    />
+                    {puedeEditar && (
+                      <ActionMenu
+                        size={15}
+                        className="-mr-1 shrink-0"
+                        items={[
+                          { label: t('edit'), icon: <Pencil size={15} />, onSelect: () => setContactoForm({ contacto: c, clave: Date.now() }) },
+                          !c.principal && { label: tc('cliMarcarPrincipal'), icon: <Star size={15} />, onSelect: () => marcarPrincipal(c) },
+                          { separator: true },
+                          { label: t('delete'), icon: <Trash2 size={15} />, onSelect: () => eliminarContacto(c), danger: true },
+                        ]}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>

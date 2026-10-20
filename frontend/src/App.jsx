@@ -59,6 +59,10 @@ const VentasPage = lazyRetry(() => import('./pages/VentasPage'), 'ventas');
 const TesoreriaPage = lazyRetry(() => import('./pages/TesoreriaPage'), 'tesoreria');
 const GastosPage = lazyRetry(() => import('./pages/GastosPage'), 'gastos');
 const InformeGastosPage = lazyRetry(() => import('./pages/InformeGastosPage'), 'informe_gastos');
+const CotizacionesPage = lazyRetry(() => import('./pages/CotizacionesPage'), 'cotizaciones');
+const ConocimientoPage = lazyRetry(() => import('./pages/ConocimientoPage'), 'conocimiento');
+const ArticuloPage = lazyRetry(() => import('./pages/ArticuloPage'), 'articulo');
+const EditorArticuloPage = lazyRetry(() => import('./pages/EditorArticuloPage'), 'editor_articulo');
 const ConfiguracionPage = lazyRetry(() => import('./pages/ConfiguracionPage'), 'configuracion');
 const Activar2faPage = lazyRetry(() => import('./pages/Activar2faPage'), 'activar_2fa');
 const PortalLayout = lazyRetry(() => import('./components/portal/PortalLayout'), 'portal_layout');
@@ -192,12 +196,18 @@ const AppRoutes = () => (
     <Route path="/clientes" element={<RutaConLayout><RutaModulo modulo="clientes"><ClientesPage /></RutaModulo></RutaConLayout>} />
     <Route path="/clientes/:id" element={<RutaConLayout><RutaModulo modulo="clientes"><ClientesPage /></RutaModulo></RutaConLayout>} />
     <Route path="/reportes" element={<RutaConLayout><ReportesPage /></RutaConLayout>} />
-    {/* Finanzas: cada página comprueba el permiso de la persona (usuario.finanzas). */}
+    {/* Finanzas: cada página comprueba el permiso de la persona (usuario.permisos). */}
     <Route path="/ventas" element={<RutaConLayout><RutaModulo modulo="finanzas"><VentasPage /></RutaModulo></RutaConLayout>} />
     <Route path="/tesoreria" element={<RutaConLayout><RutaModulo modulo="finanzas"><TesoreriaPage /></RutaModulo></RutaConLayout>} />
     <Route path="/gastos" element={<RutaConLayout><RutaModulo modulo="finanzas"><InicioGastos /></RutaModulo></RutaConLayout>} />
     <Route path="/gastos/informe" element={<RutaConLayout><RutaModulo modulo="finanzas"><InformeGastosPage /></RutaModulo></RutaConLayout>} />
     <Route path="/gastos/:categoria" element={<RutaConLayout><RutaModulo modulo="finanzas"><GastosPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/cotizaciones" element={<RutaConLayout><RutaModulo modulo="finanzas"><CotizacionesPage /></RutaModulo></RutaConLayout>} />
+    {/* Base de conocimiento: todos leen; crear y editar es de administradores (lo comprueba la página y el servidor). */}
+    <Route path="/conocimiento" element={<RutaConLayout><RutaModulo modulo="conocimiento"><ConocimientoPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/conocimiento/nuevo" element={<RutaConLayout><RutaModulo modulo="conocimiento"><EditorArticuloPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/conocimiento/:id" element={<RutaConLayout><RutaModulo modulo="conocimiento"><ArticuloPage /></RutaModulo></RutaConLayout>} />
+    <Route path="/conocimiento/:id/editar" element={<RutaConLayout><RutaModulo modulo="conocimiento"><EditorArticuloPage /></RutaModulo></RutaConLayout>} />
     <Route path="/configuracion" element={<RutaConfigurador><ConfiguracionPage /></RutaConfigurador>} />
 
     <Route path="/portal" element={<RutaPortal><PortalInicioPage /></RutaPortal>} />

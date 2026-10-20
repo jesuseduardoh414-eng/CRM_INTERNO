@@ -23,6 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { claveDiaLocal, fechaDesdeClave } from '../utils/fechasLocales';
 import { imprimirReporteDia } from '../utils/reporteDia';
 import { fondoArea } from '../utils/areas';
+import { puede } from '../utils/permisos';
 import { formatearMonto } from '../utils/contratos';
 
 const capitalizar = (texto = '') => (texto ? texto.charAt(0).toUpperCase() + texto.slice(1) : texto);
@@ -790,7 +791,7 @@ const ReportesPage = () => {
   const { moduloActivo } = useConfiguracion();
   const [params, setParams] = useSearchParams();
 
-  if (usuario?.rol !== 'ADMIN') return <Navigate to="/dashboard" replace />;
+  if (!puede(usuario, 'reportes.ver')) return <Navigate to="/dashboard" replace />;
 
   // Las vistas de un módulo apagado no se ofrecen; la vista va en la URL
   // (?vista=) para poder compartir o recargar sin perderla.

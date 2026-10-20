@@ -29,7 +29,7 @@ const {
 } = require('../utils/security.utils');
 const { cifrar, descifrar, sha256, igualesSeguro } = require('../utils/cifrado.utils');
 const { generarSecreto, verificarTotp, uriOtpauth } = require('../utils/totp.utils');
-const { resumenPermisos } = require('../utils/finanzas.utils');
+const { permisosEfectivos } = require('../utils/permisosArea.utils');
 const { moduloActivo: moduloActivoConfig } = require('../services/configuracion.service');
 const {
   ErrorSesion,
@@ -47,7 +47,8 @@ const correo = require('../services/email.service');
 const { configEnCache } = require('../services/configuracion.service');
 const { reglasAcceso, debeActivar2FA } = require('../utils/politicas.utils');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
-const { puedeGestionarArea, esAdminDeArea } = require('../utils/permissions.utils');
+const { esAdminGlobal, veTodosLosUsuarios, gestionaUsuariosDe } = require('../utils/permissions.utils');
+const { puede } = require('../utils/permisosArea.utils');
 
 // ---------------------------------------------------------------------------
 // Constantes y ayudas
@@ -102,9 +103,9 @@ const usuarioPublico = (usuario) => ({
   dosFactoresActivo: Boolean(usuario.dosFactoresActivo),
   // La política exige 2FA y aún no la activó: el frontend lo manda a hacerlo.
   debeActivar2FA: debeActivar2FA(usuario),
-  // Nivel (ninguno | ver | editar) en Ventas, Tesorería, cada categoría de
-  // gastos e Informe. El administrador global siempre sale con `editar`.
-  finanzas: resumenPermisos(usuario),
+  // Todas las casillas ya resueltas (area + rol + ajustes de la persona): el
+  // frontend decide con esto qué menús y botones muestra.
+  permisos: permisosEfectivos(usuario, configEnCache()),
 });
 
 // Hash ficticio contra el que se compara cuando el correo no existe, para que
@@ -401,12 +402,13 @@ const verificarEmail = async (req, res) => {
       return completarLogin(req, res, usuario, { recordar: false });
     }
 
-    // Aviso a los administradores activos: notificacion en la campana y correo.
-    const admins = await prisma.usuario.findMany({
-      where: { rol: 'ADMIN', OR: [{ estado: 'activo' }, { estado: null }] },
-      select: { id: true, email: true, area: true, rol: true },
+    // Aviso a quien puede aprobar la cuenta ("usuarios.desactivar" con alcance
+    // sobre su area): notificacion en la campana y correo.
+    const equipo = await prisma.usuario.findMany({
+      where: { rol: { in: ['ADMIN', 'MIEMBRO'] }, OR: [{ estado: 'activo' }, { estado: null }] },
+      select: { id: true, email: true, area: true, rol: true, permisos: true, permisosFinanzas: true },
     });
-    const destinatarios = admins.filter((admin) => !esAdminDeArea(admin) || puedeGestionarArea(admin, usuario.area));
+    const destinatarios = equipo.filter((admin) => puede(admin, 'usuarios.desactivar') && gestionaUsuariosDe(admin, usuario.area));
     if (destinatarios.length > 0) {
       await prisma.notificacion.createMany({
         data: destinatarios.map((admin) => ({
@@ -664,11 +666,11 @@ const me = async (req, res) => {
       select: {
         id: true, nombre: true, email: true, telefono: true, puesto: true, biografia: true,
         fotoPerfilUrl: true, area: true, rol: true, creadoEn: true, dosFactoresActivo: true, empresaId: true,
-        permisosFinanzas: true,
+        permisosFinanzas: true, permisos: true,
       },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
-    const { permisosFinanzas, ...publico } = usuario;
+    const { permisosFinanzas: _pf, permisos: _p, ...publico } = usuario;
     return res.json({ usuario: { ...publico, ...usuarioPublico(usuario) } });
   } catch (error) {
     console.error('[me]', error);
@@ -1085,8 +1087,11 @@ const invitar = async (req, res) => {
       return res.status(409).json({ error: 'El email ya está registrado' });
     }
 
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, areaNormalizada)) {
+    if (!gestionaUsuariosDe(req.usuario, areaNormalizada)) {
       return res.status(403).json({ error: 'Solo puedes invitar usuarios de tu propia área' });
+    }
+    if (String(rol).toUpperCase() === 'ADMIN' && !esAdminGlobal(req.usuario)) {
+      return res.status(403).json({ error: 'Solo el administrador global puede asignar el rol de administrador' });
     }
 
     const { token } = await generarInvitacion({
@@ -1262,7 +1267,7 @@ const reenviarInvitacion = async (req, res) => {
         email: normalizarEmail(email),
         estado: { not: 'aceptada' },
         rol: { not: 'cliente' },
-        ...(esAdminDeArea(req.usuario) ? { area: req.usuario.area } : {})
+        ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area })
       }
     });
 
@@ -1295,7 +1300,7 @@ const listarInvitaciones = async (req, res) => {
   try {
     const invitaciones = await prisma.invitacion.findMany({
       // Las del portal de clientes se gestionan desde la ficha de la empresa.
-      where: { rol: { not: 'cliente' }, ...(esAdminDeArea(req.usuario) ? { area: req.usuario.area } : {}) },
+      where: { rol: { not: 'cliente' }, ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area }) },
       orderBy: { creadoEn: 'desc' },
       include: { creador: { select: { nombre: true } } }
     });
@@ -1321,7 +1326,7 @@ const eliminarInvitacion = async (req, res) => {
       return res.status(404).json({ error: 'Invitación no encontrada' });
     }
 
-    if (esAdminDeArea(req.usuario) && !puedeGestionarArea(req.usuario, invitacion.area)) {
+    if (!gestionaUsuariosDe(req.usuario, invitacion.area)) {
       return res.status(403).json({ error: 'No tienes permiso para eliminar esta invitación' });
     }
 

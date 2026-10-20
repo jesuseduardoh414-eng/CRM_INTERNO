@@ -13,6 +13,15 @@
  *
  *   --desde URL   base de ORIGEN (mysql:// o postgresql://). Tambien se puede
  *                 poner en .env como ORIGEN_DATABASE_URL.
+ *   --desde-respaldo ARCHIVO
+ *                 en vez de una base, un respaldo diario de Google Drive
+ *                 (respaldo-AAAA-MM-DD-HHMM.json.gz, services/respaldo.service.js):
+ *                 asi se restaura un respaldo en una base nueva o vaciada.
+ *   --desde-supabase
+ *                 lee Supabase por su API (PostgREST) con la llave secreta
+ *                 (SUPABASE_URL y SUPABASE_SECRET_KEY en el entorno o en
+ *                 .env.migracion), sin la contraseña de la base. La llave
+ *                 secreta (service_role / sb_secret_...) se salta RLS.
  *   --reemplazar  si el destino ya tiene filas, las borra antes de copiar.
  *
  * Como funciona:
@@ -38,8 +47,13 @@
  *   lleva su propio historial de migraciones.
  */
 require('dotenv').config();
+const fs = require('fs');
+const zlib = require('zlib');
 const { Prisma } = require('@prisma/client');
 const { detectarProveedor, proveedorActivo, MYSQL, POSTGRES } = require('../src/lib/baseDatos');
+const {
+  modelos, porNombre, tablaDe, columnaDe, camposEscalares, relacionesConFk, campoId, nombreCliente, esAutoincremental, tablasM2M,
+} = require('../src/utils/esquemaBase.utils');
 
 const args = process.argv.slice(2);
 const REEMPLAZAR = args.includes('--reemplazar');
@@ -129,17 +143,127 @@ const abrirOrigen = async (url) => {
   };
 };
 
-// ── Metadatos del esquema de Prisma ─────────────────────────────────────────
+/**
+ * Un respaldo diario (services/respaldo.service.js) como origen: el mismo
+ * contrato que una base (`consultar` entiende las tres consultas que hace este
+ * script: SELECT *, COUNT(*) y las columnas A/B de las tablas intermedias).
+ * Las fechas vuelven a ser Date y los binarios ({ $b64 }) Buffer.
+ */
+const abrirRespaldo = (archivo) => {
+  const crudo = fs.readFileSync(archivo);
+  const texto = (archivo.endsWith('.gz') ? zlib.gunzipSync(crudo) : crudo).toString('utf8');
+  const respaldo = JSON.parse(texto, (_clave, valor) => (
+    valor && typeof valor === 'object' && typeof valor.$b64 === 'string' ? Buffer.from(valor.$b64, 'base64') : valor
+  ));
+  if (respaldo?.formato !== 'crm-respaldo' || !respaldo.tablas) throw new Error(`${archivo} no es un respaldo del CRM.`);
+  // Fechas: en el JSON van como texto ISO.
+  for (const modelo of modelos) {
+    const filas = respaldo.tablas[tablaDe(modelo)];
+    if (!filas) continue;
+    const fechas = camposEscalares(modelo).filter((c) => c.type === 'DateTime').map(columnaDe);
+    for (const fila of filas) {
+      for (const columna of fechas) if (typeof fila[columna] === 'string') fila[columna] = new Date(fila[columna]);
+    }
+  }
+  const tablaDeConsulta = (sql) => {
+    const tabla = /\bFROM\s+(\S+)/i.exec(sql)?.[1];
+    if (!tabla || !(tabla in respaldo.tablas)) {
+      const error = new Error(`El respaldo no tiene la tabla ${tabla}`);
+      error.code = '42P01'; // como Postgres: "no existe", se copia vacia
+      throw error;
+    }
+    return respaldo.tablas[tabla];
+  };
+  return {
+    proveedor: 'respaldo',
+    creado: respaldo.creado,
+    citar: (nombre) => nombre,
+    consultar: async (sql) => {
+      const filas = tablaDeConsulta(sql);
+      return /COUNT\(\*\)/i.test(sql) ? [{ n: filas.length }] : filas;
+    },
+    cerrar: async () => {},
+  };
+};
 
-const modelos = Prisma.dmmf.datamodel.models;
-const porNombre = new Map(modelos.map((m) => [m.name, m]));
-const tablaDe = (modelo) => modelo.dbName || modelo.name;
-const columnaDe = (campo) => campo.dbName || campo.name;
-const camposEscalares = (modelo) => modelo.fields.filter((f) => f.kind === 'scalar' || f.kind === 'enum');
-const relacionesConFk = (modelo) => modelo.fields.filter((f) => f.kind === 'object' && f.relationFromFields?.length);
-const campoId = (modelo) => modelo.fields.find((f) => f.isId);
-const nombreCliente = (modelo) => modelo.name[0].toLowerCase() + modelo.name.slice(1);
-const esAutoincremental = (campo) => campo.default?.name === 'autoincrement';
+/**
+ * Supabase por su API REST (PostgREST) como origen, con la llave secreta:
+ * sirve cuando no se tiene la contraseña de la base. Mismo contrato que las
+ * demas: `consultar` entiende SELECT *, COUNT(*) y las columnas A/B de las
+ * tablas intermedias. PostgREST devuelve los timestamp sin zona (en la base
+ * son UTC), los bytea como '\x…' en hexadecimal y como mucho 1000 filas por
+ * peticion: aqui se convierten y se pagina.
+ */
+const abrirSupabase = ({ url, clave }) => {
+  // Supabase muestra la URL a veces con /rest/v1 al final: se acepta igual.
+  const base = String(url || '').trim().replace(/\/+$/, '').replace(/\/rest\/v1$/, '');
+  // http solo para localhost (pruebas con una API falsa).
+  if (!/^(https:\/\/[^/]+|http:\/\/localhost(:\d+)?)$/.test(base)) throw new Error('SUPABASE_URL debe ser como https://xxxx.supabase.co');
+  if (!clave) throw new Error('Falta SUPABASE_SECRET_KEY (la llave secreta / service_role del proyecto).');
+  // Las llaves nuevas (sb_secret_...) no son JWT: van solo en `apikey`.
+  const cabeceras = clave.startsWith('eyJ') ? { apikey: clave, Authorization: `Bearer ${clave}` } : { apikey: clave };
+  const POR_PAGINA = 1000;
+  const porTabla = new Map(modelos.map((m) => [tablaDe(m), m]));
+
+  const pedir = async (tabla, consulta, extra = {}) => {
+    const res = await fetch(`${base}/rest/v1/${encodeURIComponent(tabla)}?${consulta}`, { headers: { ...cabeceras, ...extra } });
+    if (res.status === 404 || res.status === 400) {
+      const cuerpo = await res.json().catch(() => ({}));
+      if (/does not exist|Could not find the table|PGRST205|42P01/i.test(JSON.stringify(cuerpo))) {
+        const error = new Error(`Supabase no tiene la tabla ${tabla}`);
+        error.code = '42P01';
+        throw error;
+      }
+      throw new Error(`Supabase respondió ${res.status} en ${tabla}: ${cuerpo.message || JSON.stringify(cuerpo)}`);
+    }
+    if (res.status === 401 || res.status === 403) throw new Error('Supabase rechazó la llave: revisa SUPABASE_SECRET_KEY (debe ser la secreta, no la publica/anon).');
+    if (!res.ok) throw new Error(`Supabase respondió ${res.status} en ${tabla}`);
+    return res;
+  };
+
+  // Valores de PostgREST -> lo que da un driver: fechas UTC y binarios.
+  const convertir = (tabla, filas) => {
+    const modelo = porTabla.get(tabla);
+    if (!modelo) return filas;
+    const fechas = camposEscalares(modelo).filter((c) => c.type === 'DateTime').map(columnaDe);
+    const binarios = camposEscalares(modelo).filter((c) => c.type === 'Bytes').map(columnaDe);
+    for (const fila of filas) {
+      for (const c of fechas) {
+        if (typeof fila[c] === 'string') fila[c] = new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(fila[c]) ? fila[c] : `${fila[c]}Z`);
+      }
+      for (const c of binarios) {
+        if (typeof fila[c] === 'string' && fila[c].startsWith('\\x')) fila[c] = Buffer.from(fila[c].slice(2), 'hex');
+      }
+    }
+    return filas;
+  };
+
+  return {
+    proveedor: 'supabase',
+    citar: (nombre) => nombre,
+    consultar: async (sql) => {
+      const tabla = /\bFROM\s+(\S+)/i.exec(sql)?.[1];
+      if (/COUNT\(\*\)/i.test(sql)) {
+        const res = await pedir(tabla, 'select=*', { Prefer: 'count=exact', Range: '0-0', 'Range-Unit': 'items' });
+        const total = Number(/\/(\d+)$/.exec(res.headers.get('content-range') || '')?.[1]);
+        return [{ n: Number.isFinite(total) ? total : 0 }];
+      }
+      const modelo = porTabla.get(tabla);
+      const orden = modelo ? `${columnaDe(campoId(modelo))}.asc` : 'A.asc,B.asc';
+      const filas = [];
+      for (let desde = 0; ; desde += POR_PAGINA) {
+        const res = await pedir(tabla, `select=*&order=${orden}&limit=${POR_PAGINA}&offset=${desde}`);
+        const pagina = await res.json();
+        filas.push(...pagina);
+        if (pagina.length < POR_PAGINA) break;
+      }
+      return convertir(tabla, filas);
+    },
+    cerrar: async () => {},
+  };
+};
+
+// ── Metadatos del esquema de Prisma (src/utils/esquemaBase.utils.js) ────────
 
 /**
  * Orden de carga: cada modelo despues de los que referencia. Si hay un ciclo
@@ -170,26 +294,6 @@ const ordenarModelos = () => {
     pendientes.splice(pendientes.indexOf(elegido), 1);
   }
   return orden;
-};
-
-/** Tablas intermedias de las relaciones muchos-a-muchos implicitas (_Nombre, columnas A y B). */
-const tablasM2M = () => {
-  const vistas = new Set();
-  const lista = [];
-  for (const modelo of modelos) {
-    for (const campo of modelo.fields) {
-      if (campo.kind !== 'object' || !campo.isList || campo.relationFromFields?.length) continue;
-      const otro = porNombre.get(campo.type);
-      const inversa = otro.fields.find((f) => f.kind === 'object' && f.relationName === campo.relationName && !(otro === modelo && f.name === campo.name));
-      if (!inversa || !inversa.isList || inversa.relationFromFields?.length) continue;
-      if (vistas.has(campo.relationName)) continue;
-      vistas.add(campo.relationName);
-      // Prisma pone en A el modelo que va primero alfabeticamente.
-      const [modeloA, modeloB] = [modelo.name, otro.name].sort();
-      lista.push({ tabla: `_${campo.relationName}`, modeloA, modeloB });
-    }
-  }
-  return lista;
 };
 
 // ── Conversion de valores del driver crudo a lo que espera Prisma ───────────
@@ -359,21 +463,46 @@ const copiarM2M = async ({ origen, destino, citar, def, idsPorModelo, omitidas }
 // ── Programa ────────────────────────────────────────────────────────────────
 
 const main = async () => {
-  const urlOrigen = leerOpcion('desde') || process.env.ORIGEN_DATABASE_URL;
-  if (!urlOrigen) throw new Error('Falta la base de origen: --desde "mysql://..." (o ORIGEN_DATABASE_URL en .env).');
-  if (!detectarProveedor(urlOrigen)) throw new Error('La URL de origen debe empezar por mysql:// o postgresql://.');
+  const archivoRespaldo = leerOpcion('desde-respaldo');
+  const desdeSupabase = args.includes('--desde-supabase');
+  const sinUrl = Boolean(archivoRespaldo) || desdeSupabase;
+  const urlOrigen = sinUrl ? null : leerOpcion('desde') || process.env.ORIGEN_DATABASE_URL;
+  if (!sinUrl && !urlOrigen) {
+    throw new Error('Falta el origen: --desde "mysql://..." (o ORIGEN_DATABASE_URL en .env), --desde-respaldo respaldo.json.gz o --desde-supabase.');
+  }
+  if (urlOrigen && !detectarProveedor(urlOrigen)) throw new Error('La URL de origen debe empezar por mysql:// o postgresql://.');
+  if (archivoRespaldo && !fs.existsSync(archivoRespaldo)) throw new Error(`No existe el archivo ${archivoRespaldo}.`);
 
   const proveedorDestino = proveedorActivo(); // valida DATABASE_URL
-  const cfgOrigen = parsearUrl(urlOrigen, 'La URL de origen');
   const cfgDestino = parsearUrl(process.env.DATABASE_URL, 'DATABASE_URL');
-  if (['host', 'port', 'database'].every((k) => String(cfgOrigen[k]) === String(cfgDestino[k]))) {
+  let cfgOrigen;
+  if (archivoRespaldo) cfgOrigen = { host: 'respaldo', database: archivoRespaldo };
+  else if (desdeSupabase) cfgOrigen = { host: 'API de Supabase', database: String(process.env.SUPABASE_URL || '').replace(/^https:\/\//, '') };
+  else cfgOrigen = parsearUrl(urlOrigen, 'La URL de origen');
+  if (!sinUrl && ['host', 'port', 'database'].every((k) => String(cfgOrigen[k]) === String(cfgDestino[k]))) {
     throw new Error('Origen y destino son la misma base. El destino es DATABASE_URL; el origen va en --desde.');
   }
 
   // Lanza un error claro si el cliente generado no es del proveedor de DATABASE_URL.
   const destino = require('../src/lib/prisma');
   const citar = proveedorDestino === POSTGRES ? (n) => `"${n}"` : (n) => '`' + n + '`';
-  const origen = await abrirOrigen(urlOrigen);
+  let origen;
+  if (archivoRespaldo) origen = abrirRespaldo(archivoRespaldo);
+  else if (desdeSupabase) {
+    origen = abrirSupabase({ url: process.env.SUPABASE_URL, clave: process.env.SUPABASE_SECRET_KEY });
+    // Si la API no expone las tablas, cada una pareceria "no existe" y se
+    // copiaria todo vacio: mejor parar aqui.
+    let usuarios;
+    try {
+      [{ n: usuarios }] = await origen.consultar('SELECT COUNT(*) AS n FROM usuarios');
+    } catch (error) {
+      if (error.code === '42P01') throw new Error('La API de Supabase no muestra la tabla usuarios: revisa que la Data API exponga el esquema public.');
+      throw error;
+    }
+    if (!usuarios) throw new Error('Supabase devolvió 0 usuarios: no es la base del CRM o la llave no tiene acceso. No se copia nada.');
+    console.log(`Supabase: ${usuarios} usuarios.`);
+  } else origen = await abrirOrigen(urlOrigen);
+  if (archivoRespaldo) console.log(`Respaldo del ${origen.creado}.`);
 
   const orden = ordenarModelos();
   const m2m = tablasM2M();

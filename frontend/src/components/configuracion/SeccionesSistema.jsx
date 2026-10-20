@@ -548,7 +548,7 @@ const TONOS_ESTADO = {
 const REGEX_CLIENT_ID = /^[\w.-]+\.apps\.googleusercontent\.com$/;
 const clientIdGoogleValido = (id) => !id || REGEX_CLIENT_ID.test(id.trim());
 
-const BotonCopiar = ({ texto }) => {
+export const BotonCopiar = ({ texto }) => {
   const { t } = usePreferences();
   const [copiado, setCopiado] = useState(false);
   return (
@@ -772,6 +772,16 @@ export const PanelEstado = ({ estado, onRefrescar, seccion }) => {
     },
     { icono: FileSignature, etiqueta: t('sysContracts'), ok: estado.almacenamiento.contratos.ok, valor: estado.almacenamiento.contratos.ok ? t('sysOk') : t('sysWarn') },
     estado.almacenamiento.comprobantes && { icono: Receipt, etiqueta: t('sysReceipts'), ok: estado.almacenamiento.comprobantes.ok, valor: estado.almacenamiento.comprobantes.ok ? t('sysOk') : t('sysWarn') },
+    // Google Drive: dónde quedan los archivos y cuándo fue el último respaldo.
+    estado.drive && {
+      icono: HardDrive,
+      etiqueta: t('sysDrive'),
+      ok: !estado.drive.conectado || estado.drive.activo,
+      valor: !estado.drive.conectado ? t('sysDriveOff') : estado.drive.activo ? t('sysOk') : t('sysWarn'),
+      detalle: estado.drive.ultimoRespaldo
+        ? t('sysDriveBackup', { fecha: new Date(estado.drive.ultimoRespaldo.en).toLocaleDateString() })
+        : (estado.drive.conectado ? estado.drive.cuenta : null),
+    },
     { icono: Clock, etiqueta: t('sysTime'), ok: true, valor: estado.servidor.horaLocal, detalle: estado.servidor.zonaHoraria.replace(/_/g, ' ') },
     estado.administradores && {
       icono: ShieldCheck,

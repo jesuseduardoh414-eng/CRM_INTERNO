@@ -1,4 +1,4 @@
-// Grupo "Finanzas" del menú lateral: Ventas, Tesorería y Gastos. Gastos lleva
+// Grupo "Finanzas" del menú lateral: Ventas, Tesorería, Gastos y Cotizaciones. Gastos lleva
 // un submenú con las categorías que la persona puede ver y el informe; se
 // abre solo mientras se está en una de sus páginas (o si se abrió a mano).
 // Colapsado, Gastos es un enlace directo a su primera página.

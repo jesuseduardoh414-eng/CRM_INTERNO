@@ -1,5 +1,6 @@
 const prisma = require('../lib/prisma');
-const { esAdmin, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { cargarProyectoVisible } = require('../utils/permissions.utils');
+const { alcanceDe } = require('../utils/permisosArea.utils');
 const { contiene } = require('../utils/paginacion.utils');
 
 const listarPorProyecto = async (req, res) => {
@@ -16,7 +17,8 @@ const listarPorProyecto = async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para ver el historial de este proyecto' });
     }
 
-    const usuarioEsAdmin = esAdmin(req.usuario);
+    // Con "tareas.ver" = propios, solo la actividad de sus tareas.
+    const veTodas = alcanceDe(req.usuario, 'tareas.ver') === 'todos';
     const accionesSoloDeTarea = [
       'CREAR_TAREA',
       'EDITAR_TAREA',
@@ -27,7 +29,7 @@ const listarPorProyecto = async (req, res) => {
     const logs = await prisma.logActividad.findMany({
       where: {
         proyectoId,
-        ...(usuarioEsAdmin ? {} : {
+        ...(veTodas ? {} : {
           OR: [
             {
               tareaId: null,

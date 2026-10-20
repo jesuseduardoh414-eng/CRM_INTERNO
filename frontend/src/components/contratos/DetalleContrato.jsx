@@ -12,6 +12,8 @@ import { Button } from '../ui/button';
 import { contratosService } from '../../services/api';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import { puede } from '../../utils/permisos';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { useTextoClientes } from '../../hooks/useTextoClientes';
 import { useConfirmacion } from '../ConfirmDialog';
@@ -44,6 +46,10 @@ const DetalleContrato = ({ open, contratoId, onClose, onEditar, onEliminar, onCa
   const { confirmar, dialogo } = useConfirmacion();
   const { moduloActivo } = useConfiguracion();
   const tc = useTextoClientes();
+  const { usuario } = useAuth();
+  // Editar (datos y PDFs) y eliminar son permisos aparte.
+  const puedeEditar = puede(usuario, 'contratos.editar');
+  const puedeEliminar = puede(usuario, 'contratos.eliminar');
   const [contrato, setContrato] = useState(null);
   const [error, setError] = useState('');
   const [subiendo, setSubiendo] = useState(false);
@@ -150,14 +156,18 @@ const DetalleContrato = ({ open, contratoId, onClose, onEditar, onEliminar, onCa
   const progreso = contrato ? progresoVigencia(contrato) : null;
   const tieneFirmado = contrato?.archivos.some((a) => a.tipoDocumento === 'FIRMADO');
 
-  const pie = contrato && !previa && (
+  const pie = contrato && !previa && (puedeEditar || puedeEliminar) && (
     <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">
-      <Button type="button" variant="outline" className="text-[var(--color-error)]" onClick={() => onEliminar(contrato)}>
-        <Trash2 size={16} /> {t('delete')}
-      </Button>
-      <Button type="button" onClick={() => onEditar(contrato)}>
-        <Pencil size={16} /> {t('edit')}
-      </Button>
+      {puedeEliminar ? (
+        <Button type="button" variant="outline" className="text-[var(--color-error)]" onClick={() => onEliminar(contrato)}>
+          <Trash2 size={16} /> {t('delete')}
+        </Button>
+      ) : <span />}
+      {puedeEditar && (
+        <Button type="button" onClick={() => onEditar(contrato)}>
+          <Pencil size={16} /> {t('edit')}
+        </Button>
+      )}
     </div>
   );
 
@@ -393,9 +403,11 @@ const DetalleContrato = ({ open, contratoId, onClose, onEditar, onEliminar, onCa
                             <button type="button" className="dash-icono max-md:!h-10 max-md:!w-10" title={t('ctrDownload')} aria-label={t('ctrDownload')} onClick={() => descargar(archivo)}>
                               <Download size={15} />
                             </button>
-                            <button type="button" className="dash-icono hover:!text-[var(--color-error)] max-md:!h-10 max-md:!w-10" title={t('delete')} aria-label={t('delete')} onClick={() => borrarArchivo(archivo)}>
-                              <Trash2 size={15} />
-                            </button>
+                            {puedeEditar && (
+                              <button type="button" className="dash-icono hover:!text-[var(--color-error)] max-md:!h-10 max-md:!w-10" title={t('delete')} aria-label={t('delete')} onClick={() => borrarArchivo(archivo)}>
+                                <Trash2 size={15} />
+                              </button>
+                            )}
                           </div>
                         </div>
                       </li>
@@ -403,6 +415,7 @@ const DetalleContrato = ({ open, contratoId, onClose, onEditar, onEliminar, onCa
                   </ul>
                 )}
 
+                {puedeEditar && (
                 <div className={`space-y-3 p-4 ${contrato.archivos.length > 0 ? 'border-t border-[var(--color-border)]' : ''}`}>
                   {/* Primero el tipo: se aplica al PDF que se elija a continuación */}
                   <div className="flex items-center gap-3">
@@ -435,6 +448,7 @@ const DetalleContrato = ({ open, contratoId, onClose, onEditar, onEliminar, onCa
                     <input type="file" accept="application/pdf,.pdf" className="sr-only" disabled={subiendo} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; subir(f); }} />
                   </label>
                 </div>
+                )}
               </Panel>
             </div>
           </div>

@@ -20,9 +20,11 @@ import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useDebounce } from '../utils/useDebounce';
-import PermisosFinanzas from '../components/finanzas/PermisosFinanzas';
-import { permisosDesde } from '../utils/finanzas';
+import ModalPermisosPersona from '../components/usuarios/ModalPermisosPersona';
+import { alcanceDe, esAdminGeneral, puede } from '../utils/permisos';
+import { useTextoPermisos } from '../hooks/useTextoPermisos';
 import {
+  KeyRound,
   Pencil,
   UserPlus,
   Mail,
@@ -85,6 +87,16 @@ const UsuariosPage = () => {
   const [modalInvitar, setModalInvitar] = useState(false);
   const [modalEditar, setModalEditar] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState(null);
+  // Persona cuyos permisos se ajustan (solo el administrador general).
+  const [permisosDe, setPermisosDe] = useState(null);
+  // Lo que puede hacer quien mira la sección (utils/permisos.js); el
+  // servidor revisa además el área y que no se toque a otros administradores.
+  const puedeInvitar = puede(usuarioActual, 'usuarios.invitar');
+  const acciones = {
+    editar: puede(usuarioActual, 'usuarios.editar'),
+    desactivar: puede(usuarioActual, 'usuarios.desactivar'),
+    general: esAdminGeneral(usuarioActual),
+  };
   // El buscador global (Ctrl+K) llega aqui con ?q=nombre. Si ya estabamos en
   // esta pantalla el componente no se vuelve a montar, asi que el parametro se
   // sigue como estado derivado ("ultimo aplicado"), igual que ?fecha= en Agenda.
@@ -216,10 +228,12 @@ const UsuariosPage = () => {
           <h1 className="text-2xl md:text-4xl font-semibold text-[var(--color-text)] tracking-tight">{t('usersManageTitle')}</h1>
           <p className="text-sm text-[var(--color-text-muted)] mt-1">{t('usersManageSubtitle')}</p>
         </div>
-        <Button size="lg" className="w-full md:w-auto" onClick={() => setModalInvitar(true)}>
-          <UserPlus size={18} />
-          {t('usersInvite')}
-        </Button>
+        {puedeInvitar && (
+          <Button size="lg" className="w-full md:w-auto" onClick={() => setModalInvitar(true)}>
+            <UserPlus size={18} />
+            {t('usersInvite')}
+          </Button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -228,9 +242,11 @@ const UsuariosPage = () => {
           <TabsTrigger value="activos" className="text-sm font-normal data-[state=active]:font-medium">
             {t('usersActiveMembers')}
           </TabsTrigger>
-          <TabsTrigger value="invitaciones" className="text-sm font-normal data-[state=active]:font-medium">
-            {t('usersInvitationsTab')}
-          </TabsTrigger>
+          {puedeInvitar && (
+            <TabsTrigger value="invitaciones" className="text-sm font-normal data-[state=active]:font-medium">
+              {t('usersInvitationsTab')}
+            </TabsTrigger>
+          )}
         </TabsList>
       </Tabs>
 
@@ -326,7 +342,9 @@ const UsuariosPage = () => {
             usuarioActualId={usuarioActual?.id}
             hayFiltros={hayFiltros}
             onLimpiarFiltros={limpiarFiltros}
+            acciones={acciones}
             onEdit={(u) => { setUsuarioEditando(u); setModalEditar(true); }}
+            onPermisos={(u) => setPermisosDe(u)}
             onToggleStatus={handleToggleEstado}
           />
         ) : (
@@ -354,6 +372,10 @@ const UsuariosPage = () => {
           onClose={() => { setModalEditar(false); setUsuarioEditando(null); }}
           onSuccess={() => { setModalEditar(false); setUsuarioEditando(null); recargarUsuarios(); }}
         />
+      )}
+
+      {permisosDe && (
+        <ModalPermisosPersona usuarioId={permisosDe.id} onClose={() => setPermisosDe(null)} />
       )}
 
       {dialogo}
@@ -387,8 +409,9 @@ const EstadoUsuario = ({ estado, t }) => (
   </span>
 );
 
-const TablaActivos = ({ usuarios, usuarioActualId, hayFiltros, onLimpiarFiltros, onEdit, onToggleStatus }) => {
+const TablaActivos = ({ usuarios, usuarioActualId, hayFiltros, onLimpiarFiltros, acciones = {}, onEdit, onPermisos, onToggleStatus }) => {
   const { t, locale } = usePreferences();
+  const tp = useTextoPermisos();
   const { nombreArea } = useConfiguracion();
 
   if (usuarios.length === 0) {
@@ -404,14 +427,20 @@ const TablaActivos = ({ usuarios, usuarioActualId, hayFiltros, onLimpiarFiltros,
 
   // Sin "Eliminar" por decision del usuario: las cuentas se desactivan y
   // conservan su historial. Nadie puede desactivarse a si mismo desde aqui.
-  const accionesDe = (u) => [
-    u.id !== usuarioActualId && {
-      label: u.estado === 'activo' ? t('usersDeactivate') : esRegistroPendiente(u.estado) ? t('usersApprove') : t('usersActivate'),
-      icon: u.estado === 'activo' ? <UserX size={15} /> : <UserCheck size={15} />,
-      onSelect: () => onToggleStatus(u),
-    },
-    { label: t('edit'), icon: <Pencil size={15} />, onSelect: () => onEdit(u) },
-  ];
+  // A otros administradores solo los toca el administrador general; los
+  // permisos por persona tambien son solo suyos (y no aplican a otro general).
+  const accionesDe = (u) => {
+    const tocable = acciones.general || u.rol !== 'ADMIN';
+    return [
+      acciones.desactivar && tocable && u.id !== usuarioActualId && {
+        label: u.estado === 'activo' ? t('usersDeactivate') : esRegistroPendiente(u.estado) ? t('usersApprove') : t('usersActivate'),
+        icon: u.estado === 'activo' ? <UserX size={15} /> : <UserCheck size={15} />,
+        onSelect: () => onToggleStatus(u),
+      },
+      acciones.editar && tocable && { label: t('edit'), icon: <Pencil size={15} />, onSelect: () => onEdit(u) },
+      acciones.general && !esAdminGeneral(u) && { label: tp('permPersonaBoton'), icon: <KeyRound size={15} />, onSelect: () => onPermisos(u) },
+    ].filter(Boolean);
+  };
 
   return (
     <div className="overflow-x-auto">
@@ -459,7 +488,7 @@ const TablaActivos = ({ usuarios, usuarioActualId, hayFiltros, onLimpiarFiltros,
               <td className="px-6 py-4"><EstadoUsuario estado={u.estado} t={t} /></td>
               <td className="px-6 py-4 text-right">
                 <div className="flex justify-end items-center gap-2">
-                  <ActionMenu size={18} className="h-10 w-10" items={accionesDe(u)} />
+                  {accionesDe(u).length > 0 && <ActionMenu size={18} className="h-10 w-10" items={accionesDe(u)} />}
                 </div>
               </td>
             </tr>
@@ -508,11 +537,13 @@ const TablaActivos = ({ usuarios, usuarioActualId, hayFiltros, onLimpiarFiltros,
                 {t('usersRegShort')} {formatearFecha(u.creadoEn, locale)}
               </div>
               {/* 44px: es la única forma de llegar a editar/desactivar en móvil */}
-              <ActionMenu
-                size={18}
-                className="h-11 w-11 border border-[var(--color-border)]"
-                items={accionesDe(u)}
-              />
+              {accionesDe(u).length > 0 && (
+                <ActionMenu
+                  size={18}
+                  className="h-11 w-11 border border-[var(--color-border)]"
+                  items={accionesDe(u)}
+                />
+              )}
             </div>
           </div>
         ))}
@@ -657,10 +688,15 @@ const TablaInvitaciones = ({ invitaciones, onResend, onDelete }) => {
   );
 };
 
+/** Sin "usuarios.ver" = todos, solo se gestiona la propia área. */
+const soloSuArea = (usuario) => !esAdminGeneral(usuario) && alcanceDe(usuario, 'usuarios.ver') !== 'todos';
+/** Solo el administrador general da el rol de administrador. */
+const rolesQueAsigna = (usuario) => (esAdminGeneral(usuario) ? ROLES : ['MIEMBRO']);
+
 const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
   const { t } = usePreferences();
   const { areas, nombreArea } = useConfiguracion();
-  const esAdminArea = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area !== AREA_GENERAL;
+  const esAdminArea = soloSuArea(usuarioActual);
   const areasDisponibles = esAdminArea ? [usuarioActual.area] : areas.map((a) => a.clave);
   const [form, setForm] = useState({ nombre: '', email: '', area: areasDisponibles[0] || AREA_GENERAL, rol: 'MIEMBRO' });
   const [cargando, setCargando] = useState(false);
@@ -742,9 +778,10 @@ const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
               <label htmlFor="invitar-rol" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldRole')}</label>
               <SelectorSimple
                 id="invitar-rol"
+                disabled={rolesQueAsigna(usuarioActual).length === 1}
                 valor={form.rol}
                 onCambio={v => setForm({...form, rol: v})}
-                opciones={ROLES.map(r => ({ valor: r, etiqueta: etiquetaRol(t, r) }))}
+                opciones={rolesQueAsigna(usuarioActual).map(r => ({ valor: r, etiqueta: etiquetaRol(t, r) }))}
               />
             </div>
           </div>
@@ -772,26 +809,19 @@ const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
 
 const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
   const { t } = usePreferences();
-  const { areas, nombreArea, moduloActivo } = useConfiguracion();
-  const esAdminArea = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area !== AREA_GENERAL;
+  const { areas, nombreArea } = useConfiguracion();
+  const esAdminArea = soloSuArea(usuarioActual);
   const areasConfiguradas = areas.map((a) => a.clave);
   // Si el area del usuario ya no existe (la quito el configurador) se sigue
   // ofreciendo, para no cambiarsela sin querer al guardar.
   const areasDisponibles = esAdminArea
     ? [usuarioActual.area]
     : (usuario?.area && !areasConfiguradas.includes(usuario.area) ? [...areasConfiguradas, usuario.area] : areasConfiguradas);
-  // Permisos de finanzas (ventas, tesorería, gastos, informe): los reparte
-  // solo el administrador global, y no tienen sentido para otro
-  // administrador global (siempre puede todo).
-  const esAdminGlobal = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area === AREA_GENERAL;
-  const objetivoEsAdminGlobal = usuario?.rol === 'ADMIN' && usuario?.area === AREA_GENERAL;
-  const editaFinanzas = moduloActivo('finanzas') && esAdminGlobal && !objetivoEsAdminGlobal;
   const [form, setForm] = useState({
     nombre: usuario?.nombre || '',
     email: usuario?.email || '',
     area: usuario?.area || areasDisponibles[0] || AREA_GENERAL,
     rol: usuario?.rol || 'MIEMBRO',
-    ...(editaFinanzas ? { permisosFinanzas: permisosDesde(usuario?.permisosFinanzas) } : {}),
   });
   const [cargando, setCargando] = useState(false);
   const { showToast } = useToast();
@@ -814,7 +844,7 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
     <Modal
       open
       onClose={onClose}
-      maxWidth={editaFinanzas ? '600px' : '448px'}
+      maxWidth="448px"
       title={t('usersEditTitle')}
       subtitle={t('usersEditSubtitle')}
     >
@@ -859,16 +889,13 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
               <label htmlFor="editar-rol" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldRole')}</label>
               <SelectorSimple
                 id="editar-rol"
+                disabled={rolesQueAsigna(usuarioActual).length === 1}
                 valor={form.rol}
                 onCambio={v => setForm({...form, rol: v})}
-                opciones={ROLES.map(r => ({ valor: r, etiqueta: etiquetaRol(t, r) }))}
+                opciones={rolesQueAsigna(usuarioActual).map(r => ({ valor: r, etiqueta: etiquetaRol(t, r) }))}
               />
             </div>
           </div>
-
-          {editaFinanzas && (
-            <PermisosFinanzas valor={form.permisosFinanzas} onCambio={(permisosFinanzas) => setForm({ ...form, permisosFinanzas })} />
-          )}
 
           <div className="flex gap-3 pt-4">
             <button type="button" onClick={onClose} className="flex-1 px-6 py-3 rounded-xl font-medium text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-3)] transition-all">{t('cancel')}</button>

@@ -10,7 +10,7 @@
 //  - El menú lateral muestra cuánto de la marca está personalizado y sugiere
 //    el siguiente paso; las secciones con cambios sin guardar llevan un punto.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Brush, CalendarSync, Check, ChevronRight, Eye, FolderKanban, KeyRound, LayoutPanelLeft, Loader2, Mail, Palette, Paperclip, RotateCcw, Settings2, ShieldCheck, UserCog } from 'lucide-react';
+import { ArrowRight, Brush, CalendarSync, Check, ChevronRight, Eye, FolderKanban, HardDrive, KeyRound, LayoutPanelLeft, Loader2, Mail, Palette, Paperclip, RotateCcw, Settings2, ShieldCheck, UserCog } from 'lucide-react';
 import { configuracionService, getPublicAssetUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -26,6 +26,7 @@ import { Campo, CampoColor, CampoImagen, Fila, Interruptor, PaletaGenerada } fro
 import { PanelEstado, SeccionAccesos, SeccionArchivos, SeccionCorreo, SeccionGoogle, SeccionOperacion } from '../components/configuracion/SeccionesSistema';
 import { EditorAreas, ListaModulos, ReglasTareas, SeccionPermisos, ServidorCorreo } from '../components/configuracion/SeccionesReglas';
 import { DisenoCorreo, TextosCorreo, VistaCorreo } from '../components/configuracion/CorreoDiseno';
+import SeccionDrive from '../components/configuracion/SeccionDrive';
 import { COLORES_FABRICA, esColorFabrica } from '../utils/temaMarca';
 import { ICONOS_BENEFICIO } from '../utils/iconosMarca';
 import '../configuracion.css';
@@ -38,12 +39,14 @@ const SECCIONES = [
   { id: 'colores', grupo: 'personalizacion', icono: Palette, titulo: 'cfgSecColors', ayuda: 'cfgSecColorsHint', grupos: ['colores'], vista: 'crm', atajo: '2' },
   { id: 'login', grupo: 'personalizacion', icono: LayoutPanelLeft, titulo: 'cfgSecLogin', ayuda: 'cfgSecLoginHint', grupos: ['login'], vista: 'login', atajo: '3' },
   { id: 'accesos', grupo: 'empresa', icono: ShieldCheck, titulo: 'cfgSecAccess', ayuda: 'cfgSecAccessHint', grupos: ['seguridad'], atajo: '4' },
-  { id: 'permisos', grupo: 'empresa', icono: KeyRound, titulo: 'cfgSecPerms', ayuda: 'cfgSecPermsHint', grupos: ['permisos'], atajo: '5' },
+  { id: 'permisos', grupo: 'empresa', icono: KeyRound, titulo: 'cfgSecPerms', ayuda: 'cfgSecPermsHint', grupos: ['permisosAreas'], atajo: '5' },
   { id: 'operacion', grupo: 'empresa', icono: FolderKanban, titulo: 'cfgSecOps', ayuda: 'cfgSecOpsHint', grupos: ['reglas.areas', 'tareas', 'operacion'], atajo: '6' },
   { id: 'archivos', grupo: 'sistema', icono: Paperclip, titulo: 'cfgSecFiles', ayuda: 'cfgSecFilesHint', grupos: ['subidas'], atajo: '7' },
   { id: 'correo', grupo: 'sistema', icono: Mail, titulo: 'cfgSecMail', ayuda: 'cfgSecMailHint', grupos: ['correo', 'reglas.remitenteCorreo', 'avisos', 'disenoCorreo', 'textosCorreo'], atajo: '8' },
   { id: 'modulos', grupo: 'sistema', icono: Settings2, titulo: 'cfgSecModules', ayuda: 'cfgSecModulesHint', grupos: ['modulos', 'reglas.idiomaPorDefecto', 'reglas.temaPorDefecto'], vista: 'crm', atajo: '9' },
   { id: 'google', grupo: 'sistema', icono: CalendarSync, titulo: 'cfgSecGoogle', ayuda: 'cfgSecGoogleHint', grupos: ['google'], atajo: '0' },
+  // Se guarda al momento (conectar, respaldar): no pasa por el borrador.
+  { id: 'drive', grupo: 'sistema', icono: HardDrive, titulo: 'cfgSecDrive', ayuda: 'cfgSecDriveHint', grupos: [] },
   { id: 'cuenta', grupo: null, icono: UserCog, titulo: 'cfgSecAccount', ayuda: 'cfgSecAccountHint', grupos: [] },
 ];
 const GRUPOS = [
@@ -94,6 +97,8 @@ const aBorrador = (c) => ({
   modulos: { ...c.modulos },
   reglas: { ...c.reglas, areas: (c.reglas.areas || []).map((a) => ({ ...a })) },
   permisos: { ...c.permisos },
+  // Tabla por área: { AREA: { miembro: {...}, admin: {...} } }, solo lo cambiado.
+  permisosAreas: JSON.parse(JSON.stringify(c.permisosAreas || {})),
   tareas: { ...c.tareas },
   // `password` solo viaja si se escribe una nueva ('' = conservar la guardada).
   correo: { ...c.correo, password: '' },
@@ -233,6 +238,7 @@ const ConfiguracionPage = () => {
     login: { ...b.login, beneficios: b.login.beneficios.map((x, j) => (j === i ? { ...x, [campo]: valor } : x)) },
   }));
   const cambiarAreas = (areas) => setBorrador((b) => ({ ...b, reglas: { ...b.reglas, areas } }));
+  const cambiarPermisosAreas = (permisosAreas) => setBorrador((b) => ({ ...b, permisosAreas }));
   // Quitar el servidor SMTP: el correo vuelve al SMTP del .env o a la consola.
   const quitarSmtp = () => setBorrador((b) => ({
     ...b,
@@ -546,7 +552,17 @@ const ConfiguracionPage = () => {
 
     if (seccion === 'accesos') return <SeccionAccesos seguridad={borrador.seguridad} cambiar={cambiar} />;
     if (seccion === 'archivos') return <SeccionArchivos archivos={borrador.subidas} cambiar={cambiar} estado={estado} />;
-    if (seccion === 'permisos') return <SeccionPermisos permisos={borrador.permisos} cambiar={cambiar} />;
+    if (seccion === 'permisos') {
+      return (
+        <SeccionPermisos
+          areas={borrador.reglas.areas}
+          permisosAreas={borrador.permisosAreas}
+          onCambio={cambiarPermisosAreas}
+          catalogo={servidor.catalogoPermisos}
+          defectos={servidor.defectosPermisos}
+        />
+      );
+    }
     if (seccion === 'correo') {
       const correoSucio = JSON.stringify(borrador.correo) !== JSON.stringify(original.correo);
       const pestanas = [
@@ -609,6 +625,18 @@ const ConfiguracionPage = () => {
             cambiosSinGuardar={correoSucio}
           />
         </>
+      );
+    }
+    if (seccion === 'drive') {
+      return (
+        <SeccionDrive
+          google={borrador.google}
+          guardado={servidor?.google}
+          cambiar={cambiar}
+          onGuardar={guardar}
+          guardando={guardando}
+          nombreSistema={marca.nombreSistema}
+        />
       );
     }
     if (seccion === 'google') {

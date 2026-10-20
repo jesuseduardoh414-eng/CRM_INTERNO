@@ -7,7 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
-import { AREA_GENERAL, areasDeTexto } from '../utils/areas';
+import { areasDeTexto } from '../utils/areas';
+import { alcanzaProyecto, esAdminGeneral, puede } from '../utils/permisos';
 import { agendaService, empresasService, proyectosService, usuariosService } from '../services/api';
 import { useTextoClientes } from '../hooks/useTextoClientes';
 import { PageSkeleton } from '../components/Skeleton';
@@ -231,7 +232,7 @@ const tareasDe = (proyecto) => ({
 });
 
 // ── Tarjeta de Proyecto ─────────────────────────────────────────────────────
-const ProyectoCard = ({ proyecto, hoy, onEditar, onCambiarEstado, onVerDetalle, esAdmin, mostrarCliente }) => {
+const ProyectoCard = ({ proyecto, hoy, onEditar, onCambiarEstado, onVerDetalle, esAdmin, puedeEditar, mostrarCliente }) => {
   const { t, locale } = usePreferences();
   const tp = useTextoProyectos();
   const listoParaRevision = esAdmin && estaListoParaRevision(proyecto);
@@ -255,9 +256,9 @@ const ProyectoCard = ({ proyecto, hoy, onEditar, onCambiarEstado, onVerDetalle, 
           <EstadoProyecto estado={proyecto.estado} />
           <AvisosProyecto listo={listoParaRevision} vencido={vencido} />
         </div>
-        {/* La tarjeta entera ya lleva al proyecto; los 3 puntos son solo para
-            las acciones del admin. */}
-        {esAdmin && (
+        {/* La tarjeta entera ya lleva al proyecto; los 3 puntos son para quien
+            puede editarlo ("proyectos.editar"). */}
+        {puedeEditar(proyecto) && (
           <ActionMenu
             size={16}
             className="-mr-1.5 -mt-1 shrink-0"
@@ -311,9 +312,10 @@ const ProyectoCard = ({ proyecto, hoy, onEditar, onCambiarEstado, onVerDetalle, 
 };
 
 // ── Tabla de Proyectos (vista "Lista") ──────────────────────────────────────
-const TablaProyectos = ({ proyectos, hoy, esAdmin, mostrarCliente, onEditar, onCambiarEstado, onVerDetalle }) => {
+const TablaProyectos = ({ proyectos, hoy, esAdmin, puedeEditar, mostrarCliente, onEditar, onCambiarEstado, onVerDetalle }) => {
   const { t, locale } = usePreferences();
   const tp = useTextoProyectos();
+  const conMenu = proyectos.some(puedeEditar);
   return (
     <div className="overflow-x-auto">
       <table className="cli-tabla proy-tabla">
@@ -326,7 +328,7 @@ const TablaProyectos = ({ proyectos, hoy, esAdmin, mostrarCliente, onEditar, onC
             <th className="text-right">{tp('lista_colTareas')}</th>
             <th>{tp('lista_colFechas')}</th>
             <th>{tp('lista_colEquipo')}</th>
-            {esAdmin && <th aria-label={t('moreOptions')} />}
+            {conMenu && <th aria-label={t('moreOptions')} />}
           </tr>
         </thead>
         <tbody>
@@ -382,9 +384,9 @@ const TablaProyectos = ({ proyectos, hoy, esAdmin, mostrarCliente, onEditar, onC
                   )}
                 </td>
                 <td><AvataresEquipo miembros={p.miembros} /></td>
-                {esAdmin && (
+                {conMenu && (
                   <td className="w-10 text-right">
-                    <ActionMenu size={16} items={itemsMenuProyecto(p, t, onEditar, onCambiarEstado)} />
+                    {puedeEditar(p) && <ActionMenu size={16} items={itemsMenuProyecto(p, t, onEditar, onCambiarEstado)} />}
                   </td>
                 )}
               </tr>
@@ -415,7 +417,9 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   const { usuario: usuarioActual } = useAuth();
   const { areas, nombreArea } = useConfiguracion();
   const clavesAreas = areas.map((a) => a.clave);
-  const esAdminArea = usuarioActual?.rol === 'ADMIN' && usuarioActual?.area !== AREA_GENERAL;
+  // Fuera del administrador general, cada quien crea y mueve proyectos solo
+  // dentro de su área (el servidor lo vuelve a revisar).
+  const esAdminArea = !esAdminGeneral(usuarioActual);
   // Proyecto nuevo: de entrada el area de quien lo crea (o la primera configurada).
   const areasIniciales = proyecto?.area
     ? getAreasProyecto(proyecto.area)
@@ -436,14 +440,14 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   });
   // Modulos de la instalacion: sin plantillas no se pide ni se ofrece elegir
   // una; sin adjuntos no hay bloque de documentos.
-  const { moduloActivo, puede } = useConfiguracion();
+  const { moduloActivo } = useConfiguracion();
   const plantillasActivas = moduloActivo('plantillas');
   const adjuntosActivos = moduloActivo('adjuntos');
-  const puedeSubirAdjuntos = adjuntosActivos && puede(usuarioActual, 'subirAdjuntos');
-  // Cliente del directorio: solo lo asigna un admin y con el modulo activo.
+  const puedeSubirAdjuntos = adjuntosActivos && puede(usuarioActual, 'tareas.adjuntos');
+  // Cliente del directorio: solo lo asigna quien ve clientes y con el modulo activo.
   const tc = useTextoClientes();
   const tp = useTextoProyectos();
-  const conCliente = usuarioActual?.rol === 'ADMIN' && moduloActivo('clientes');
+  const conCliente = puede(usuarioActual, 'clientes.ver') && moduloActivo('clientes');
   const clientes = useClientesCatalogo(conCliente)
     .filter((c) => c.estado === 'ACTIVO' || String(c.id) === form.clienteId);
   const [paso, setPaso] = useState(1);
@@ -800,7 +804,7 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
                     opciones={[...clavesAreas, ...form.areas.filter((a) => !clavesAreas.includes(a))].map((k) => ({
                       valor: k,
                       etiqueta: nombreArea(k),
-                      // Un admin de area solo puede crear proyectos de la suya
+                      // Fuera del administrador general, solo la propia area
                       deshabilitada: esAdminArea && k !== usuarioActual?.area,
                     }))}
                   />
@@ -900,13 +904,14 @@ const ProyectosPage = () => {
   const { showToast } = useToast();
   const { mutate: mutateGlobal } = useSWRConfig();
   const esAdmin = usuario?.rol?.toUpperCase() === 'ADMIN';
-  // Crear proyectos: admin o miembro con el permiso de la configuracion (el
-  // backend lo limita a su area). Pestañas y edicion siguen siendo del admin.
-  const { puede, moduloActivo } = useConfiguracion();
-  const puedeCrearProyecto = puede(usuario, 'crearProyectos');
+  // Crear y editar salen de los permisos de la persona ("proyectos.crear",
+  // "proyectos.editar"); el backend limita la creacion a su area. La pestaña
+  // de equipo sigue siendo del admin.
+  const { moduloActivo } = useConfiguracion();
+  const puedeCrearProyecto = puede(usuario, 'proyectos.crear');
   const tc = useTextoClientes();
-  // Filtro y nombre del cliente: solo admin con el directorio activo.
-  const conClientes = esAdmin && moduloActivo('clientes');
+  // Filtro y nombre del cliente: quien ve el directorio, con el modulo activo.
+  const conClientes = puede(usuario, 'clientes.ver') && moduloActivo('clientes');
   const clientesFiltro = useClientesCatalogo(conClientes);
 
   // Pestaña activa. "miembros" es la antigua pagina Comunidad, solo para admin.
@@ -1100,6 +1105,7 @@ const ProyectosPage = () => {
   const propsFila = {
     hoy,
     esAdmin,
+    puedeEditar: (p) => alcanzaProyecto(usuario, p, 'proyectos.editar'),
     mostrarCliente: conClientes,
     onEditar: abrirEdicion,
     onCambiarEstado: handleCambiarEstado,

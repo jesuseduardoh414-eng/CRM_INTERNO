@@ -26,7 +26,7 @@
 const express = require('express');
 const ctrl = require('../controllers/auth.controller');
 const { verificarToken } = require('../middlewares/auth.middleware');
-const { soloAdmin }      = require('../middlewares/roles.middleware');
+const { requiere }       = require('../middlewares/roles.middleware');
 const {
   authLimiter,
   loginLimiter,
@@ -80,9 +80,9 @@ router.post('/2fa/desactivar', verificarToken, limiteAccionSensible, ctrl.desact
 router.post('/2fa/codigos-respaldo', verificarToken, limiteAccionSensible, ctrl.regenerarCodigosRespaldo);
 
 // ---- Gestión de invitaciones (solo admin) ----
-router.post('/invitar', verificarToken, soloAdmin, ctrl.invitar);
-router.post('/invitar/reenviar', verificarToken, soloAdmin, ctrl.reenviarInvitacion);
-router.get('/invitaciones', verificarToken, soloAdmin, ctrl.listarInvitaciones);
-router.delete('/invitaciones/:id', verificarToken, soloAdmin, ctrl.eliminarInvitacion);
+router.post('/invitar', verificarToken, requiere('usuarios.invitar'), ctrl.invitar);
+router.post('/invitar/reenviar', verificarToken, requiere('usuarios.invitar'), ctrl.reenviarInvitacion);
+router.get('/invitaciones', verificarToken, requiere('usuarios.invitar'), ctrl.listarInvitaciones);
+router.delete('/invitaciones/:id', verificarToken, requiere('usuarios.invitar'), ctrl.eliminarInvitacion);
 
 module.exports = router;

@@ -1,0 +1,6 @@
+# Huella SSH del servidor de cPanel (crm.omnispg.com:22) para el despliegue
+# automático (.github/workflows/desplegar-cpanel.yml). Si el hosting cambia
+# de servidor, vuelve a sacarla con: ssh-keyscan -p 22 crm.omnispg.com
+crm.omnispg.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFonKoQ/vIQdjQFBE6ew1EOwSsUl9ONA2Xe+la0RNXIKk27vJ7OfRPkptjDGmLG+A0BdLK5MUqX/rbeZVCMfYzE=
+crm.omnispg.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIC06Vm4/7MzLkzWU0D8C0F4CPZB90/RL9y581hl3uysF
+crm.omnispg.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC5h42wj9budGpFPAV4Uu1FOIIIh+H/jY6cvozn8Il3m0GnKirX2UegKhgafR3F5Nwvkyc71CdfqqZwbVQRLnCwKZ0Z7lUg347Q10/vQc/Cp/IKvMcbz5w65MWtQ0kuzjMCFEQaP7wcqjrxj06HO5/xBoXMwOQrdW0jwKNECFKlwiq48LKjjQnto3lGb2tJVMCVplqJDk5gVBw+MUJ95T2L4MpuOrWdGybp9ZX2Ml+qexCtiS/7hxIng0kxe1ScH1ZXbQOmKJWEoZ3fVLoP/t1ku2vmmDzEdJ7FZtqqzZgkx60EXLWA2mvGD6tuxoi/QlGRXYi5KSdlBGfyNnTZBDcBS4gt0+X6HuUxe8xEc660E3v0jEl1b1FWRykea+hwzyzWtR1quTXtpIhaO1/La4yeMX2uR2nL9j7v7O1RbaXMcjNo03YJ5pcwfZ4jY//PMcRPbCvLVDaXnhpDfQ9zDwy1aHZ4kC2013KGJlEXCLkOphWpVvd7Q9Wjchi++uR+e5k=

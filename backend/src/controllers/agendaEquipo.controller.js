@@ -4,7 +4,7 @@
 // la empresa.
 const prisma = require('../lib/prisma');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
-const { esAdmin, esAdminGlobal, esAdminDeArea } = require('../utils/permissions.utils');
+const { puede, alcanceDe } = require('../utils/permisosArea.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { feriadosMexico } = require('./agenda.controller');
 const { horarioDelDia } = require('../utils/horarios.utils');
@@ -52,8 +52,12 @@ const leerRango = (query, maxDias, porDefectoDias = 7) => {
   return { desde, hasta, dias };
 };
 
-/** Áreas cuyos días ve el usuario: todo un admin general; los demás, empresa + su área. */
-const filtroAreaVisible = (usuario) => (esAdminGlobal(usuario)
+/**
+ * Áreas cuyos días ve el usuario: todas con "agenda.diasEmpresa" = todos (el
+ * administrador general siempre); los demás, empresa + su área.
+ */
+const diasDeTodas = (usuario) => alcanceDe(usuario, 'agenda.diasEmpresa') === 'todos';
+const filtroAreaVisible = (usuario) => (diasDeTodas(usuario)
   ? {}
   : { OR: [{ area: null }, { area: usuario.area }] });
 
@@ -120,7 +124,7 @@ const listarDiasEmpresa = async (req, res) => {
   if (rango.error) return res.status(400).json({ error: rango.error });
   try {
     const dias = await diasEmpresaEnRango(rango.desde, rango.hasta, filtroAreaVisible(req.usuario));
-    return res.json({ desde: rango.desde, hasta: rango.hasta, dias, puedeEditar: esAdmin(req.usuario) });
+    return res.json({ desde: rango.desde, hasta: rango.hasta, dias, puedeEditar: puede(req.usuario, 'agenda.diasEmpresa') });
   } catch (error) {
     console.error('[agenda.diasEmpresa]', error);
     return res.status(500).json({ error: 'No se pudo leer el calendario de la empresa' });
@@ -166,9 +170,10 @@ const crearDiaEmpresa = async (req, res) => {
   const nombreLimpio = String(nombre || '').trim().slice(0, 120);
   if (nombreLimpio.length < 2) return res.status(400).json({ error: 'Ponle un nombre (por ejemplo, Día de la Independencia)' });
 
-  // Un admin de área solo marca días para su área; el general, para quien quiera.
+  // Con alcance "area" solo se marcan días de la propia área; con "todos",
+  // para la empresa o el área que se elija.
   let areaFinal = area ? String(area).toUpperCase() : null;
-  if (esAdminDeArea(req.usuario)) areaFinal = req.usuario.area;
+  if (!diasDeTodas(req.usuario)) areaFinal = req.usuario.area;
   if (areaFinal && !configEnCache().reglas.areas.some((a) => a.clave === areaFinal)) {
     return res.status(400).json({ error: 'Área no válida' });
   }
@@ -199,7 +204,7 @@ const eliminarDiaEmpresa = async (req, res) => {
   try {
     const dia = await prisma.diaEmpresa.findUnique({ where: { id: String(req.params.id) } });
     if (!dia) return res.status(404).json({ error: 'No existe ese día' });
-    if (esAdminDeArea(req.usuario) && dia.area !== req.usuario.area) {
+    if (!diasDeTodas(req.usuario) && dia.area !== req.usuario.area) {
       return res.status(403).json({ error: 'Solo puedes quitar los días de tu área' });
     }
     await prisma.diaEmpresa.delete({ where: { id: dia.id } });
@@ -266,7 +271,7 @@ const agendaEquipo = async (req, res) => {
       where: {
         rol: { in: ['MIEMBRO', 'ADMIN'] },
         ...ACTIVO,
-        ...(esAdminDeArea(req.usuario) ? { area: req.usuario.area } : {}),
+        ...(alcanceDe(req.usuario, 'agenda.equipo') === 'todos' ? {} : { area: req.usuario.area }),
       },
       orderBy: { nombre: 'asc' },
       select: { id: true, nombre: true, area: true, rol: true, fotoPerfilUrl: true },

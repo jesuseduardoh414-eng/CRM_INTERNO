@@ -1,7 +1,7 @@
 const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
 const { configEnCache } = require('../services/configuracion.service');
-const { esAdmin, puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
 
 const selectProyectoVisible = { id: true, nombre: true, area: true, creadorId: true, miembros: { select: { id: true } } };
 
@@ -167,19 +167,19 @@ const eliminar = async (req, res) => {
     if (comentario.tareaId) {
       const tarea = await prisma.tarea.findUnique({
         where: { id: comentario.tareaId },
-        include: { proyecto: { select: { area: true } } }
+        include: { proyecto: { select: { area: true, creadorId: true, miembros: { select: { id: true } } } } }
       });
       proyectoScope = tarea?.proyecto || null;
     } else if (comentario.proyectoId) {
       proyectoScope = await prisma.proyecto.findUnique({
         where: { id: comentario.proyectoId },
-        select: { area: true }
+        select: { area: true, creadorId: true, miembros: { select: { id: true } } }
       });
     }
 
-    const adminPuedeBorrar = esAdmin(req.usuario) && proyectoScope && puedeAdministrarProyecto(req.usuario, proyectoScope);
+    const adminPuedeBorrar = proyectoScope && puedeAdministrarProyecto(req.usuario, proyectoScope);
 
-    // Solo el autor o un ADMIN con alcance pueden borrarlo
+    // Solo el autor o quien puede editar el proyecto ("proyectos.editar")
     if (comentario.autorId !== req.usuario.id && !adminPuedeBorrar) {
       return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario' });
     }

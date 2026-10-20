@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const servicio = require('../services/configuracion.service');
 const { ARCHIVOS_MARCA, validarArchivoMarca } = require('../utils/configuracion.utils');
+const { catalogoPublico, defectos } = require('../utils/permisosArea.utils');
 const { cifrar } = require('../utils/cifrado.utils');
 
 /** URLs (relativas al backend) de las imagenes subidas, con version para la cache. */
@@ -34,7 +35,8 @@ const publica = async (_req, res) => {
   try {
     const datos = await servicio.obtener();
     // Ni el remitente, ni el servidor, ni el diseño de los correos hacen falta fuera del panel.
-    const { reglas, correo: _correo, disenoCorreo: _diseno, textosCorreo: _textos, ...resto } = respuesta(datos);
+    // Las tablas de permisos tampoco: cada persona recibe los suyos ya resueltos (/auth/me).
+    const { reglas, correo: _correo, disenoCorreo: _diseno, textosCorreo: _textos, permisosAreas: _permisos, ...resto } = respuesta(datos);
     const { remitenteCorreo: _remitente, ...reglasPublicas } = reglas;
     res.set('Cache-Control', 'no-cache');
     return res.json({ ...resto, reglas: reglasPublicas });
@@ -48,7 +50,13 @@ const publica = async (_req, res) => {
 const obtener = async (_req, res) => {
   try {
     const datos = await servicio.obtener();
-    return res.json({ ...respuesta(datos), limitesArchivos: ARCHIVOS_MARCA });
+    return res.json({
+      ...respuesta(datos),
+      limitesArchivos: ARCHIVOS_MARCA,
+      // Para la tabla de permisos por area: estructura y valores de fabrica.
+      catalogoPermisos: catalogoPublico(),
+      defectosPermisos: defectos(datos.config.permisos),
+    });
   } catch (error) {
     console.error('[configuracion.obtener]', error);
     return res.status(500).json({ error: 'No se pudo leer la configuración' });

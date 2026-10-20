@@ -21,6 +21,7 @@ import { agendaService, adjuntosService, usuariosService } from '../services/api
 import Modal from './Modal';
 import Tooltip from './Tooltip';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { useToast } from '../context/ToastContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
@@ -211,9 +212,10 @@ const ModalEvento = ({
   const [errorTitulo, setErrorTitulo] = useState(false);
 
   const esDuenio = !evento || evento.usuarioId === usuario?.id || evento.creadoPorId === usuario?.id;
-  const esAdmin = usuario?.rol === 'ADMIN';
-  // Reunión con cliente (portal de clientes): solo administradores.
-  const puedeLigarCliente = esAdmin && moduloActivo('clientes') && moduloActivo('portalClientes');
+  // "Todo el equipo" pide "agenda.eventosEmpresa".
+  const esAdmin = puede(usuario, 'agenda.eventosEmpresa');
+  // Reunión con cliente (portal de clientes): quien ve el directorio.
+  const puedeLigarCliente = puede(usuario, 'clientes.ver') && moduloActivo('clientes') && moduloActivo('portalClientes');
   const esVirtual = form.modalidad === 'virtual';
   // Un evento que se repite llega siempre como una ocurrencia. Sus fechas las
   // marca el patron de la serie, no esta ocurrencia: se muestran pero no se
@@ -354,8 +356,8 @@ const ModalEvento = ({
         invitados_ids: compartido && !form.es_global ? form.invitados_ids : [],
       };
 
-      // "Todo el equipo" solo lo acepta el servidor de un administrador; los
-      // demas no lo envian y el servidor conserva lo que hubiera.
+      // "Todo el equipo" solo lo acepta el servidor de quien tiene el permiso;
+      // los demas no lo envian y el servidor conserva lo que hubiera.
       if (esAdmin) payload.es_global = compartido && !!form.es_global;
       if (puedeLigarCliente) payload.empresa_id = form.empresa_id ? parseInt(form.empresa_id, 10) : null;
 
@@ -470,7 +472,7 @@ const ModalEvento = ({
   const rangoHorasTexto = `${formatoHora(form.hora_inicio, locale)} – ${formatoHora(form.hora_fin, locale)}`;
   const horarioTexto = `${fechaInicioTexto}${variosDias ? ` – ${fechaFinTexto}` : ''} · ${todoElDia ? tx('mod_todoElDia') : rangoHorasTexto}`;
 
-  // "Todo el equipo" solo lo puede elegir un administrador. Si otro usuario abre
+  // "Todo el equipo" solo lo elige quien tiene el permiso. Si otro usuario abre
   // un evento que ya era global, lo ve como tal pero no puede cambiarlo.
   const puedeElegirGlobal = esAdmin;
 

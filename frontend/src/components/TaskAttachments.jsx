@@ -5,6 +5,7 @@ import { useTextoPortal } from '../hooks/useTextoPortal';
 import { useTextoProyectos } from '../hooks/useTextoProyectos';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useAuth } from '../context/AuthContext';
+import { puede } from '../utils/permisos';
 import { usePreferences } from '../context/PreferencesContext';
 import { useToast } from '../context/ToastContext';
 import Tooltip from './Tooltip';
@@ -411,7 +412,8 @@ const TaskAttachments = ({
   ) : (
     <ul className="det-adjuntos">
       {allItems.map((item) => {
-        const canDelete = item.isPending || item.usuarioId === usuario?.id || usuario?.rol === 'ADMIN';
+        // Autor o quien edita proyectos (el servidor revisa el alcance).
+        const canDelete = item.isPending || item.usuarioId === usuario?.id || puede(usuario, 'proyectos.editar');
         return (
           <FilaAdjunto
             key={item.id || item.url}

@@ -1,9 +1,9 @@
-// Gastos de una categoría (/gastos/:categoria): cifras, próximos a vencer,
-// filtros y lista. La ficha y el formulario son ventanas. El permiso es por
-// categoría (usuario.finanzas.gastos) y lo vuelve a comprobar el servidor.
+// Gastos de una categoría (/gastos/:categoria): cifras, presupuesto del mes,
+// próximos a vencer, filtros y lista. La ficha y el formulario son ventanas. El permiso es por
+// categoría (usuario.permisos, finanzas.gastos.*) y lo vuelve a comprobar el servidor.
 import { useState } from 'react';
 import useSWR from 'swr';
-import { Navigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
 import { AlarmClock, ChevronRight, Paperclip, Plus, ReceiptText, Search, X } from 'lucide-react';
 import { finanzasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -16,11 +16,11 @@ import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import FormularioGasto from '../components/finanzas/FormularioGasto';
 import DetalleGasto from '../components/finanzas/DetalleGasto';
-import { Cifras, ErrorCarga, PuntoPartida, SelectorAnio, Vacio } from '../components/finanzas/piezas';
+import { Cifras, ErrorCarga, SelectorAnio, TarjetaPresupuesto, Vacio } from '../components/finanzas/piezas';
 import { useFormatoFinanzas } from '../hooks/useFormatoFinanzas';
 import {
-  BADGE_ESTADO_GASTO, ESTADOS_FILTRO_GASTO, aniosSelector, categoriaDesdeSlug, estadoVisibleGasto, nivelFinanzas,
-  OPCIONES_SWR_FINANZAS, recargarFinanzas,
+  BADGE_ESTADO_GASTO, ESTADOS_FILTRO_GASTO, aniosSelector, categoriaDesdeSlug, estadoVisibleGasto, nombreMesAnio,
+  OPCIONES_SWR_FINANZAS, puedeFinanzas, recargarFinanzas,
 } from '../utils/finanzas';
 import NavCategoriasGastos from '../components/finanzas/NavCategoriasGastos';
 
@@ -38,37 +38,38 @@ const VistaCategoria = ({ categoria }) => {
   const { usuario } = useAuth();
   const { t } = usePreferences();
   const tf = useTextoFinanzas();
-  const { monto, fecha } = useFormatoFinanzas();
+  const { monto, fecha, locale } = useFormatoFinanzas();
   const [params, setParams] = useSearchParams();
   const [busqueda, setBusqueda] = useState('');
   const [estado, setEstado] = useState('TODOS');
-  const [partidaId, setPartidaId] = useState('');
   const [anio, setAnio] = useState(() => new Date().getFullYear());
   const [formulario, setFormulario] = useState(null);
   const [detalleId, setDetalleId] = useState(() => Number(params.get('gasto')) || null);
   const q = useDebounce(busqueda, 300);
-  const nivel = nivelFinanzas(usuario, `gastos.${categoria}`);
-  const puedeVer = nivel !== 'ninguno';
-  const puedeEditar = nivel === 'editar';
+  const puedeVer = puedeFinanzas(usuario, `gastos.${categoria}`);
+  const puedeCrear = puedeFinanzas(usuario, `gastos.${categoria}`, 'crear');
 
   const filtroAnio = estado === 'PENDIENTE' || estado === 'VENCIDO' ? '' : anio;
   const { data, error, isLoading, mutate } = useSWR(
-    puedeVer ? ['finanzas-gastos', categoria, q, estado, partidaId, filtroAnio] : null,
-    () => finanzasService.gastos.listar({ categoria, q, estado: estado === 'TODOS' ? '' : estado, partidaId, anio: filtroAnio }),
+    puedeVer ? ['finanzas-gastos', categoria, q, estado, filtroAnio] : null,
+    () => finanzasService.gastos.listar({ categoria, q, estado: estado === 'TODOS' ? '' : estado, anio: filtroAnio }),
     OPCIONES_SWR_FINANZAS,
   );
   const { data: resumen } = useSWR(puedeVer ? ['finanzas-gastos-resumen', categoria, anio] : null, () => finanzasService.gastos.resumen({ categoria, anio }), OPCIONES_SWR_FINANZAS);
+  // Presupuesto de la categoría en el mes actual (lo decide el servidor).
+  const { data: datosPresupuesto } = useSWR(puedeVer ? ['finanzas-presupuesto-categoria', categoria, 'actual'] : null, () => finanzasService.gastos.presupuesto({ categoria }), OPCIONES_SWR_FINANZAS);
   const { data: catalogos } = useSWR(puedeVer ? 'finanzas-catalogos' : null, () => finanzasService.catalogos(), OPCIONES_SWR_FINANZAS);
   // Por pagar: los pendientes con fecha límite, los más urgentes primero (vencidos incluidos).
   const { data: proximos } = useSWR(puedeVer ? ['finanzas-gastos-proximos', categoria] : null, () => finanzasService.gastos.listar({ categoria, estado: 'PENDIENTE', orden: 'limite', limit: 6, page: 1 }), OPCIONES_SWR_FINANZAS);
 
   if (!puedeVer) return <Navigate to="/gastos" replace />;
 
+  const presupuesto = datosPresupuesto?.presupuesto;
   // Un gasto cambia los saldos de Tesorería y el informe: se recarga todo lo de finanzas.
   const recargarTodo = () => { recargarFinanzas(); };
   const gastos = data?.gastos || [];
-  const hayFiltros = Boolean(busqueda) || estado !== 'TODOS' || Boolean(partidaId);
-  const limpiar = () => { setBusqueda(''); setEstado('TODOS'); setPartidaId(''); };
+  const hayFiltros = Boolean(busqueda) || estado !== 'TODOS';
+  const limpiar = () => { setBusqueda(''); setEstado('TODOS'); };
   const abrirNuevo = () => setFormulario({ gasto: null, clave: Date.now() });
   const abrirEdicion = (gasto) => { setDetalleId(null); setFormulario({ gasto, clave: Date.now() }); };
   const cerrarDetalle = () => { setDetalleId(null); if (params.has('gasto')) { params.delete('gasto'); setParams(params, { replace: true }); } };
@@ -96,38 +97,55 @@ const VistaCategoria = ({ categoria }) => {
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{tf(`finCat${categoria}`)}</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">{tf(`finCat${categoria}Hint`)}</p>
         </div>
-        {puedeEditar && (
+        {puedeCrear && (
           <Button className="w-full md:w-auto" onClick={abrirNuevo}><Plus size={16} /> {tf('finGastoNuevo')}</Button>
         )}
       </div>
 
       <Cifras cifras={cifras} className="mb-6" />
 
-      {porVencer.length > 0 && (
-        <section className="cli-panel mb-6 overflow-hidden">
-          <header className="cli-panel-cabecera">
-            <h2 className="cli-etiqueta">
-              <AlarmClock size={14} className="text-[var(--color-warning)]" aria-hidden="true" />
-              {tf('finPorVencerTitulo')}
-              <span className="cli-conteo">{porVencer.length}</span>
-            </h2>
-          </header>
-          <ul className="divide-y divide-[var(--color-border)]">
-            {porVencer.map((g) => (
-              <li key={g.id}>
-                <button type="button" onClick={() => setDetalleId(g.id)} className="cli-fila w-full !border-t-0 text-left">
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13.5px] font-medium text-[var(--color-text)]">{g.concepto}</span>
-                    <span className="block truncate text-[12px] text-[var(--color-text-muted)]">{g.folio}{g.proveedorNombre ? ` · ${g.proveedorNombre}` : ''} · {monto(g.monto, g.moneda)}</span>
-                  </span>
-                  <span className={`shrink-0 text-[12px] font-semibold ${g.vencido ? 'text-[var(--color-error)]' : 'text-[var(--color-warning)]'}`}>
-                    {g.vencido ? tf('finVencioHace', { n: Math.abs(g.diasRestantes) }) : g.diasRestantes === 0 ? tf('finVenceHoy') : tf('finVenceEn', { n: g.diasRestantes })}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {(presupuesto || porVencer.length > 0) && (
+        <div className="mb-6 grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+          {presupuesto && (
+            <TarjetaPresupuesto
+              as="section"
+              fila={presupuesto}
+              titulo={tf('finPresupuestoMesGastos', { mes: nombreMesAnio(presupuesto.anio, presupuesto.mes, locale) })}
+              tf={tf}
+              monto={monto}
+              nota={!presupuesto.tienePresupuesto ? tf('finCategoriaSinPresupuesto', { mes: nombreMesAnio(presupuesto.anio, presupuesto.mes, locale) }) : undefined}
+              extra={puedeFinanzas(usuario, 'tesoreria', 'editar') && (
+                <Link to="/tesoreria" className="cli-enlace shrink-0 text-[12.5px]">{presupuesto.tienePresupuesto ? t('edit') : tf('finFijarEnTesoreria')}</Link>
+              )}
+            />
+          )}
+          {porVencer.length > 0 && (
+            <section className="cli-panel overflow-hidden">
+              <header className="cli-panel-cabecera">
+                <h2 className="cli-etiqueta">
+                  <AlarmClock size={14} className="text-[var(--color-warning)]" aria-hidden="true" />
+                  {tf('finPorVencerTitulo')}
+                  <span className="cli-conteo">{porVencer.length}</span>
+                </h2>
+              </header>
+              <ul className="divide-y divide-[var(--color-border)]">
+                {porVencer.map((g) => (
+                  <li key={g.id}>
+                    <button type="button" onClick={() => setDetalleId(g.id)} className="cli-fila w-full !border-t-0 text-left">
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13.5px] font-medium text-[var(--color-text)]">{g.concepto}</span>
+                        <span className="block truncate text-[12px] text-[var(--color-text-muted)]">{g.folio}{g.proveedorNombre ? ` · ${g.proveedorNombre}` : ''} · {monto(g.monto, g.moneda)}</span>
+                      </span>
+                      <span className={`shrink-0 text-[12px] font-semibold ${g.vencido ? 'text-[var(--color-error)]' : 'text-[var(--color-warning)]'}`}>
+                        {g.vencido ? tf('finVencioHace', { n: Math.abs(g.diasRestantes) }) : g.diasRestantes === 0 ? tf('finVenceHoy') : tf('finVenceEn', { n: g.diasRestantes })}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       )}
 
       <div className="mb-4 flex flex-wrap items-end gap-3">
@@ -156,17 +174,6 @@ const VistaCategoria = ({ categoria }) => {
             </SelectContent>
           </Select>
         </CampoFiltro>
-        {catalogos?.partidas?.length > 0 && (
-          <CampoFiltro label={tf('finPartida')}>
-            <Select value={partidaId || 'TODAS'} onValueChange={(v) => setPartidaId(v === 'TODAS' ? '' : v)}>
-              <SelectTrigger aria-label={tf('finPartida')} className="h-10 w-[190px] text-[13.5px] font-normal"><SelectValue /></SelectTrigger>
-              <SelectContent className="z-[1500]">
-                <SelectItem value="TODAS" className="text-sm font-normal">{tf('finTodasPartidas')}</SelectItem>
-                {catalogos.partidas.map((p) => <SelectItem key={p.id} value={String(p.id)} className="text-sm font-normal">{p.nombre}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </CampoFiltro>
-        )}
         {hayFiltros && (
           <Button variant="ghost" className="h-10 text-[var(--color-text-dim)]" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
         )}
@@ -182,7 +189,7 @@ const VistaCategoria = ({ categoria }) => {
             texto={!hayFiltros ? tf('finGastosVacioHint') : undefined}
             accion={hayFiltros
               ? <Button variant="outline" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
-              : (puedeEditar && <Button onClick={abrirNuevo}><Plus size={16} /> {tf('finGastoNuevo')}</Button>)}
+              : (puedeCrear && <Button onClick={abrirNuevo}><Plus size={16} /> {tf('finGastoNuevo')}</Button>)}
           />
         )}
 
@@ -196,7 +203,6 @@ const VistaCategoria = ({ categoria }) => {
                     <th>{tf('finProveedor')}</th>
                     <th>{tf('finFecha')}</th>
                     <th>{tf('finFechaLimite')}</th>
-                    <th>{tf('finPartida')}</th>
                     <th className="text-right">{tf('finMonto')}</th>
                     <th>{tf('finEstado')}</th>
                     <th aria-hidden="true" className="w-8" />
@@ -217,7 +223,6 @@ const VistaCategoria = ({ categoria }) => {
                         <td className="max-w-[220px] truncate text-[13px]">{g.proveedorNombre || g.empresa?.nombre || '—'}</td>
                         <td className="whitespace-nowrap text-[13px]">{fecha(g.fecha)}</td>
                         <td className={`whitespace-nowrap text-[13px] ${g.vencido ? 'font-semibold text-[var(--color-error)]' : ''}`}>{g.fechaLimite ? fecha(g.fechaLimite) : '—'}</td>
-                        <td className="max-w-[160px] truncate text-[13px] text-[var(--color-text-dim)]">{g.partida ? <span className="inline-flex items-center gap-1.5"><PuntoPartida color={g.partida.color} />{g.partida.nombre}</span> : '—'}</td>
                         <td className="text-right"><span className={`font-semibold tabular-nums ${g.estado === 'ANULADO' ? 'text-[var(--color-text-muted)] line-through' : ''}`}>{monto(g.monto, g.moneda)}</span></td>
                         <td><span className={BADGE_ESTADO_GASTO[est] || 'badge-neutral'}>{tf(`finEstadoGasto${est}`)}</span></td>
                         <td className="pr-3"><ChevronRight size={16} className="text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100 [@media(hover:none)]:opacity-100" aria-hidden="true" /></td>

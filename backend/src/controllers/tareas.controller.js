@@ -9,8 +9,10 @@ const prisma = require('../lib/prisma');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const { registrarActividad } = require('../utils/logger');
 const { sortTareas } = require('../utils/sort.utils');
-const { esAdmin, puedeAdministrarProyecto, puedeVerProyecto } = require('../utils/permissions.utils');
+const { puedeActuarEnTarea, puedeVerProyecto } = require('../utils/permissions.utils');
+const { puede, alcanceDe } = require('../utils/permisosArea.utils');
 const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
+const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
 
 const { configEnCache } = require('../services/configuracion.service');
 const { instanteLocal, partesDiaMexico } = require('../utils/fechas.utils');
@@ -383,8 +385,8 @@ const aplicarAjustesFechas = async (tareas) => {
 };
 
 // €€ GET /api/proyectos/:id/tareas €€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€
-// ADMIN → ve todas las tareas del proyecto
-// MIEMBRO → ve las tareas visibles para el (ver `visibilidadTareasPara`)
+// "tareas.ver" = todos → todas las tareas del proyecto
+// "tareas.ver" = propios → las visibles para la persona (`visibilidadTareasPara`)
 const listar = async (req, res) => {
   const proyectoId = parseInt(req.params.id);
   if (isNaN(proyectoId)) return res.status(400).json({ error: 'ID de proyecto inválido' });
@@ -395,14 +397,14 @@ const listar = async (req, res) => {
       include: {
         creador: { select: { id: true, nombre: true, area: true } },
         miembros: { select: { id: true, nombre: true, email: true, area: true, rol: true } },
-        // El directorio de clientes es solo para administradores.
-        ...(esAdmin(req.usuario) ? { cliente: { select: { id: true, nombre: true, nombreComercial: true } } } : {}),
+        // El directorio de clientes solo lo ve quien tiene "clientes.ver".
+        ...(puede(req.usuario, 'clientes.ver') ? { cliente: { select: { id: true, nombre: true, nombreComercial: true } } } : {}),
       },
     });
     if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
     // Misma regla de lectura que el resto de endpoints del proyecto
-    const usuarioEsAdmin = esAdmin(req.usuario);
+    const veTodas = alcanceDe(req.usuario, 'tareas.ver') === 'todos';
     if (!(await puedeVerProyecto(prisma, req.usuario, proyecto))) {
       return res.status(403).json({ error: 'No tienes permiso para ver las tareas de este proyecto' });
     }
@@ -419,7 +421,7 @@ const listar = async (req, res) => {
       where: combinarWhere(
         {
           proyectoId,
-          ...(usuarioEsAdmin ? {} : visibilidadTareasPara(req.usuario.id)),
+          ...(veTodas ? {} : visibilidadTareasPara(req.usuario.id)),
         },
         busqueda,
         filtroEstado,
@@ -494,7 +496,7 @@ const listar = async (req, res) => {
           porcentaje: totalMiembro > 0 ? Math.round((hechasMiembro / totalMiembro) * 100) : 0,
         },
       },
-      filtradoPorUsuario: !usuarioEsAdmin,
+      filtradoPorUsuario: !veTodas,
     });
   } catch (error) {
     return responderError(res, error, '[tareas.listar]');
@@ -534,12 +536,8 @@ const crear = async (req, res) => {
     });
     if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
-    // Si es MIEMBRO, verificar que pertenece a la lista de miembros del proyecto
-    if (esAdmin(req.usuario)) {
-      if (!puedeAdministrarProyecto(req.usuario, proyecto)) {
-        return res.status(403).json({ error: 'No tienes permiso para crear tareas en este proyecto' });
-      }
-    } else if (!proyecto.miembros.some((m) => m.id === req.usuario.id)) {
+    // "tareas.crear": con alcance propios hace falta ser miembro del proyecto
+    if (!puedeActuarEnTarea(req.usuario, proyecto, 'tareas.crear')) {
       return res.status(403).json({ error: 'No tienes permiso para crear tareas en este proyecto' });
     }
 
@@ -576,7 +574,7 @@ const crear = async (req, res) => {
       const url = await subirArchivo(file, 'adjuntos');
       urlsSubidas.push(url);
       adjuntos.push({
-        nombre: file.originalname,
+        nombre: nombreUtf8(file.originalname),
         url,
         tipo: file.mimetype,
         tamano: file.size,
@@ -683,16 +681,9 @@ const editar = async (req, res) => {
     });
     if (!existente) return res.status(404).json({ error: 'Tarea no encontrada' });
 
-    // Verificar permisos: ADMIN o miembro con visibilidad sobre esta tarea
-    if (esAdmin(req.usuario)) {
-      if (!puedeAdministrarProyecto(req.usuario, existente.proyecto)) {
-        return res.status(403).json({ error: 'No tienes permiso para editar esta tarea' });
-      }
-    } else {
-      const esMiembro = existente.proyecto.miembros.some(m => m.id === req.usuario.id);
-      if (!esMiembro || !puedeAccederTarea(existente, req.usuario.id)) {
-        return res.status(403).json({ error: 'No tienes permiso para editar esta tarea' });
-      }
+    // "tareas.editar": con alcance propios, miembro del proyecto y tarea suya
+    if (!puedeActuarEnTarea(req.usuario, existente.proyecto, 'tareas.editar', puedeAccederTarea(existente, req.usuario.id))) {
+      return res.status(403).json({ error: 'No tienes permiso para editar esta tarea' });
     }
 
     const asignadoIdsNormalizados = normalizarAsignadoIds(body.asignadoIds, body.asignadoId);
@@ -843,16 +834,9 @@ const eliminar = async (req, res) => {
     });
     if (!existente) return res.status(404).json({ error: 'Tarea no encontrada' });
 
-    // Verificar permisos: ADMIN o miembro con visibilidad sobre esta tarea
-    if (esAdmin(req.usuario)) {
-      if (!puedeAdministrarProyecto(req.usuario, existente.proyecto)) {
-        return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
-      }
-    } else {
-      const esMiembro = existente.proyecto.miembros.some(m => m.id === req.usuario.id);
-      if (!esMiembro || !puedeAccederTarea(existente, req.usuario.id)) {
-        return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
-      }
+    // "tareas.eliminar": con alcance propios, miembro del proyecto y tarea suya
+    if (!puedeActuarEnTarea(req.usuario, existente.proyecto, 'tareas.eliminar', puedeAccederTarea(existente, req.usuario.id))) {
+      return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
     }
 
     const urlsAdjuntos = await prisma.$transaction((tx) => borrarTareasEnCascada(tx, [id]));
@@ -904,10 +888,7 @@ const eliminarVarias = async (req, res) => {
     if (!tareas.length) return res.status(404).json({ error: 'No se encontró ninguna de las tareas' });
 
     const permitidas = tareas.filter((tarea) => (
-      esAdmin(req.usuario)
-        ? puedeAdministrarProyecto(req.usuario, tarea.proyecto)
-        : tarea.proyecto.miembros.some((m) => m.id === req.usuario.id)
-          && puedeAccederTarea(tarea, req.usuario.id)
+      puedeActuarEnTarea(req.usuario, tarea.proyecto, 'tareas.eliminar', puedeAccederTarea(tarea, req.usuario.id))
     ));
     if (!permitidas.length) {
       return res.status(403).json({ error: 'No tienes permiso para eliminar estas tareas' });
@@ -966,16 +947,9 @@ const actualizarEstado = async (req, res) => {
     });
     if (!existente) return res.status(404).json({ error: 'Tarea no encontrada' });
 
-    // Verificar permisos: ADMIN o miembro con visibilidad sobre esta tarea
-    if (esAdmin(req.usuario)) {
-      if (!puedeAdministrarProyecto(req.usuario, existente.proyecto)) {
-        return res.status(403).json({ error: 'No tienes permiso para actualizar esta tarea' });
-      }
-    } else {
-      const esMiembro = existente.proyecto.miembros.some(m => m.id === req.usuario.id);
-      if (!esMiembro || !puedeAccederTarea(existente, req.usuario.id)) {
-        return res.status(403).json({ error: 'No tienes permiso para actualizar esta tarea' });
-      }
+    // "tareas.editar": con alcance propios, miembro del proyecto y tarea suya
+    if (!puedeActuarEnTarea(req.usuario, existente.proyecto, 'tareas.editar', puedeAccederTarea(existente, req.usuario.id))) {
+      return res.status(403).json({ error: 'No tienes permiso para actualizar esta tarea' });
     }
 
     let tarea = await prisma.tarea.update({
