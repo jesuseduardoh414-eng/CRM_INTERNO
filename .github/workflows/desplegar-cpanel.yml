@@ -11,6 +11,9 @@ name: Desplegar en cPanel
 on:
   push:
     branches: [master]
+    # Un cambio que solo toca documentos no se despliega.
+    paths-ignore:
+      - '**.md'
   workflow_dispatch:
     inputs:
       todo:
