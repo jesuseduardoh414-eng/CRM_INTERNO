@@ -45,6 +45,12 @@ model Usuario {
   googleAccessToken        String?                 @map("google_access_token") @db.Text
   googleRefreshToken       String?                 @map("google_refresh_token") @db.Text
   googleTokenExpiresAt     DateTime?               @map("google_token_expires_at")
+  // Calendario "OMNIS CRM" que el CRM crea en el Google de la persona y que se
+  // sincroniza en los dos sentidos (services/google-calendar.service.js), y la
+  // marca de Google para pedir solo lo que cambio desde la ultima vez.
+  googleCalendarCrmId      String?                 @map("google_calendar_crm_id") @db.VarChar(255)
+  googleCalendarSyncToken  String?                 @map("google_calendar_sync_token") @db.Text
+  googleCalendarSyncEn     DateTime?               @map("google_calendar_sync_en")
   // ---- Seguridad de acceso (modulo auth) ----
   // Bloqueo progresivo por cuenta: vive en la base y no en memoria para que
   // valga igual en todas las instancias y sobreviva a reinicios.
@@ -518,11 +524,16 @@ model Evento {
   patronRecurrencia     String?   @map("patron_recurrencia") @db.Text // JSON: { tipo:'semanal', dias:[0,6], horaInicio:'09:00', horaFin:'18:00' }
   fechaFinRecurr        DateTime? @map("fecha_fin_recurrencia")
   googleCalendarEventId String?   @map("google_calendar_event_id") @db.VarChar(255)
+  // etag de la ultima version que el CRM escribio o leyo de Google: si un
+  // cambio que llega de Google trae el mismo, es el eco del propio CRM.
+  googleEtag            String?   @map("google_etag") @db.VarChar(255)
+  actualizadoEn         DateTime  @default(now()) @updatedAt @map("actualizado_en")
   // Reunión con un cliente: aparece en el portal de esa empresa.
   empresaId             Int?      @map("empresa_id")
   empresa               Empresa?  @relation(fields: [empresaId], references: [id], onDelete: SetNull)
 
   @@index([empresaId])
+  @@index([usuarioId, googleCalendarEventId])
   @@map("eventos")
 }
 

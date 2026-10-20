@@ -7,6 +7,7 @@ const {
   disconnectGoogleCalendar,
   syncEventoToGoogle,
   deleteEventoFromGoogle,
+  sincronizarDesdeGoogle,
 } = require('../services/google-calendar.service');
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
@@ -1406,6 +1407,24 @@ const disconnectGoogleCalendarController = async (req, res) => {
   }
 };
 
+// ── POST /api/agenda/google-calendar/sync ────────────────────────────────────
+// Trae ya lo que cambio en el calendario del CRM en Google (la agenda lo pide
+// al abrirse y al volver a la pestaña). Si se leyo hace menos de 15 s, no
+// vuelve a preguntar. Responde { cambios } para que la agenda recargue.
+const sincronizarGoogleCalendar = async (req, res) => {
+  try {
+    const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id }, select: { googleCalendarSyncEn: true } });
+    if (usuario?.googleCalendarSyncEn && Date.now() - usuario.googleCalendarSyncEn.getTime() < 15 * 1000) {
+      return res.json({ cambios: 0, reciente: true });
+    }
+    const resultado = await sincronizarDesdeGoogle(req.usuario.id);
+    return res.json({ cambios: resultado?.cambios || 0, conectado: Boolean(resultado) });
+  } catch (error) {
+    console.error('[agenda.google.sync]', error);
+    return res.status(502).json({ error: 'No se pudo leer Google Calendar' });
+  }
+};
+
 // ── GET /api/agenda/recordatorios ────────────────────────────────────────────
 // Eventos (de cualquier tipo) cuya alerta ya toca: faltan como mucho
 // `alertaMinutos` para que empiecen. Incluye las ocurrencias de los recurrentes.
@@ -1479,6 +1498,7 @@ module.exports = {
   getGoogleCalendarStatus,
   connectGoogleCalendarController,
   disconnectGoogleCalendarController,
+  sincronizarGoogleCalendar,
   recordatoriosProximos,
   // Funciones puras, exportadas para poder probarlas sin base de datos
   expandirRecurrente,

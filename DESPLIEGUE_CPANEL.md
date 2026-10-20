@@ -363,7 +363,8 @@ dominio autorizado. Se escribió recorriendo Google Cloud de verdad el
    Calendar* (con Externo sale "Google no verificó esta app": *Configuración
    avanzada → Ir a … (no seguro)*).
 9. Comprobar: **Respaldar ahora** y un adjunto de prueba en Drive; un evento
-   de prueba en Google Calendar (la sincronización va solo del CRM a Google).
+   de prueba en el calendario "OMNIS CRM" de Google Calendar, y uno creado allá
+   que aparezca en la agenda (Calendar va en los dos sentidos: README, "Google Calendar").
 
 Abajo de la guía hay una lista de errores comunes con su arreglo, y los
 errores que devuelve Google al conectar Drive dicen qué paso revisar. Si se

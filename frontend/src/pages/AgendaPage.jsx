@@ -567,6 +567,26 @@ const AgendaPage = () => {
     };
   }, [recargarDatos]);
 
+  // Lo que cambio en Google (calendario "OMNIS CRM") se trae al abrir la
+  // agenda y al volver a la pestaña; el servidor tambien lo revisa cada 5 min.
+  // Falla en silencio: la agenda sigue con lo que ya tiene.
+  useEffect(() => {
+    if (!googleCalendar.connected) return undefined;
+    let activo = true;
+    const traer = () => {
+      if (document.visibilityState !== 'visible') return;
+      agendaService.sincronizarGoogleCalendar()
+        .then((r) => { if (activo && r?.cambios > 0) recargarDatos(); })
+        .catch(() => {});
+    };
+    traer();
+    document.addEventListener('visibilitychange', traer);
+    return () => {
+      activo = false;
+      document.removeEventListener('visibilitychange', traer);
+    };
+  }, [googleCalendar.connected, recargarDatos]);
+
   // El cajón de invitaciones se cierra con Escape, como el resto de ventanas.
   useEffect(() => {
     if (!showInvitaciones) return undefined;

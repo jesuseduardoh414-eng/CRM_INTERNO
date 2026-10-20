@@ -253,6 +253,24 @@ se elimina el adjunto.
   PowerPoint), tambien comprobados por contenido (`services/documentos.service.js`);
   usan el limite de comprobantes y el de adjuntos respectivamente.
 
+### Google Calendar (en los dos sentidos)
+
+Desde el 2026-10-20, al conectar Google Calendar en su agenda, el CRM crea en
+el Google de cada persona un calendario con el nombre del sistema ("OMNIS
+CRM") y mueve ahi lo que antes iba a su calendario principal. Lo que se crea,
+edita o borra en la agenda llega a ese calendario, y lo que se cambia en ese
+calendario desde Google llega a la agenda: `sincronizarDesdeGoogle`
+(`services/google-calendar.service.js`) lee los cambios con el `syncToken` de
+Google cada 5 minutos para todos (`GOOGLE_CALENDAR_SYNC=off` lo apaga) y al
+abrir la agenda (`POST /api/agenda/google-calendar/sync`). Cada evento guarda
+el `etag` de la ultima version que el CRM escribio o leyo para no rebotar sus
+propios cambios; si los dos lados cambiaron, gana el mas nuevo. Las ediciones
+desde el CRM van con PATCH, asi no se pierden los invitados, el Meet o el color
+puestos en Google. Repeticiones: semanal y diaria se traducen; las demas
+(mensual, cada N semanas, N veces) entran como un solo evento con una nota.
+Las ocurrencias editadas sueltas en Google no se copian. Los eventos personales
+de los demas calendarios no entran al CRM.
+
 ### Google Drive (archivos y respaldo diario)
 
 Desde el 2026-10-16 se puede conectar una cuenta de Google Workspace de la

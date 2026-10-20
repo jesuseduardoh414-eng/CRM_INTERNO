@@ -18,6 +18,7 @@ router.put('/config-laboral', agendaController.updateConfigLaboral);
 const google = [requiereModulo('agenda'), requiereModulo('googleCalendar')];
 router.get('/google-calendar/status', google, agendaController.getGoogleCalendarStatus);
 router.post('/google-calendar/connect', google, agendaController.connectGoogleCalendarController);
+router.post('/google-calendar/sync', google, agendaController.sincronizarGoogleCalendar);
 // Desconectar siempre se permite: apagar el modulo no debe dejar cuentas atadas.
 router.delete('/google-calendar/connect', agendaController.disconnectGoogleCalendarController);
 

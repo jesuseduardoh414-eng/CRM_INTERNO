@@ -185,6 +185,8 @@ if (!enServerless) {
     require('./services/avisosCorreo.service').iniciarAvisosProgramados();
     // Respaldo diario de la base en Google Drive (si esta conectado).
     require('./services/respaldo.service').iniciarRespaldoDiario();
+    // Cambios de Google Calendar hacia la agenda (cada 5 minutos).
+    require('./services/google-calendar.service').iniciarSincronizacionCalendar();
   });
 }
 

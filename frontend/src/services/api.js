@@ -749,6 +749,13 @@ export const agendaService = {
     });
     return handleResponse(res);
   },
+  // Trae lo que cambio en el calendario del CRM en Google. { cambios }
+  sincronizarGoogleCalendar: async () => {
+    const res = await apiFetch(`${API_URL}/agenda/google-calendar/sync`, {
+      method: 'POST', headers: getHeaders(),
+    });
+    return handleResponse(res);
+  },
 
   // Phase 8.1 - Días Especiales
   listarDiasEspeciales: async (mes, anio) => {
