@@ -69,7 +69,7 @@ preparar_node() {
   (( node_listo )) && return 0
   paso 'node y variables de la aplicación'
   margen 15
-  local activar json
+  local activar json exportar
   activar=$(ls -1d "$HOME/nodevenv/$APP_ROOT"/*/bin/activate 2>/dev/null | sort -V | tail -1 || true)
   if [[ -z "$activar" ]]; then
     echo "No está ~/nodevenv/$APP_ROOT: ¿existe la aplicación en Setup Node.js App?" >&2
@@ -80,22 +80,9 @@ preparar_node() {
   source "$activar"
   set -u
   json=$(limitado 60 cloudlinux-selector get --json --interpreter nodejs)
-  local nombres=() par
-  while IFS= read -r -d '' par; do
-    export "$par"
-    nombres+=("${par%%=*}")
-  done < <(APP_ROOT="$APP_ROOT" node --v8-pool-size=1 -e '
-    let d = "";
-    process.stdin.on("data", (c) => { d += c; }).on("end", () => {
-      const usuario = require("os").userInfo().username;
-      for (const v of Object.values(JSON.parse(d).available_versions || {})) {
-        const app = v.users?.[usuario]?.applications?.[process.env.APP_ROOT];
-        if (app) {
-          for (const [k, val] of Object.entries(app.env_vars || {})) process.stdout.write(`${k}=${val}\0`);
-          return;
-        }
-      }
-    });' <<<"$json")
+  # Sin `< <(...)`: en la jaula de CloudLinux no hay /dev/fd.
+  exportar=$(APP_ROOT="$APP_ROOT" node --v8-pool-size=1 scripts/variables_app.js <<<"$json")
+  eval "$exportar"
   if [[ -z "${DATABASE_URL:-}" ]]; then
     echo "No encontré las variables de la aplicación $APP_ROOT (falta DATABASE_URL)." >&2
     exit 1
@@ -103,7 +90,7 @@ preparar_node() {
   # Pocos hilos también para npm, prisma generate y el motor de migraciones.
   export TOKIO_WORKER_THREADS="${TOKIO_WORKER_THREADS:-2}" UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-2}"
   export NODE_OPTIONS="${NODE_OPTIONS:-} --v8-pool-size=2"
-  echo "node $(node -v), npm $(npm -v); ${#nombres[@]} variables: ${nombres[*]}"
+  echo "node $(node -v), npm $(npm -v); variables: ${VARIABLES_APP:-}"
   node_listo=1
 }
 # Cada dependencia de package.json está en node_modules y las clave cargan. No
