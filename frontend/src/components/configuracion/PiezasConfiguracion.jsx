@@ -1,8 +1,9 @@
 // Piezas del panel de configuración: fila de ajustes (enlazada con la vista
 // previa), campo, interruptor, color con contraste, imagen de marca con
-// arrastrar y soltar, y la paleta generada. Estilos en src/configuracion.css.
+// arrastrar y soltar, la paleta generada y el botón de copiar. Estilos en
+// src/configuracion.css.
 import { useRef, useState } from 'react';
-import { CheckCircle2, Info, Loader2, UploadCloud } from 'lucide-react';
+import { CheckCircle2, Copy, Info, Loader2, UploadCloud } from 'lucide-react';
 import { usePreferences } from '../../context/PreferencesContext';
 import { ajustarContraste, contraste, generarVariables } from '../../utils/temaMarca';
 
@@ -33,7 +34,22 @@ export const Campo = ({ etiqueta, ayuda, htmlFor, zona, children, className = ''
   </div>
 );
 
-export const Interruptor = ({ activo, onChange, etiqueta, ayuda, id, zona }) => (
+/** Copia `texto` al portapapeles y lo confirma un momento en el propio botón. */
+export const BotonCopiar = ({ texto }) => {
+  const { t } = usePreferences();
+  const [copiado, setCopiado] = useState(false);
+  return (
+    <button
+      type="button"
+      className="cfg-btn shrink-0"
+      onClick={async () => { await navigator.clipboard?.writeText(texto).catch(() => {}); setCopiado(true); setTimeout(() => setCopiado(false), 1800); }}
+    >
+      {copiado ? <CheckCircle2 size={14} /> : <Copy size={14} />} {copiado ? t('admCopied') : t('admCopy')}
+    </button>
+  );
+};
+
+export const Interruptor =({ activo, onChange, etiqueta, ayuda, id, zona }) => (
   <div className="flex items-start justify-between gap-6" data-zona={zona}>
     {(etiqueta || ayuda) && (
       <div className="min-w-0">

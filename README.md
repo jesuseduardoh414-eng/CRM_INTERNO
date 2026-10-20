@@ -273,9 +273,12 @@ cliente OAuth que Google Calendar, permiso `drive.file`). Con Drive conectado:
 Codigo: `services/drive.service.js` (API de Drive sin dependencias),
 `services/almacenHibrido.service.js` (Drive o disco), `services/respaldo.service.js`
 y la tabla `conexion_drive` (migracion `20261018120000_conexion_drive`).
-Los pasos de Google Cloud estan en el panel (guia paso a paso en
-`components/configuracion/GuiaGoogleDrive.jsx`, con enlaces directos y valores
-para copiar) y resumidos en [DESPLIEGUE_CPANEL.md](DESPLIEGUE_CPANEL.md), paso 13.
+Los pasos de Google Cloud estan en el panel, iguales en Google Drive y en
+Google Calendar (`components/configuracion/GuiaGoogleCloud.jsx`: una sola llave
+para los dos, caminos Interno/Externo, enlaces directos y valores para copiar)
+y resumidos en [DESPLIEGUE_CPANEL.md](DESPLIEGUE_CPANEL.md), paso 13. Para el
+camino Externo, Google pide una politica de privacidad: `/privacidad` es
+publica (`pages/PrivacidadPage.jsx`).
 
 ## Finanzas (Ventas, Tesoreria, Gastos y Cotizaciones)
 

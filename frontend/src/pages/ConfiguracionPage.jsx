@@ -648,6 +648,9 @@ const ConfiguracionPage = () => {
           cambiar={cambiar}
           onQuitar={quitarGoogle}
           onIrModulos={() => setSeccion('modulos')}
+          onGuardar={guardar}
+          guardando={guardando}
+          nombreSistema={marca.nombreSistema}
         />
       );
     }

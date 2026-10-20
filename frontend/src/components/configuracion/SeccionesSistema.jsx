@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 import {
-  Archive, ArrowRight, CalendarOff, CheckCircle2, Clock, Copy, Database, ExternalLink, Eye, EyeOff, FileImage, FileSignature, FileSpreadsheet, FileText, FileType, KeyRound, Lock, LogOut,
+  Archive, ArrowRight, BookOpen, CalendarOff, CheckCircle2, Clock, Copy, Database, FileImage, FileSignature, FileSpreadsheet, FileText, FileType, KeyRound, Lock, LogOut,
   HardDrive, Mail, MailCheck, Minus, Paperclip, Plus, Receipt, RefreshCcw, Send, ShieldCheck, ShieldOff, TriangleAlert, Unlock, UserCheck, UserPlus, UserX, Users,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
@@ -18,6 +18,7 @@ import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { useConfirmacion } from '../ConfirmDialog';
 import ActionMenu from '../ActionMenu';
 import { Campo, Fila, Interruptor } from './PiezasConfiguracion';
+import GuiaGoogleCloud from './GuiaGoogleCloud';
 
 const ZONAS = [
   'America/Mexico_City', 'America/Cancun', 'America/Chihuahua', 'America/Hermosillo', 'America/Mazatlan', 'America/Tijuana',
@@ -545,35 +546,17 @@ const TONOS_ESTADO = {
   warning: 'bg-[var(--badge-warning-bg)] text-[var(--badge-warning-fg)]',
   neutral: 'bg-[var(--color-surface-3)] text-[var(--color-text-dim)]',
 };
-const REGEX_CLIENT_ID = /^[\w.-]+\.apps\.googleusercontent\.com$/;
-const clientIdGoogleValido = (id) => !id || REGEX_CLIENT_ID.test(id.trim());
-
-export const BotonCopiar = ({ texto }) => {
-  const { t } = usePreferences();
-  const [copiado, setCopiado] = useState(false);
-  return (
-    <button
-      type="button"
-      className="cfg-btn shrink-0"
-      onClick={async () => { await navigator.clipboard?.writeText(texto).catch(() => {}); setCopiado(true); setTimeout(() => setCopiado(false), 1800); }}
-    >
-      {copiado ? <CheckCircle2 size={14} /> : <Copy size={14} />} {copiado ? t('admCopied') : t('admCopy')}
-    </button>
-  );
-};
 
 /**
- * Credenciales OAuth de Google de la empresa. El secreto sigue el mismo
- * patrón que la contraseña SMTP: '' = conservar, null = borrar, y el
- * servidor solo devuelve `secretGuardado`. `guardado` es el estado del
- * servidor (no el borrador) para que el estado no cambie mientras se escribe.
+ * Llave de Google de la empresa (cliente OAuth; la misma de Google Drive). El
+ * secreto sigue el mismo patrón que la contraseña SMTP: '' = conservar, null =
+ * borrar, y el servidor solo devuelve `secretGuardado`. `guardado` es el estado
+ * del servidor (no el borrador) para que el estado no cambie mientras se
+ * escribe. Los campos de la llave están en el paso 7 de la guía compartida.
  */
-export const SeccionGoogle = ({ google, guardado, modulos, cambiar, onQuitar, onIrModulos }) => {
+export const SeccionGoogle = ({ google, guardado, modulos, cambiar, onQuitar, onIrModulos, onGuardar, guardando, nombreSistema }) => {
   const { t } = usePreferences();
-  const [verSecreto, setVerSecreto] = useState(false);
-  const set = (campo) => (valor) => cambiar('google', campo, valor);
-  const origen = window.location.origin;
-  const idValido = clientIdGoogleValido(google.clientId || '');
+  const [verGuia, setVerGuia] = useState(false);
   const moduloApagado = modulos.googleCalendar === false || modulos.agenda === false;
   const configurado = Boolean(guardado?.clientId && guardado?.secretGuardado);
   const incompleto = !configurado && Boolean(guardado?.clientId || guardado?.secretGuardado);
@@ -586,14 +569,8 @@ export const SeccionGoogle = ({ google, guardado, modulos, cambiar, onQuitar, on
       : { tono: 'warning', icono: TriangleAlert, titulo: incompleto ? t('gcalStatusPartial') : t('gcalStatusMissing'), texto: t('gcalStatusMissingText') };
   const IconoEstado = estado.icono;
 
-  const PASOS = [
-    { titulo: 'gcalStep1', texto: 'gcalStep1Text', enlace: 'https://console.cloud.google.com/projectcreate' },
-    { titulo: 'gcalStep2', texto: 'gcalStep2Text', enlace: 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com' },
-    { titulo: 'gcalStep3', texto: 'gcalStep3Text', enlace: 'https://console.cloud.google.com/apis/credentials/consent' },
-    { titulo: 'gcalStep4', texto: 'gcalStep4Text', enlace: 'https://console.cloud.google.com/apis/credentials' },
-    { titulo: 'gcalStep5', texto: 'gcalStep5Text', origen: true },
-    { titulo: 'gcalStep6', texto: 'gcalStep6Text' },
-  ];
+  // Sin llave la guía va abierta; con llave, se puede abrir para consultarla.
+  const guiaAbierta = !configurado;
 
   return (
     <>
@@ -604,7 +581,7 @@ export const SeccionGoogle = ({ google, guardado, modulos, cambiar, onQuitar, on
           <button type="button" className="cfg-btn cfg-btn-texto cfg-btn-peligro" onClick={onQuitar}><Minus size={13} /> {t('gcalRemove')}</button>
         )}
       >
-        <div className={`mb-5 flex items-start gap-3 rounded-[8px] p-3.5 ${TONOS_ESTADO[estado.tono]}`}>
+        <div className={`flex items-start gap-3 rounded-[8px] p-3.5 ${TONOS_ESTADO[estado.tono]}`}>
           <IconoEstado size={18} className="mt-0.5 shrink-0" />
           <div className="min-w-0 flex-1 text-[13.5px]">
             <p className="font-semibold">{estado.titulo}</p>
@@ -612,72 +589,30 @@ export const SeccionGoogle = ({ google, guardado, modulos, cambiar, onQuitar, on
           </div>
           {moduloApagado && <button type="button" className="cfg-btn shrink-0" onClick={onIrModulos}>{t('gcalGoModules')} <ArrowRight size={13} /></button>}
         </div>
-
-        <div className="grid grid-cols-1 gap-4">
-          <Campo etiqueta={t('gcalClientId')} ayuda={idValido ? t('gcalClientIdHint') : null} htmlFor="gcal-id">
-            <input
-              id="gcal-id"
-              className="cfg-input font-mono text-[13px]"
-              maxLength={200}
-              placeholder="123456789012-abc123.apps.googleusercontent.com"
-              value={google.clientId || ''}
-              onChange={(e) => set('clientId')(e.target.value.trim())}
-              aria-invalid={!idValido}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {!idValido && <p className="cfg-ayuda !text-[var(--color-error)]">{t('gcalClientIdInvalid')}</p>}
-          </Campo>
-          <Campo etiqueta={t('gcalSecret')} ayuda={google.secretGuardado && !google.secret ? t('gcalSecretSaved') : t('gcalSecretHint')} htmlFor="gcal-secreto">
-            <div className="relative">
-              <input
-                id="gcal-secreto"
-                type={verSecreto ? 'text' : 'password'}
-                className="cfg-input !pr-10 font-mono text-[13px]"
-                maxLength={200}
-                placeholder={google.secretGuardado ? '••••••••••' : 'GOCSPX-…'}
-                value={google.secret || ''}
-                onChange={(e) => set('secret')(e.target.value.trim())}
-                autoComplete="new-password"
-                spellCheck={false}
-              />
-              <button type="button" className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[6px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onClick={() => setVerSecreto((v) => !v)} aria-label={verSecreto ? t('hidePassword') : t('showPassword')}>
-                {verSecreto ? <EyeOff size={15} /> : <Eye size={15} />}
-              </button>
-            </div>
-          </Campo>
-        </div>
         {quitarPendiente && <p className="cfg-ayuda !text-[var(--color-warning)]">{t('gcalRemovePending')}</p>}
       </Fila>
 
-      <Fila titulo={t('gcalGuide')} descripcion={t('gcalGuideHint')}>
-        <ol className="cfg-lista">
-          {PASOS.map((p, i) => (
-            <li key={p.titulo} className="flex gap-3">
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary-10)] text-[12px] font-bold tabular-nums text-[var(--color-primary)]">{i + 1}</span>
-              <div className="min-w-0 flex-1">
-                <p className="flex flex-wrap items-center gap-x-2 text-[13.5px] font-semibold text-[var(--color-text)]">
-                  {t(p.titulo)}
-                  {p.enlace && (
-                    <a href={p.enlace} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--color-primary)] hover:underline">
-                      {t('gcalOpen')} <ExternalLink size={11} />
-                    </a>
-                  )}
-                </p>
-                <p className="mt-0.5 text-[12.5px] leading-relaxed text-[var(--color-text-dim)]">{t(p.texto)}</p>
-                {p.origen && (
-                  <>
-                    <div className="mt-2 flex gap-2">
-                      <input readOnly value={origen} aria-label={t('gcalOrigin')} className="cfg-input font-mono text-[12.5px]" onFocus={(e) => e.target.select()} />
-                      <BotonCopiar texto={origen} />
-                    </div>
-                    <p className="cfg-ayuda">{t('gcalOriginHint')}</p>
-                  </>
-                )}
-              </div>
-            </li>
-          ))}
-        </ol>
+      <Fila
+        titulo={t('gcgTitulo')}
+        descripcion={t('gcgTexto')}
+        extra={!guiaAbierta && (
+          <button type="button" className="cfg-btn" onClick={() => setVerGuia((v) => !v)} aria-expanded={verGuia}>
+            <BookOpen size={14} /> {verGuia ? t('drvGuiaOcultar') : t('drvGuiaVer')}
+          </button>
+        )}
+      >
+        {guiaAbierta || verGuia ? (
+          <GuiaGoogleCloud
+            variante="calendar"
+            google={google}
+            guardado={guardado}
+            cambiar={cambiar}
+            onGuardar={onGuardar}
+            guardando={guardando}
+            nombreSistema={nombreSistema}
+            credencialesListas={configurado}
+          />
+        ) : <p className="cfg-ayuda">{t('gcgCerradaCalendar')}</p>}
       </Fila>
     </>
   );

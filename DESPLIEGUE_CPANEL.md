@@ -332,29 +332,43 @@ El CRM pide el permiso **"drive.file"**: solo puede ver y tocar los archivos
 que él mismo crea, nunca el resto del Drive de esa cuenta. No hacen falta
 cuentas de servicio ni claves en el servidor.
 
-**La guía está en el propio panel:** cuenta de configuración → **Google
-Drive y respaldos** → *Cómo conectarlo, paso a paso*. Está pensada para que la
-empresa lo haga sola con su cuenta de administrador de Google Workspace: cada
-paso abre la pantalla exacta de Google Cloud y trae listos para copiar el
-nombre del proyecto, el nombre de la app y la dirección del CRM (la que tenga
-el navegador, p. ej. `https://crm.omnispg.com`). Resumen de lo que pide:
+**La guía está en el propio panel**, igual en **Google Drive y respaldos** y en
+**Google Calendar** (cuenta de configuración): *Cómo crear y conectar la llave
+de Google, paso a paso*. Es una sola llave (cliente de OAuth) para las dos
+cosas. Está pensada para que la empresa lo haga sola: cada paso abre la
+pantalla exacta de Google Cloud y trae listos para copiar el nombre del
+proyecto, el nombre de la app, la dirección del CRM (la que tenga el
+navegador, p. ej. `https://crm.omnispg.com`), la página de privacidad y el
+dominio autorizado. Se escribió recorriendo Google Cloud de verdad el
+2026-10-20. Resumen:
 
-1. Entrar a <https://console.cloud.google.com> con la cuenta de Workspace.
-2. Crear el proyecto "CRM" (o reusar el de Google Calendar).
-3. Habilitar **Google Drive API**.
-4. *Google Auth Platform*: nombre de la app y público **Interno** (si queda
-   *Externo* en prueba, Google corta la conexión cada 7 días).
-5. *Clientes* → **Crear cliente** tipo *Aplicación web* con el origen de
-   JavaScript del CRM (sin URI de redireccionamiento).
-6. Pegar el ID de cliente y el secreto en la guía → **Guardar la llave**
-   (es la misma llave de Google Calendar).
-7. **Conectar con Google** con la cuenta que guardará los archivos (una que no
-   se vaya a borrar, por ejemplo `avisos@omnispg.com`).
+1. Entrar a <https://console.cloud.google.com>, de preferencia con la cuenta de
+   administrador de Google Workspace (ignorar la prueba de $300: no hace falta
+   facturación).
+2. Crear el proyecto con **Recurso superior** = el dominio de la empresa (con
+   una @gmail.com sale "Sin organización").
+3. Habilitar **Google Drive API** y **Google Calendar API**.
+4. *Google Auth Platform* → **Comenzar**: nombre de la app, correo, público
+   **Interno** (Workspace) o **Externo** (Gmail), contacto, aceptar → Crear.
+5. Solo con Externo: *Información de la marca* (página principal, política
+   de privacidad `https://crm.omnispg.com/privacidad` y dominio autorizado; sin
+   logo) y *Público* → **Publicar app**. En "Prueba" Google corta la conexión
+   cada 7 días, y sin la marca el botón sale apagado.
+6. *Clientes* → **Crear cliente**: *Aplicación web*, origen de JavaScript
+   del CRM, sin redireccionamiento. El secreto solo se ve en esa ventana.
+7. Pegar el ID de cliente y el secreto en la guía → **Guardar la llave**.
+8. Drive: **Conectar con Google** con la cuenta que guardará los archivos
+   (una que no se vaya a borrar, por ejemplo `avisos@omnispg.com`). Calendar:
+   cada persona en *Agenda → Configuración de agenda → Conectar Google
+   Calendar* (con Externo sale "Google no verificó esta app": *Configuración
+   avanzada → Ir a … (no seguro)*).
+9. Comprobar: **Respaldar ahora** y un adjunto de prueba en Drive; un evento
+   de prueba en Google Calendar (la sincronización va solo del CRM a Google).
 
-Abajo de la guía hay una lista de errores comunes (origin_mismatch, cuenta de
-otra organización, app no verificada, API sin activar, llave rechazada,
-ventana bloqueada, permiso no permanente) con su arreglo; los errores que
-devuelve Google al conectar también dicen qué paso revisar.
+Abajo de la guía hay una lista de errores comunes con su arreglo, y los
+errores que devuelve Google al conectar Drive dicen qué paso revisar. Si se
+cambia la llave, quien tenía Calendar conectado debe desconectar y volver a
+conectar en su agenda.
 
 Al terminar, comprueba que en el Drive de esa cuenta apareció la carpeta
 **Archivos del CRM** y pulsa **Respaldar ahora**: en *Respaldos* debe aparecer

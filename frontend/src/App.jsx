@@ -44,6 +44,7 @@ const lazyRetry = (importer, key) => lazy(async () => {
 });
 
 const InvitationPage = lazyRetry(() => import('./pages/InvitationPage'), 'invitation');
+const PrivacidadPage = lazyRetry(() => import('./pages/PrivacidadPage'), 'privacidad');
 const RegisterPage = lazyRetry(() => import('./pages/RegisterPage'), 'register');
 const VerifyEmailPage = lazyRetry(() => import('./pages/VerifyEmailPage'), 'verify_email');
 const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'), 'dashboard');
@@ -185,6 +186,8 @@ const AppRoutes = () => (
     <Route path="/forgot-password" element={<RutaPublica><ForgotPasswordPage /></RutaPublica>} />
     <Route path="/reset-password/:token" element={<RutaPublica><ResetPasswordPage /></RutaPublica>} />
     <Route path="/verify/:token" element={<VerifyAccountPage />} />
+    {/* Pública, con o sin sesión: Google la pide para publicar la app (guía de Google Cloud del panel). */}
+    <Route path="/privacidad" element={<PublicLazyRoute><PrivacidadPage /></PublicLazyRoute>} />
 
     <Route path="/dashboard" element={<RutaConLayout><DashboardPage /></RutaConLayout>} />
     <Route path="/proyectos" element={<RutaConLayout><ProyectosPage /></RutaConLayout>} />

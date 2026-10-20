@@ -17,7 +17,7 @@ import { useConfirmacion } from '../ConfirmDialog';
 import { pedirCodigoGoogle } from '../../utils/googleIdentity';
 import { formatearTamano } from '../../utils/contratos';
 import { Fila } from './PiezasConfiguracion';
-import GuiaGoogleDrive from './GuiaGoogleDrive';
+import GuiaGoogleCloud from './GuiaGoogleCloud';
 
 const TONOS = {
   success: 'bg-[var(--badge-success-bg)] text-[var(--badge-success-fg)]',
@@ -62,7 +62,7 @@ const SeccionDrive = ({ google, guardado, cambiar, onGuardar, guardando, nombreS
   const MENSAJES_GOOGLE = {
     'google-script': 'drvSinScript',
     'sin-codigo': 'drvSinCodigo',
-    'popup-bloqueado': 'drvProblemaVentanaTexto',
+    'popup-bloqueado': 'gcgProblemaVentanaTexto',
   };
   const conectar = async () => {
     setOcupado('conectar');
@@ -133,7 +133,8 @@ const SeccionDrive = ({ google, guardado, cambiar, onGuardar, guardando, nombreS
     </button>
   );
   const guia = (
-    <GuiaGoogleDrive
+    <GuiaGoogleCloud
+      variante="drive"
       google={google}
       guardado={guardado}
       cambiar={cambiar}
@@ -231,8 +232,8 @@ const SeccionDrive = ({ google, guardado, cambiar, onGuardar, guardando, nombreS
       </Fila>
 
       <Fila
-        titulo={t('drvGuiaTitulo')}
-        descripcion={t('drvGuiaTexto')}
+        titulo={t('gcgTitulo')}
+        descripcion={t('gcgTexto')}
         extra={!guiaAbierta && (
           <button type="button" className="cfg-btn" onClick={() => setVerGuia((v) => !v)} aria-expanded={verGuia}>
             <BookOpen size={14} /> {verGuia ? t('drvGuiaOcultar') : t('drvGuiaVer')}
