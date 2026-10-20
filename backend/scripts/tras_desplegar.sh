@@ -1,20 +1,36 @@
 #!/usr/bin/env bash
 # Corre en el servidor de cPanel justo después de que GitHub Actions sube el
-# backend (.github/workflows/desplegar-cpanel.yml). Hace lo mismo que los
-# botones de "Setup Node.js App" (Run NPM Install, Run JS script y Restart)
-# con cloudlinux-selector, que es lo que usan esos botones: así los scripts
-# reciben las variables de entorno de la aplicación (DATABASE_URL,
-# NODE_OPTIONS...), que una terminal o un cron no tienen.
+# backend (.github/workflows/desplegar-cpanel.yml): instala dependencias si
+# cambió package-lock.json, genera el cliente de Prisma, aplica migraciones y
+# pide el reinicio de la aplicación con tmp/restart.txt.
+#
+# PROCESOS. En la jaula de CloudLinux la cuenta tiene 100 procesos y cada hilo
+# cuenta como uno. El 2026-10-20 la aplicación (sin tope de hilos de Prisma)
+# ocupaba ~88; `cloudlinux-selector install-modules` llegó al límite, se colgó
+# 20 minutos sin salida y la cuenta se quedó sin poder abrir nada (SSH: "exec
+# request failed"; se arregla suspendiendo y reactivando la cuenta en WHM). Por
+# eso aquí:
+#   - si no hay nada que instalar, generar ni migrar, no se arranca ningún
+#     node: solo se toca tmp/restart.txt;
+#   - antes de cada paso pesado se mira cuántos procesos usa la cuenta y, si no
+#     hay margen, se detiene en vez de quedarse colgado;
+#   - los node que corre (npm, prisma) llevan pocos hilos y un tiempo máximo.
+#
+# Usa el node y npm de la aplicación (~/nodevenv/<app>/<versión>) y sus
+# variables de entorno (las de "Setup Node.js App", leídas con
+# `cloudlinux-selector get`), que una terminal o un cron no tienen.
 #
 #   bash crm_backend/scripts/tras_desplegar.sh [--instalar] [--generar] [--migrar] COMMIT
 #
-# Al terminar bien anota COMMIT en .commit_desplegado: el siguiente despliegue
-# compara contra él para saber si cambiaron dependencias, esquema o migraciones.
+# Sin --instalar, npm install solo corre si package-lock.json no coincide con
+# el de la última instalación (.lock_instalado). Al terminar anota COMMIT en
+# .commit_desplegado, que /api/health lee al arrancar.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export PATH="$PATH:/usr/sbin:/usr/bin:/usr/local/bin"
 APP_ROOT="${PWD#"$HOME"/}"
+LIMITE="${LIMITE_PROCESOS:-100}"
 
 instalar=0 generar=0 migrar=0 commit=""
 for arg in "$@"; do
@@ -27,49 +43,132 @@ for arg in "$@"; do
   esac
 done
 
-hay_selector=0
-command -v cloudlinux-selector >/dev/null 2>&1 && hay_selector=1
-
-# cloudlinux-selector responde JSON con "result": "success" o el error.
-selector() {
-  local salida
-  salida=$(cloudlinux-selector "$@" --json --interpreter nodejs --app-root "$APP_ROOT" 2>&1) || true
-  printf '%s\n' "$salida"
-  grep -q '"result": *"success"' <<<"$salida"
+paso() { printf '\n== %s (%s)\n' "$1" "$(date +%H:%M:%S)"; }
+hilos() { ps -L -u "$(id -un)" --no-headers 2>/dev/null | wc -l; }
+# margen N: hay sitio para un paso que necesita ~N procesos más.
+margen() {
+  local usados
+  usados=$(hilos)
+  echo "Procesos de la cuenta: $usados de $LIMITE (este paso necesita ~$1)"
+  if (( usados + $1 > LIMITE )); then
+    echo "Sin margen: la aplicación ocupa casi todo. Reinicia la aplicación (o espera a que se duerma) y vuelve a desplegar." >&2
+    return 1
+  fi
+}
+# Con límite de tiempo; si se pasa, se corta y el despliegue falla.
+limitado() {
+  local segundos="$1"; shift
+  if ! timeout --kill-after=30 "$segundos" "$@"; then
+    echo "Falló o pasó de ${segundos}s: $*" >&2
+    return 1
+  fi
 }
 
-paso() { printf '\n== %s\n' "$1"; }
+node_listo=0
+preparar_node() {
+  (( node_listo )) && return 0
+  paso 'node y variables de la aplicación'
+  margen 15
+  local activar json
+  activar=$(ls -1d "$HOME/nodevenv/$APP_ROOT"/*/bin/activate 2>/dev/null | sort -V | tail -1 || true)
+  if [[ -z "$activar" ]]; then
+    echo "No está ~/nodevenv/$APP_ROOT: ¿existe la aplicación en Setup Node.js App?" >&2
+    exit 1
+  fi
+  set +u
+  # shellcheck disable=SC1090
+  source "$activar"
+  set -u
+  json=$(limitado 60 cloudlinux-selector get --json --interpreter nodejs)
+  local nombres=() par
+  while IFS= read -r -d '' par; do
+    export "$par"
+    nombres+=("${par%%=*}")
+  done < <(APP_ROOT="$APP_ROOT" node --v8-pool-size=1 -e '
+    let d = "";
+    process.stdin.on("data", (c) => { d += c; }).on("end", () => {
+      const usuario = require("os").userInfo().username;
+      for (const v of Object.values(JSON.parse(d).available_versions || {})) {
+        const app = v.users?.[usuario]?.applications?.[process.env.APP_ROOT];
+        if (app) {
+          for (const [k, val] of Object.entries(app.env_vars || {})) process.stdout.write(`${k}=${val}\0`);
+          return;
+        }
+      }
+    });' <<<"$json")
+  if [[ -z "${DATABASE_URL:-}" ]]; then
+    echo "No encontré las variables de la aplicación $APP_ROOT (falta DATABASE_URL)." >&2
+    exit 1
+  fi
+  # Pocos hilos también para npm, prisma generate y el motor de migraciones.
+  export TOKIO_WORKER_THREADS="${TOKIO_WORKER_THREADS:-2}" UV_THREADPOOL_SIZE="${UV_THREADPOOL_SIZE:-2}"
+  export NODE_OPTIONS="${NODE_OPTIONS:-} --v8-pool-size=2"
+  echo "node $(node -v), npm $(npm -v); ${#nombres[@]} variables: ${nombres[*]}"
+  node_listo=1
+}
+# Cada dependencia de package.json está en node_modules y las clave cargan. No
+# se usa `npm ls`: en cPanel siempre falla (node_modules es un enlace a
+# ~/nodevenv y xlsx viene de una URL), y eso dispararía un npm install de más.
+completas() {
+  node -e '
+    const fs = require("fs");
+    const { dependencies } = require("./package.json");
+    const faltan = Object.keys(dependencies).filter((m) => !fs.existsSync(`node_modules/${m}/package.json`));
+    if (faltan.length) { console.error(`Faltan: ${faltan.join(", ")}`); process.exit(1); }
+    require("express"); require("@prisma/client");
+  '
+}
 
-if (( instalar || generar || migrar )) && (( ! hay_selector )); then
-  echo "No está cloudlinux-selector en este servidor: haz a mano en Setup Node.js App" >&2
-  (( instalar )) && echo "  - Run NPM Install" >&2
-  (( generar )) && echo "  - Run JS script → db:generate" >&2
-  (( migrar )) && echo "  - Run JS script → db:migrate" >&2
-  exit 1
-fi
+paso 'inicio'
+echo "Procesos de la cuenta: $(hilos) de $LIMITE"
 
+paso 'dependencias'
+huella=$(sha256sum package-lock.json | cut -d' ' -f1)
+instalada=$(cat .lock_instalado 2>/dev/null || true)
 if (( instalar )); then
-  paso 'npm install (Run NPM Install)'
-  selector install-modules
+  echo 'Instalación pedida.'
+elif [[ "$huella" == "$instalada" ]]; then
+  echo 'package-lock.json sin cambios: no se instala nada.'
+elif [[ -z "$instalada" ]]; then
+  preparar_node
+  if completas; then
+    echo 'Dependencias completas (primera vez con este script): se anota la huella sin reinstalar.'
+    echo "$huella" > .lock_instalado
+  else
+    instalar=1
+  fi
+else
+  instalar=1
 fi
+if (( instalar )); then
+  preparar_node
+  paso 'npm install'
+  margen 40
+  limitado 600 npm install --omit=dev --no-audit --no-fund --no-progress
+  completas || { echo 'npm install terminó pero faltan dependencias.' >&2; exit 1; }
+  echo "$huella" > .lock_instalado
+  generar=1
+fi
+
 if (( generar )); then
-  paso 'prisma generate (db:generate)'
-  selector run-script --script-name db:generate
+  preparar_node
+  paso 'prisma generate'
+  margen 25
+  limitado 300 node scripts/prisma.js generate
 fi
 if (( migrar )); then
-  paso 'migraciones (db:migrate)'
-  selector run-script --script-name db:migrate
+  preparar_node
+  paso 'migraciones'
+  margen 25
+  limitado 300 node scripts/prisma.js migrate deploy
 fi
 
 paso 'reiniciar la aplicación'
-if ! { (( hay_selector )) && selector restart; }; then
-  # Passenger y LiteSpeed reinician la app al tocar tmp/restart.txt.
-  mkdir -p tmp
-  touch tmp/restart.txt
-  echo 'Reinicio pedido con tmp/restart.txt'
-fi
-
 if [[ -n "$commit" ]]; then
   printf '%s\n' "$commit" > .commit_desplegado
 fi
-echo 'Listo.'
+# Passenger y LiteSpeed reinician la aplicación en la siguiente petición al
+# ver tmp/restart.txt más nuevo (comprobado en este servidor con MAQSER24).
+mkdir -p tmp
+touch tmp/restart.txt
+echo "Listo. Procesos de la cuenta: $(hilos) de $LIMITE"

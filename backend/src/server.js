@@ -1,4 +1,14 @@
 // Punto de entrada del servidor Express
+
+// Hilos. En la jaula de CloudLinux (cPanel) cada hilo cuenta como un proceso y
+// la cuenta tiene 100: el motor de Prisma (Rust/Tokio) abre por defecto uno por
+// núcleo del servidor, que son decenas, y libuv 4. Con 2 de cada uno sobra para
+// el CRM y queda margen para despliegues y otra instancia. Va antes de cargar
+// cualquier módulo porque Tokio y libuv leen estas variables al crear sus
+// hilos. Se respeta lo que ya fije el entorno.
+process.env.TOKIO_WORKER_THREADS ??= '2';
+process.env.UV_THREADPOOL_SIZE ??= '2';
+
 const express = require('express');
 const cors    = require('cors');
 const helmet = require('helmet');
@@ -104,9 +114,19 @@ app.use('/api/finanzas',                    require('./routes/finanzas.routes'))
 app.use('/api/conocimiento',                require('./routes/conocimiento.routes'));
 app.get('/api/archivos/:carpeta/:nombre',   require('./controllers/archivos.controller').ver);
 
+// Commit desplegado en cPanel (lo escribe scripts/tras_desplegar.sh antes de
+// reiniciar): el despliegue automático comprueba con él que ya corre lo nuevo.
+const VERSION = (() => {
+  try {
+    return require('fs').readFileSync(require('path').join(__dirname, '..', '.commit_desplegado'), 'utf8').trim() || null;
+  } catch (_e) {
+    return null;
+  }
+})();
+
 // Ruta de salud para verificar que el servidor está corriendo
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, mensaje: 'Servidor CRM funcionando' });
+  res.json({ ok: true, mensaje: 'Servidor CRM funcionando', version: VERSION });
 });
 
 // Manejador global de errores.

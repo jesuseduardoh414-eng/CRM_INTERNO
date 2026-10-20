@@ -407,13 +407,16 @@ en GitHub Actions:
    `scripts/`, `assets/` y los `package*.json`; `node_modules` y
    `crm_archivos` no se tocan).
 3. En el servidor ([backend/scripts/tras_desplegar.sh](backend/scripts/tras_desplegar.sh))
-   corre lo mismo que los botones de *Setup Node.js App*, con sus variables de
-   entorno: **Run NPM Install** si cambió `package.json`, `db:generate` si
-   cambió el esquema, `db:migrate` si hay migraciones nuevas y siempre
-   **Restart**. Si una migración falla, no reinicia y el siguiente despliegue
-   la vuelve a intentar.
-4. Comprueba `/api/health`, sube el frontend a `public_html` (sin tocar
-   `api/`) y comprueba que el sitio sirve la versión nueva.
+   hace con el node y las variables de la aplicación lo que harían los botones
+   de *Setup Node.js App*, pero solo si hace falta: `npm install` si cambió
+   `package-lock.json`, `db:generate` si cambió el esquema y `db:migrate` si
+   hay migraciones nuevas. Si no hay nada de eso, no arranca ningún node. Al
+   final reinicia con `tmp/restart.txt`. Si un paso falla o no hay procesos
+   libres, no reinicia y el siguiente despliegue lo vuelve a intentar.
+4. Espera a que `/api/health` diga que corre el commit nuevo (preguntando
+   desde el propio servidor), sube el frontend a `public_html` conservando el
+   bloque de cPanel del `.htaccess` y comprueba que el sitio sirve la versión
+   nueva.
 
 El avance y los errores se ven en GitHub → **Actions**. Para repetir un
 despliegue: Actions → *Desplegar en cPanel* → **Run workflow** (con la casilla
@@ -451,6 +454,16 @@ Sin `CPANEL_USER` el workflow no corre. La clave privada solo vive en el
 secreto de GitHub (que no se ve en el repositorio aunque sea público) y en tu
 PC: si se pierde la PC, quita la clave en cPanel y crea otra.
 
+**Procesos.** En este hosting (CloudLinux) la cuenta tiene un límite de **100
+procesos** y cada hilo cuenta como uno. El motor de Prisma abre por defecto un
+hilo por núcleo del servidor: el 2026-10-20 la aplicación sola ocupaba ~88, el
+`npm install` de un despliegue llegó a 100 y la cuenta se quedó sin poder abrir
+nada hasta suspenderla y reactivarla en WHM. Desde entonces `src/server.js` fija
+`TOKIO_WORKER_THREADS=2` y `UV_THREADPOOL_SIZE=2` antes de cargar nada (como
+MAQSER24, en el mismo servidor), y `tras_desplegar.sh` mira cuántos procesos
+usa la cuenta antes de cada paso pesado. Lo que consume se ve en cPanel →
+**Uso de recursos** → *Current usage* → *Number of Processes*.
+
 Vercel ya no despliega con cada push (`"git": { "deploymentEnabled": false }`
 en los dos `vercel.json`): se queda en la última versión hasta apagarlo.
 
@@ -484,4 +497,5 @@ Con Google Drive conectado ya hay un respaldo de cada noche (paso 13).
 | 404 al recargar una página del CRM | Falta `.htaccess` en `public_html` (es un archivo oculto). |
 | "Origen no permitido por CORS" al iniciar sesión | `FRONTEND_URL` no es exactamente `https://crm.omnispg.com`. |
 | La página abre sin candado o con aviso de certificado | AutoSSL todavía no emitió el certificado (paso 2) o el DNS aún no apunta al cPanel. |
-| **Run NPM Install** falla por memoria o con `EAGAIN` | Límites del hosting compartido: reintenta y, si sigue, pide al hosting que suba el límite de memoria o de procesos. |
+| **Run NPM Install** falla por memoria, con `EAGAIN` o se queda colgado | La cuenta llegó a su límite de **100 procesos** (ver *Procesos* abajo). Detén la aplicación (*Stop App*) antes de instalar, o deja que lo haga el despliegue automático, que solo instala si cambió `package-lock.json` y se frena si no hay margen. |
+| SSH dice `exec request failed on channel 0`, cPanel o *Setup Node.js App* no abren (`Unable to fork`) | Procesos agotados y algo colgado ocupándolos. **WHM → Administrar suspensión de cuenta → Suspender y luego Reactivar** la cuenta: mata todos sus procesos (el sitio se cae un minuto). Después la aplicación arranca sola con la primera visita. |

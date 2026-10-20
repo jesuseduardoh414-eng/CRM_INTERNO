@@ -29,7 +29,7 @@ jobs:
   desplegar:
     if: vars.CPANEL_USER != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       HOST: ${{ vars.CPANEL_HOST || 'crm.omnispg.com' }}
       PUERTO: ${{ vars.CPANEL_PORT || '22' }}
@@ -67,8 +67,11 @@ jobs:
         run: |
           test -n "$LLAVE" || { echo "::error::Falta el secreto CPANEL_SSH_KEY"; exit 1; }
           install -m 700 -d ~/.ssh
-          printf '%s\n' "$LLAVE" > ~/.ssh/cpanel
+          # Sin los \r de Windows ni espacios al final de línea: con ellos OpenSSH
+          # rechaza la llave con "error in libcrypto" (le pasó a MAQSER24).
+          printf '%s\n' "$LLAVE" | tr -d '\r' | sed -e 's/[[:space:]]*$//' > ~/.ssh/cpanel
           chmod 600 ~/.ssh/cpanel
+          ssh-keygen -y -f ~/.ssh/cpanel > /dev/null || { echo "::error::CPANEL_SSH_KEY no es una llave privada válida: pega el archivo completo, de BEGIN a END"; exit 1; }
           # La huella del servidor va fija: si cambia, el despliegue se detiene.
           if [ -n "$CONOCIDOS" ]; then printf '%s\n' "$CONOCIDOS"; else cat .github/cpanel_known_hosts; fi > ~/.ssh/known_hosts
           cat > ~/.ssh/config <<EOF
@@ -97,7 +100,9 @@ jobs:
           fi
           cambio() { [ -z "$desde" ] || ! git diff --quiet "$desde" HEAD -- "$@"; }
           opciones=""
-          if cambio backend/package.json backend/package-lock.json; then opciones="$opciones --instalar"; fi
+          # npm install: si se pide a mano o cambió el lock; sin despliegue
+          # anterior lo decide el servidor (compara con su última instalación).
+          if [ "$TODO" = true ] || { [ -n "$desde" ] && cambio backend/package.json backend/package-lock.json; }; then opciones="$opciones --instalar"; fi
           if cambio backend/package.json backend/package-lock.json backend/prisma/schema.prisma backend/prisma/postgres/schema.prisma; then opciones="$opciones --generar"; fi
           if cambio backend/prisma/migrations backend/prisma/postgres/migrations; then opciones="$opciones --migrar"; fi
           echo "Opciones:${opciones:- ninguna}"
@@ -114,10 +119,28 @@ jobs:
             backend/ "cpanel:$APP/"
 
       - name: Instalar, migrar y reiniciar en el servidor
+        timeout-minutes: 25
         run: ssh cpanel "bash '$APP/scripts/tras_desplegar.sh' ${{ steps.cambios.outputs.opciones }} '${{ github.sha }}'"
 
-      - name: Comprobar la API
-        run: curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "$URL/api/health"
+      # /api/health dice qué commit corre. Se pregunta DESDE EL SERVIDOR: con
+      # MAQSER24 (mismo hosting) el runner de GitHub no alcanzaba el sitio por
+      # HTTPS. Si en un minuto sigue el anterior, se reinicia con
+      # cloudlinux-selector (lo mismo que el botón Restart).
+      - name: Comprobar que la API ya corre la versión nueva
+        timeout-minutes: 6
+        run: |
+          version() { ssh cpanel "curl -s --max-time 30 '$URL/api/health'" 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || true; }
+          for i in $(seq 1 36); do
+            v=$(version)
+            if [ "$v" = "$GITHUB_SHA" ]; then echo "La API ya corre $v"; exit 0; fi
+            if [ "$i" = 12 ]; then
+              echo "Sigue respondiendo ${v:-la versión anterior}: reinicio con cloudlinux-selector"
+              ssh cpanel "timeout 120 cloudlinux-selector restart --json --interpreter nodejs --app-root '$APP'" || true
+            fi
+            sleep 5
+          done
+          echo "::error::La API no muestra la versión nueva (responde: ${v:-sin versión})"
+          exit 1
 
       # Setup Node.js App escribe su configuración (bloques "DO NOT REMOVE ...
       # CLOUDLINUX ... BEGIN/END") en el .htaccess de la carpeta de su URL: si la
@@ -156,5 +179,5 @@ jobs:
       - name: Comprobar el sitio
         run: |
           js=$(grep -o 'assets/index-[^"]*\.js' frontend/dist/index.html | head -1)
-          curl -fsS "$URL/" | grep -q "$js" || { echo "::error::$URL no sirve el index.html nuevo ($js)"; exit 1; }
+          ssh cpanel "curl -s --max-time 30 '$URL/'" | grep -q "$js" || { echo "::error::$URL no sirve el index.html nuevo ($js)"; exit 1; }
           echo "En línea: $URL ($js)"
