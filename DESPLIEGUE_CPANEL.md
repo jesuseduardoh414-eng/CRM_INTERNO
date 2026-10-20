@@ -463,7 +463,11 @@ en los dos `vercel.json`): se queda en la última versión hasta apagarlo.
    - si hay migraciones nuevas en `prisma/migrations/` → **Run JS script** → `db:migrate`;
    - siempre → **Restart**.
 3. Frontend: sube `crm-frontend.zip` a `public_html` y extráelo
-   encima (sin borrar `api/`).
+   encima (sin borrar `api/`). Si la aplicación Node.js está en la raíz del
+   dominio (*Application URL* vacía), el zip pisa el `.htaccess` donde cPanel
+   guarda su bloque `CLOUDLINUX PASSENGER CONFIGURATION` y la API da 404:
+   en *Setup Node.js App* pulsa **Edit** → **Save** para que lo vuelva a
+   escribir. El despliegue automático conserva ese bloque solo.
 
 Respalda la base (phpMyAdmin → *Exportar*, o *Copias de seguridad* de cPanel)
 y la carpeta `crm_archivos` antes de cada actualización con migraciones.

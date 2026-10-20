@@ -119,9 +119,26 @@ jobs:
       - name: Comprobar la API
         run: curl -fsS --retry 12 --retry-delay 5 --retry-all-errors "$URL/api/health"
 
+      # Setup Node.js App escribe su configuración (bloques "DO NOT REMOVE ...
+      # CLOUDLINUX ... BEGIN/END") en el .htaccess de la carpeta de su URL: si la
+      # aplicación está en la raíz, en public_html/.htaccess. Se copian al
+      # .htaccess nuevo para no desconectar la API.
+      - name: Conservar la configuración de cPanel en .htaccess
+        run: |
+          ssh cpanel "cat '$SITIO/.htaccess' 2>/dev/null" > htaccess_servidor || true
+          awk '/^# DO NOT REMOVE.*CLOUDLINUX.*BEGIN/{dentro=1} dentro{print} /^# DO NOT REMOVE.*CLOUDLINUX.*END/{dentro=0}' htaccess_servidor > bloques_cpanel
+          echo "Bloques de cPanel conservados: $(grep -c 'BEGIN' bloques_cpanel || true)"
+          if [ -s bloques_cpanel ]; then
+            { cat bloques_cpanel; cat frontend/dist/.htaccess; } > htaccess_nuevo
+            mv htaccess_nuevo frontend/dist/.htaccess
+          fi
+          if grep -q PassengerAppRoot htaccess_servidor && ! grep -q PassengerAppRoot frontend/dist/.htaccess; then
+            echo "::error::El .htaccess nuevo perdería la configuración de la aplicación Node.js"; exit 1
+          fi
+
       # Primero assets/ (archivos con hash, nuevos) y al final index.html, para
       # que nadie reciba un index.html que apunte a archivos que aún no están.
-      # La carpeta api/ es de la aplicación Node.js y nunca se toca.
+      # Si la aplicación Node.js está en /api, su carpeta api/ nunca se toca.
       - name: Subir el frontend
         run: |
           rsync -rlcz --chmod=D755,F644 frontend/dist/assets/ "cpanel:$SITIO/assets/"
