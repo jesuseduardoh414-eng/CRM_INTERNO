@@ -246,6 +246,12 @@ vienen de XAMPP, sube también el contenido de `backend/storage/` (`adjuntos`,
 `contratos`, `comprobantes`) a `/home/CUENTA/crm_archivos/`, en carpetas con
 los mismos nombres.
 
+Ojo con los adjuntos: `ADJUNTOS_DIR` apunta a `crm_archivos/adjuntos` y el
+CRM agrega dentro sus propias carpetas `adjuntos/` y `perfiles/`, así que un
+adjunto debe quedar en `crm_archivos/adjuntos/adjuntos/<uuid>.pdf` (como en
+`backend/storage/adjuntos/adjuntos/` de tu PC). Un nivel más arriba da 404:
+el 2026-10-20 hubo que mover así los 6 adjuntos copiados de Supabase.
+
 ## 7. Frontend
 
 1. **Administrador de archivos** → **Configuración** → marca **Mostrar archivos
@@ -515,6 +521,7 @@ Con Google Drive conectado ya hay un respaldo de cada noche (paso 13).
 | `Prisma Client could not locate the Query Engine for runtime "rhel-openssl-..."` | Agrega en `backend/prisma/schema.prisma`, bloque `generator client`, `binaryTargets = ["native", "<el runtime del error>"]`, vuelve a empaquetar y subir, y corre **Run NPM Install**. |
 | `Too many connections` / `max_user_connections` | Baja `connection_limit` a `3` en `DATABASE_URL`. |
 | `Cannot GET /...` al abrir `/api/...` | La *Application URL* no termina en `api`. |
+| Un adjunto da 404 (`/api/archivos/adjuntos/…`) | El archivo está un nivel arriba: debe ir en `crm_archivos/adjuntos/adjuntos/` (ver paso 6, *Archivos*). |
 | 404 al recargar una página del CRM | Falta `.htaccess` en `public_html` (es un archivo oculto). |
 | "Origen no permitido por CORS" al iniciar sesión | `FRONTEND_URL` no es exactamente `https://crm.omnispg.com`. |
 | La página abre sin candado o con aviso de certificado | AutoSSL todavía no emitió el certificado (paso 2) o el DNS aún no apunta al cPanel. |
