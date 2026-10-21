@@ -1,9 +1,11 @@
 // Base de conocimiento (/conocimiento): buscador, categorías y artículos.
-// Todo el equipo lee; los administradores crean y editan (y ven borradores).
+// Todo el equipo lee; los administradores crean y editan (y ven borradores),
+// a mano o subiendo varios documentos a la vez. Cada quien ve solo lo que su
+// acceso le permite (el candado marca lo restringido).
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { BookOpen, Paperclip, Pin, Plus, Search, X } from 'lucide-react';
+import { BookOpen, Lock, Paperclip, Pin, Plus, Search, Upload, X } from 'lucide-react';
 import { conocimientoService } from '../services/api';
 import { usePreferences } from '../context/PreferencesContext';
 import { useAuth } from '../context/AuthContext';
@@ -13,6 +15,7 @@ import { useDebounce } from '../utils/useDebounce';
 import { ListSkeleton } from '../components/Skeleton';
 import { Button } from '../components/ui/button';
 import { ErrorCarga, Vacio } from '../components/finanzas/piezas';
+import SubirDocumentos from '../components/conocimiento/SubirDocumentos';
 
 const ConocimientoPage = () => {
   const { t, locale } = usePreferences();
@@ -36,15 +39,22 @@ const ConocimientoPage = () => {
   const hayFiltros = Boolean(busqueda) || Boolean(categoria);
   const limpiar = () => { setBusqueda(''); elegirCategoria(''); };
   const fechaCorta = (iso) => new Date(iso).toLocaleDateString(locale, { day: 'numeric', month: 'short', year: 'numeric' });
+  const [subirDocumentos, setSubirDocumentos] = useState(false);
 
   return (
     <div className="mx-auto max-w-7xl">
+      <SubirDocumentos abierto={subirDocumentos} categorias={categorias} onCerrar={() => setSubirDocumentos(false)} onSubidos={() => mutate()} />
       <div className="mb-6 flex flex-col items-start justify-between gap-4 md:flex-row md:items-end">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-[var(--color-text)] md:text-[30px]">{tc('conTitulo')}</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--color-text-muted)]">{tc('conSubtitulo')}</p>
         </div>
-        {puedeEditar && <Button className="w-full md:w-auto" onClick={() => navigate('/conocimiento/nuevo')}><Plus size={16} /> {tc('conNuevo')}</Button>}
+        {puedeEditar && (
+          <div className="flex w-full flex-col gap-2 sm:flex-row md:w-auto">
+            <Button variant="outline" className="w-full md:w-auto" onClick={() => setSubirDocumentos(true)}><Upload size={16} /> {tc('docSubir')}</Button>
+            <Button className="w-full md:w-auto" onClick={() => navigate('/conocimiento/nuevo')}><Plus size={16} /> {tc('conNuevo')}</Button>
+          </div>
+        )}
       </div>
 
       <div className="relative mb-4 max-w-xl">
@@ -90,7 +100,12 @@ const ConocimientoPage = () => {
             texto={hayFiltros ? undefined : (puedeEditar ? tc('conVacioHint') : tc('conVacioHintMiembro'))}
             accion={hayFiltros
               ? <Button variant="outline" onClick={limpiar}><X size={15} /> {t('clearFilters')}</Button>
-              : (puedeEditar && <Button onClick={() => navigate('/conocimiento/nuevo')}><Plus size={16} /> {tc('conNuevo')}</Button>)}
+              : (puedeEditar && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Button variant="outline" onClick={() => setSubirDocumentos(true)}><Upload size={16} /> {tc('docSubir')}</Button>
+                  <Button onClick={() => navigate('/conocimiento/nuevo')}><Plus size={16} /> {tc('conNuevo')}</Button>
+                </div>
+              ))}
           />
         </div>
       )}
@@ -107,7 +122,10 @@ const ConocimientoPage = () => {
                   <div className="flex items-center gap-2">
                     <span className="truncate text-[11.5px] font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">{a.categoria}</span>
                     {a.fijado && <span className="inline-flex items-center gap-1 text-[11.5px] font-medium text-[var(--color-gold-text,var(--color-primary))]"><Pin size={12} aria-hidden="true" />{tc('conDestacado')}</span>}
-                    {!a.publicado && <span className="badge-neutral ml-auto">{tc('conBorrador')}</span>}
+                    <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                      {a.restringido && <Lock size={13} className="text-[var(--color-text-muted)]" role="img" aria-label={tc('accRestringido')} />}
+                      {!a.publicado && <span className="badge-neutral">{tc('conBorrador')}</span>}
+                    </span>
                   </div>
                   <h2 className="mt-1.5 text-[15.5px] font-semibold leading-snug text-[var(--color-text)]">{a.titulo}</h2>
                   {a.resumen && <p className="mt-1 line-clamp-2 text-[13px] text-[var(--color-text-dim)]">{a.resumen}</p>}

@@ -115,6 +115,7 @@ model Usuario {
   articulosEscritos        ArticuloConocimiento[]  @relation("AutorArticulo")
   articulosEditados        ArticuloConocimiento[]  @relation("EditorArticulo")
   archivosConocimiento     ArchivoConocimiento[]   @relation("SubeArchivoConocimiento")
+  accesosConocimiento      AccesoConocimiento[]    @relation("AccesoConocimientoPersona")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -943,6 +944,8 @@ model VersionCotizacion {
 // frecuentes). Lo escriben los administradores y lo lee todo el equipo; un
 // borrador (publicado = false) solo lo ven los administradores. `contenido`
 // es texto con formato basico tipo Markdown que el frontend pinta sin HTML.
+// Con `restringido` solo lo ven quienes esten en sus accesos (ademas del
+// administrador general y de quien lo escribio).
 model ArticuloConocimiento {
   id            Int                   @id @default(autoincrement())
   titulo        String                @db.VarChar(200)
@@ -951,6 +954,7 @@ model ArticuloConocimiento {
   contenido     String                @db.Text
   publicado     Boolean               @default(true)
   fijado        Boolean               @default(false)
+  restringido   Boolean               @default(false)
   autorId       Int?                  @map("autor_id")
   editadoPorId  Int?                  @map("editado_por_id")
   creadoEn      DateTime              @default(now()) @map("creado_en")
@@ -958,13 +962,15 @@ model ArticuloConocimiento {
   autor         Usuario?              @relation("AutorArticulo", fields: [autorId], references: [id], onDelete: SetNull)
   editadoPor    Usuario?              @relation("EditorArticulo", fields: [editadoPorId], references: [id], onDelete: SetNull)
   archivos      ArchivoConocimiento[]
+  accesos       AccesoConocimiento[]
 
   @@index([categoria])
   @@map("articulos_conocimiento")
 }
 
 // Archivo adjunto de un articulo (manual, formato, politica). En disco
-// (CONOCIMIENTO_DIR) y solo se sirve a quien puede ver el articulo.
+// (CONOCIMIENTO_DIR) y solo se sirve a quien puede ver el articulo. Con
+// `restringido`, ademas, solo a quienes esten en sus propios accesos.
 model ArchivoConocimiento {
   id             String               @id @default(uuid()) @db.VarChar(36)
   articuloId     Int                  @map("articulo_id")
@@ -973,11 +979,35 @@ model ArchivoConocimiento {
   mime           String               @db.VarChar(100)
   tamano         Int
   sha256         String               @db.VarChar(64)
+  restringido    Boolean              @default(false)
   subidoPorId    Int?                 @map("subido_por_id")
   creadoEn       DateTime             @default(now()) @map("creado_en")
   articulo       ArticuloConocimiento @relation(fields: [articuloId], references: [id], onDelete: Cascade)
   subidoPor      Usuario?             @relation("SubeArchivoConocimiento", fields: [subidoPorId], references: [id], onDelete: SetNull)
+  accesos        AccesoConocimiento[]
 
   @@index([articuloId])
   @@map("archivos_conocimiento")
+}
+
+// Quien puede ver un articulo o un archivo restringido de la base de
+// conocimiento (utils/accesoConocimiento.utils.js). Cuelga del articulo o del
+// archivo, y cada fila es una de: una persona (usuarioId), toda un area
+// (area), solo los administradores o solo los miembros de un area (area + rol)
+// o de todas las areas (rol sin area). rol: admin | miembro.
+model AccesoConocimiento {
+  id         Int                   @id @default(autoincrement())
+  articuloId Int?                  @map("articulo_id")
+  archivoId  String?               @map("archivo_id") @db.VarChar(36)
+  area       String?               @db.VarChar(40)
+  rol        String?               @db.VarChar(10)
+  usuarioId  Int?                  @map("usuario_id")
+  articulo   ArticuloConocimiento? @relation(fields: [articuloId], references: [id], onDelete: Cascade)
+  archivo    ArchivoConocimiento?  @relation(fields: [archivoId], references: [id], onDelete: Cascade)
+  usuario    Usuario?              @relation("AccesoConocimientoPersona", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([articuloId])
+  @@index([archivoId])
+  @@index([usuarioId])
+  @@map("accesos_conocimiento")
 }

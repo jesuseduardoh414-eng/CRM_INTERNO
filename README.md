@@ -370,6 +370,18 @@ adjuntos, con buscador y filtro por categoria. De fabrica los
 el equipo** lee (permisos `conocimiento.*`, configurables por area).
 Rutas: `/api/conocimiento` (`controllers/conocimiento.controller.js`).
 
+- **Subir documentos:** varios archivos de una vez; cada uno queda como un
+  articulo propio con su titulo y su categoria (`POST /api/conocimiento/documentos`).
+- **Quien ve cada cosa** (permiso `conocimiento.acceso`, de fabrica los
+  administradores): un articulo es de todo el equipo o solo de quienes se
+  elijan, y cada archivo puede limitarse aun mas. Una regla es una persona,
+  toda un area, solo administradores o solo miembros de un area, o los de
+  todas las areas. Siempre ven el administrador general, quien escribio el
+  articulo y quien subio cada archivo. Lo demas responde 404 y no aparece en
+  la lista, las categorias, los conteos ni la busqueda
+  (`utils/accesoConocimiento.utils.js`, tabla `accesos_conocimiento`,
+  migracion `20261021150000_acceso_conocimiento`).
+
 ## Permisos (por area y por persona)
 
 Desde el 2026-10-16 lo que puede hacer cada persona se configura, no esta fijo

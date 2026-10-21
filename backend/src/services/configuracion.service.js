@@ -85,17 +85,21 @@ const comprobarAreasQuitadas = async (antes, despues) => {
       throw new ErrorConfiguracion(`No se puede quitar el área «${nombre}»: la usan ${partes.join(', ')}. Cámbialos de área primero.`);
     }
   }
+  return quitadas.map((a) => a.clave);
 };
 
 const guardar = async (cambios, usuarioId) => {
   const actual = await obtener();
   const nueva = validar(cambios, actual.config);
-  await comprobarAreasQuitadas(actual.config.reglas.areas, nueva.reglas.areas);
+  const quitadas = await comprobarAreasQuitadas(actual.config.reglas.areas, nueva.reglas.areas);
   await prisma.configuracion.upsert({
     where: { id: 1 },
     create: { id: 1, datos: nueva, version: 1, actualizadoPorId: usuarioId },
     update: { datos: nueva, version: { increment: 1 }, actualizadoPorId: usuarioId },
   });
+  // Las reglas de acceso de la base de conocimiento de un area quitada ya no
+  // alcanzan a nadie; se borran para que no revivan si otra area toma la clave.
+  if (quitadas.length) await prisma.accesoConocimiento.deleteMany({ where: { area: { in: quitadas } } });
   invalidar();
   return obtener();
 };

@@ -84,7 +84,14 @@ const CATALOGO = [
   },
   {
     seccion: 'conocimiento',
-    permisos: [bool('conocimiento.ver', true, true), bool('conocimiento.crear', false, true), bool('conocimiento.editar', false, true), bool('conocimiento.eliminar', false, true)],
+    permisos: [
+      bool('conocimiento.ver', true, true),
+      bool('conocimiento.crear', false, true),
+      bool('conocimiento.editar', false, true),
+      bool('conocimiento.eliminar', false, true),
+      // Restringir articulos y archivos a areas, roles o personas.
+      bool('conocimiento.acceso', false, true),
+    ],
   },
   {
     seccion: 'finanzas',
@@ -256,5 +263,6 @@ module.exports = {
   puede,
   alcanceDe,
   esAdminGeneral,
+  rolDe,
   sinPermiso,
 };

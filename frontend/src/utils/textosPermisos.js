@@ -86,8 +86,10 @@ export const textosPermisos = {
     'perm.conocimiento.ver': 'Leer la base',
     'perm.conocimiento.crear': 'Escribir artículos',
     'perm.conocimiento.editar': 'Editar artículos',
-    'perm.conocimiento.editar.ayuda': 'Y sus archivos. También ve los borradores.',
+    'perm.conocimiento.editar.ayuda': 'Y sus archivos, de los artículos que puede ver. También ve los borradores.',
     'perm.conocimiento.eliminar': 'Eliminar artículos',
+    'perm.conocimiento.acceso': 'Elegir quién ve cada artículo',
+    'perm.conocimiento.acceso.ayuda': 'Dejar artículos y archivos solo para ciertas áreas, roles o personas. El administrador general siempre ve todo.',
 
     // Finanzas: recurso + acción
     'rec.finanzas.ventas': 'Ventas',
@@ -218,8 +220,10 @@ export const textosPermisos = {
     'perm.conocimiento.ver': 'Read the base',
     'perm.conocimiento.crear': 'Write articles',
     'perm.conocimiento.editar': 'Edit articles',
-    'perm.conocimiento.editar.ayuda': 'And their files. Also sees drafts.',
+    'perm.conocimiento.editar.ayuda': 'And their files, in the articles they can see. Also sees drafts.',
     'perm.conocimiento.eliminar': 'Delete articles',
+    'perm.conocimiento.acceso': 'Choose who sees each article',
+    'perm.conocimiento.acceso.ayuda': 'Keep articles and files for certain areas, roles or people only. The general administrator always sees everything.',
 
     'rec.finanzas.ventas': 'Sales',
     'rec.finanzas.tesoreria': 'Treasury',

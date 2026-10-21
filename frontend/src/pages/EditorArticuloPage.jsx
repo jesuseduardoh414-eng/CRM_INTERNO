@@ -1,7 +1,8 @@
 // Crear o editar un artículo de la base de conocimiento (/conocimiento/nuevo y
 // /conocimiento/:id/editar). Solo administradores. El texto lleva formato
 // básico tipo Markdown con una barra de botones y vista previa; los archivos
-// elegidos antes de crear el artículo se suben al guardarlo.
+// elegidos antes de crear el artículo se suben al guardarlo. Quien gestiona
+// accesos elige además quién lo ve (viaja con el resto al guardar).
 import { useRef, useState } from 'react';
 import useSWR, { mutate } from 'swr';
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
@@ -19,18 +20,26 @@ import { Button } from '../components/ui/button';
 import { AvisoError, Campo } from '../components/finanzas/piezas';
 import Markdown from '../components/conocimiento/Markdown';
 import ArchivosArticulo from '../components/conocimiento/ArchivosArticulo';
+import SelectorAcceso from '../components/conocimiento/SelectorAcceso';
+import { ACCESO_ABIERTO, accesoDe, claveRegla } from '../utils/accesoConocimiento';
 
 const VACIO = { titulo: '', categoria: '', resumen: '', contenido: '', publicado: true, fijado: false };
+
+/** Huella de un acceso para saber si cambió (el orden de las reglas no importa). */
+const huellaAcceso = (a) => JSON.stringify([a.restringido, a.restringido ? a.reglas.map(claveRegla).sort() : []]);
 
 const Formulario = ({ articulo, categorias }) => {
   const { t } = usePreferences();
   const tc = useTextoConocimiento();
   const navigate = useNavigate();
   const { showToast } = useToast();
+  const { usuario } = useAuth();
+  const gestionaAcceso = puede(usuario, 'conocimiento.acceso');
   const editando = Boolean(articulo?.id);
   const [form, setForm] = useState(() => (articulo
     ? { titulo: articulo.titulo, categoria: articulo.categoria, resumen: articulo.resumen || '', contenido: articulo.contenido || '', publicado: articulo.publicado, fijado: articulo.fijado }
     : VACIO));
+  const [acceso, setAcceso] = useState(() => (articulo ? accesoDe(articulo) : ACCESO_ABIERTO));
   const [pestana, setPestana] = useState('escribir');
   const [pendientes, setPendientes] = useState([]);
   const [guardando, setGuardando] = useState(false);
@@ -85,7 +94,10 @@ const Formulario = ({ articulo, categorias }) => {
     setGuardando(true);
     setError(null);
     try {
-      const data = editando ? await conocimientoService.editar(articulo.id, form) : await conocimientoService.crear(form);
+      // El acceso solo viaja si cambió (y solo quien lo gestiona puede cambiarlo).
+      const cambioAcceso = gestionaAcceso && huellaAcceso(acceso) !== huellaAcceso(articulo ? accesoDe(articulo) : ACCESO_ABIERTO);
+      const datos = cambioAcceso ? { ...form, acceso } : form;
+      const data = editando ? await conocimientoService.editar(articulo.id, datos) : await conocimientoService.crear(datos);
       // Los archivos elegidos antes de que existiera el artículo.
       for (const archivo of pendientes) {
         try {
@@ -96,6 +108,11 @@ const Formulario = ({ articulo, categorias }) => {
       }
       // La lista y la ficha se vuelven a pedir con lo recién guardado.
       mutate((clave) => Array.isArray(clave) && String(clave[0]).startsWith('conocimiento'));
+      if (data.sinAcceso) {
+        showToast(tc('accSinAcceso'), 'success');
+        navigate('/conocimiento', { replace: true });
+        return;
+      }
       showToast(editando ? tc('conActualizado') : tc('conCreado'), 'success');
       navigate(`/conocimiento/${data.articulo.id}`, { replace: true });
     } catch (err) {
@@ -123,7 +140,7 @@ const Formulario = ({ articulo, categorias }) => {
       </div>
       <AvisoError error={error} />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-1">
           <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
             <Campo id="art-titulo" label={tc('conArticuloTitulo')} requerido ancho>
@@ -191,12 +208,23 @@ const Formulario = ({ articulo, categorias }) => {
               </span>
             </label>
           </div>
+          {gestionaAcceso && (
+            <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+              <p className="mb-3 text-[13.5px] font-semibold text-[var(--color-text)]">{tc('accQuienVe')}</p>
+              <SelectorAcceso valor={acceso} onCambio={setAcceso} autorId={articulo?.autorId ?? usuario?.id} />
+            </div>
+          )}
           <ArchivosArticulo
             archivos={articulo?.archivos || []}
             puedeEditar
             articuloId={articulo?.id || null}
             pendientes={pendientes}
             onPendientes={setPendientes}
+            // Al editar, lo que se sube o se cambia aquí se guarda al momento: se vuelve a pedir el artículo.
+            onCambio={editando ? () => mutate(['conocimiento-articulo', String(articulo.id)]) : undefined}
+            gestionaAcceso={gestionaAcceso && editando}
+            accesoArticulo={acceso}
+            autorId={articulo?.autorId}
           />
         </aside>
       </div>

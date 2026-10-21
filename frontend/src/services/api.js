@@ -942,10 +942,19 @@ const pedirConocimiento = async (ruta, { metodo = 'GET', cuerpo, formData } = {}
 export const conocimientoService = {
   listar: (params = {}) => pedirConocimiento(construirQuery(params)),
   obtener: (id) => pedirConocimiento(`/${id}`),
+  // datos: { titulo, categoria, resumen, contenido, publicado, fijado, acceso? }
+  // acceso: { restringido, reglas: [{ area, rol, usuarioId }] } (permiso conocimiento.acceso)
   crear: (datos) => pedirConocimiento('', { metodo: 'POST', cuerpo: datos }),
   editar: (id, datos) => pedirConocimiento(`/${id}`, { metodo: 'PUT', cuerpo: datos }),
+  cambiarAcceso: (id, acceso) => pedirConocimiento(`/${id}/acceso`, { metodo: 'PUT', cuerpo: acceso }),
   eliminar: (id) => pedirConocimiento(`/${id}`, { metodo: 'DELETE' }),
+  // Un artículo por archivo: { titulo, categoria, acceso? }.
+  crearDocumento: (archivo, { acceso, ...datos }) => pedirConocimiento('/documentos', {
+    metodo: 'POST',
+    formData: formularioConArchivo(archivo, { ...datos, acceso: acceso ? JSON.stringify(acceso) : undefined }),
+  }),
   subirArchivo: (id, archivo) => pedirConocimiento(`/${id}/archivos`, { metodo: 'POST', formData: formularioComprobante(archivo) }),
+  cambiarAccesoArchivo: (id, acceso) => pedirConocimiento(`/archivos/${id}/acceso`, { metodo: 'PUT', cuerpo: acceso }),
   eliminarArchivo: (id) => pedirConocimiento(`/archivos/${id}`, { metodo: 'DELETE' }),
   urlArchivo: (id) => urlBlob(`${API_URL}/conocimiento/archivos/${id}`),
   descargarArchivo: (id, nombre) => descargarArchivo(`${API_URL}/conocimiento/archivos/${id}?descargar=1`, nombre),
