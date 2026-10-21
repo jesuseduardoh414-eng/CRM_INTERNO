@@ -380,6 +380,17 @@ const enviarInvitacion = async ({ nombre, email, token }) => {
   return { success: true, messageId: info?.messageId };
 };
 
+/** Invitación a otra cuenta de configuración (rol CONFIGURADOR), desde el panel. */
+const enviarInvitacionConfiguracion = async ({ nombre, email, token }) => {
+  const info = await enviarPlantilla(
+    email,
+    'invitacionConfiguracion',
+    { nombre, horas: configEnCache().seguridad.invitacionHoras },
+    { url: `${urlFrontend()}/invitacion/${encodeURIComponent(token)}` },
+  );
+  return { success: true, messageId: info?.messageId };
+};
+
 /** Invitación al portal de clientes (rol CLIENTE). */
 const enviarInvitacionPortal = async ({ nombre, email, token, cliente }) => {
   const info = await enviarPlantilla(
@@ -426,6 +437,7 @@ module.exports = {
   enviarAvisoDosFactores,
   enviarAvisoSesionComprometida,
   enviarInvitacion,
+  enviarInvitacionConfiguracion,
   enviarInvitacionPortal,
   avisarMensajePortal,
 };

@@ -54,6 +54,13 @@ export const textosSistema = {
     admCopy: 'Copiar',
     admCopied: 'Copiado',
 
+    // Cuentas de configuración
+    cfgrTitle: 'Cuentas de configuración',
+    cfgrHint: 'Quienes entran a este panel. No ven los proyectos ni los datos de la empresa. Invita a otra persona si también debe configurar el CRM.',
+    cfgrInvite: 'Invitar a configuración',
+    cfgrYou: 'Tú',
+    cfgrConfirmDeactivateText: 'No podrá entrar a este panel hasta que la vuelvas a activar.',
+
     // Reglas de acceso
     secRulesPassword: 'Contraseñas',
     secRulesPasswordHint: 'Largo mínimo exigido al crear o cambiar una contraseña. Siempre se exigen mayúsculas, minúsculas, números y símbolos.',
@@ -534,6 +541,13 @@ export const textosSistema = {
     admLinkHint: 'Share it only with that person: it gives access to their account.',
     admCopy: 'Copy',
     admCopied: 'Copied',
+
+    // Configuration accounts
+    cfgrTitle: 'Configuration accounts',
+    cfgrHint: 'People who can open this panel. They cannot see the company projects or data. Invite someone else if they also need to configure the CRM.',
+    cfgrInvite: 'Invite to configuration',
+    cfgrYou: 'You',
+    cfgrConfirmDeactivateText: 'They will not be able to open this panel until you reactivate them.',
 
     secRulesPassword: 'Passwords',
     secRulesPasswordHint: 'Minimum length when creating or changing a password. Uppercase, lowercase, numbers and symbols are always required.',

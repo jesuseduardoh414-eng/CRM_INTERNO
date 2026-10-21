@@ -1,9 +1,10 @@
 // Panel de configuración (solo CONFIGURADOR): administradores de la empresa,
-// correo de prueba y estado del sistema.
+// otras cuentas de configuración, correo de prueba y estado del sistema.
 //
 // Administradores: el configurador NO gestiona miembros ni ve datos de la
 // empresa (decisión del usuario). Solo da de alta a los administradores y
-// les restablece el acceso cuando hace falta.
+// les restablece el acceso cuando hace falta. Igual con las cuentas de
+// configuración: la primera se crea por consola y las demás se invitan aquí.
 const crypto = require('crypto');
 const fs = require('fs/promises');
 const prisma = require('../lib/prisma');
@@ -14,6 +15,7 @@ const { revocarTodas } = require('../services/sesiones.service');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
 const { registrarEvento } = require('../services/seguridad.service');
 const { configEnCache } = require('../services/configuracion.service');
+const { AREA_GENERAL } = require('../utils/configuracion.utils');
 const { zonaHoraria } = require('../utils/fechas.utils');
 const archivosContratos = require('../services/contratosArchivos.service');
 const archivosComprobantes = require('../services/comprobantes.service');
@@ -30,43 +32,77 @@ const selectAdmin = {
   ultimoLoginEn: true, bloqueadoHasta: true, creadoEn: true,
 };
 
-// GET /api/configuracion/administradores
-const listarAdministradores = async (_req, res) => {
+// Cuentas que da de alta el configurador. `rol` es el de la cuenta e
+// `invitacion` el de su invitación. Las de configuración no son de ningún
+// área del equipo: llevan la general, como las de `npm run crear-configurador`.
+const ADMINISTRADORES = {
+  clave: 'administradores',
+  rol: 'ADMIN',
+  invitacion: 'admin',
+  conArea: true,
+  enviar: (datos) => correo.enviarInvitacion(datos),
+  textos: {
+    errorLista: 'No se pudo cargar la lista de administradores',
+    noEncontrado: 'Administrador no encontrado',
+    ultimoActivo: 'Debe quedar al menos un administrador activo',
+    desactivado: 'Administrador desactivado',
+    activado: 'Administrador activado',
+  },
+};
+const CONFIGURADORES = {
+  clave: 'configuradores',
+  rol: 'CONFIGURADOR',
+  invitacion: 'configurador',
+  conArea: false,
+  enviar: (datos) => correo.enviarInvitacionConfiguracion(datos),
+  textos: {
+    errorLista: 'No se pudo cargar la lista de cuentas de configuración',
+    noEncontrado: 'Cuenta de configuración no encontrada',
+    ultimoActivo: 'Debe quedar al menos una cuenta de configuración activa',
+    desactivado: 'Cuenta de configuración desactivada',
+    activado: 'Cuenta de configuración activada',
+  },
+};
+
+// GET /api/configuracion/administradores | /configuradores
+const listarCuentas = (tipo) => async (req, res) => {
   try {
-    const [admins, invitaciones, sesiones] = await Promise.all([
-      prisma.usuario.findMany({ where: { rol: 'ADMIN' }, select: selectAdmin, orderBy: { nombre: 'asc' } }),
+    const [cuentas, invitaciones, sesiones] = await Promise.all([
+      prisma.usuario.findMany({ where: { rol: tipo.rol }, select: selectAdmin, orderBy: { nombre: 'asc' } }),
       prisma.invitacion.findMany({
-        where: { rol: 'admin', estado: { not: 'aceptada' } },
+        where: { rol: tipo.invitacion, estado: { not: 'aceptada' } },
         select: { id: true, nombre: true, email: true, area: true, estado: true, expiraEn: true, creadoEn: true },
         orderBy: { creadoEn: 'desc' },
       }),
       prisma.sesion.groupBy({
         by: ['usuarioId'],
-        where: { revocadaEn: null, expiraEn: { gt: new Date() }, usuario: { rol: 'ADMIN' } },
+        where: { revocadaEn: null, expiraEn: { gt: new Date() }, usuario: { rol: tipo.rol } },
         _count: { _all: true },
       }),
     ]);
     const porUsuario = Object.fromEntries(sesiones.map((s) => [s.usuarioId, s._count._all]));
     const ahora = new Date();
     return res.json({
-      administradores: admins.map((a) => ({
+      [tipo.clave]: cuentas.map((a) => ({
         ...a,
         bloqueado: Boolean(a.bloqueadoHasta && a.bloqueadoHasta > ahora),
         sesionesActivas: porUsuario[a.id] || 0,
+        esTuCuenta: a.id === req.usuario.id,
       })),
       invitaciones: invitaciones.map((i) => ({ ...i, vencida: i.expiraEn < ahora })),
     });
   } catch (error) {
-    console.error('[configuracion.listarAdministradores]', error);
-    return res.status(500).json({ error: 'No se pudo cargar la lista de administradores' });
+    console.error(`[configuracion.listar ${tipo.clave}]`, error);
+    return res.status(500).json({ error: tipo.textos.errorLista });
   }
 };
 
 // POST /api/configuracion/administradores  { nombre, email, area }
-const invitarAdministrador = async (req, res) => {
+// POST /api/configuracion/configuradores   { nombre, email }
+const invitarCuenta = (tipo) => async (req, res) => {
   const nombre = String(req.body?.nombre || '').trim();
   const email = String(req.body?.email || '').toLowerCase().trim();
-  const area = String(req.body?.area || 'ADMINISTRACION').toUpperCase();
+  const area = tipo.conArea ? String(req.body?.area || AREA_GENERAL).toUpperCase() : AREA_GENERAL;
   if (nombre.length < 3) return res.status(400).json({ error: 'Escribe el nombre completo' });
   if (!esEmailValido(email)) return res.status(400).json({ error: 'El correo no tiene un formato válido' });
   if (!esAreaValida(area)) return res.status(400).json({ error: 'Área no válida' });
@@ -75,14 +111,14 @@ const invitarAdministrador = async (req, res) => {
     if (await prisma.usuario.findUnique({ where: { email }, select: { id: true } })) {
       return res.status(409).json({ error: 'Ya existe una cuenta con ese correo' });
     }
-    const { token } = await generarInvitacion({ nombre, email, area, rol: 'admin', creadoPor: req.usuario.id });
+    const { token } = await generarInvitacion({ nombre, email, area, rol: tipo.invitacion, creadoPor: req.usuario.id });
     const enlace = `${urlFrontend(req)}/invitacion/${token}`;
     let correoEnviado = true;
     try {
-      await correo.enviarInvitacion({ nombre, email, token });
+      await tipo.enviar({ nombre, email, token });
     } catch (errorCorreo) {
       correoEnviado = false;
-      console.error('[configuracion.invitarAdministrador] correo:', errorCorreo?.message);
+      console.error(`[configuracion.invitar ${tipo.clave}] correo:`, errorCorreo?.message);
     }
     return res.status(201).json({
       mensaje: correoEnviado ? `Invitación enviada a ${email}` : 'Invitación creada, pero no se pudo enviar el correo: comparte el enlace',
@@ -90,57 +126,59 @@ const invitarAdministrador = async (req, res) => {
       correoEnviado,
     });
   } catch (error) {
-    console.error('[configuracion.invitarAdministrador]', error);
+    console.error(`[configuracion.invitar ${tipo.clave}]`, error);
     return res.status(500).json({ error: 'No se pudo crear la invitación' });
   }
 };
 
-// POST /api/configuracion/administradores/invitaciones/:id/reenviar
-const reenviarInvitacionAdmin = async (req, res) => {
+// POST /api/configuracion/administradores/invitaciones/:id/reenviar  (o /configuradores/...)
+const reenviarInvitacionCuenta = (tipo) => async (req, res) => {
   try {
     const invitacion = await prisma.invitacion.findUnique({ where: { id: String(req.params.id) } });
-    if (!invitacion || invitacion.rol !== 'admin' || invitacion.estado === 'aceptada') {
+    if (!invitacion || invitacion.rol !== tipo.invitacion || invitacion.estado === 'aceptada') {
       return res.status(404).json({ error: 'Invitación no encontrada' });
     }
     const { token } = await generarInvitacion({
-      nombre: invitacion.nombre, email: invitacion.email, area: invitacion.area, rol: 'admin', creadoPor: req.usuario.id,
+      nombre: invitacion.nombre, email: invitacion.email, area: invitacion.area, rol: tipo.invitacion, creadoPor: req.usuario.id,
     });
     let correoEnviado = true;
     try {
-      await correo.enviarInvitacion({ nombre: invitacion.nombre, email: invitacion.email, token });
+      await tipo.enviar({ nombre: invitacion.nombre, email: invitacion.email, token });
     } catch (_e) {
       correoEnviado = false;
     }
     return res.json({ mensaje: 'Invitación renovada', enlace: `${urlFrontend(req)}/invitacion/${token}`, correoEnviado });
   } catch (error) {
-    console.error('[configuracion.reenviarInvitacionAdmin]', error);
+    console.error(`[configuracion.reenviarInvitacion ${tipo.clave}]`, error);
     return res.status(500).json({ error: 'No se pudo reenviar la invitación' });
   }
 };
 
-// DELETE /api/configuracion/administradores/invitaciones/:id
-const eliminarInvitacionAdmin = async (req, res) => {
+// DELETE /api/configuracion/administradores/invitaciones/:id  (o /configuradores/...)
+const eliminarInvitacionCuenta = (tipo) => async (req, res) => {
   try {
-    const { count } = await prisma.invitacion.deleteMany({ where: { id: String(req.params.id), rol: 'admin', estado: { not: 'aceptada' } } });
+    const { count } = await prisma.invitacion.deleteMany({ where: { id: String(req.params.id), rol: tipo.invitacion, estado: { not: 'aceptada' } } });
     if (count === 0) return res.status(404).json({ error: 'Invitación no encontrada' });
     return res.json({ mensaje: 'Invitación eliminada' });
   } catch (error) {
-    console.error('[configuracion.eliminarInvitacionAdmin]', error);
+    console.error(`[configuracion.eliminarInvitacion ${tipo.clave}]`, error);
     return res.status(500).json({ error: 'No se pudo eliminar la invitación' });
   }
 };
 
 const ACCIONES = ['restablecer', 'desbloquear', 'quitar2fa', 'cerrarSesiones', 'desactivar', 'activar'];
 
-// POST /api/configuracion/administradores/:id/acciones  { accion }
-const accionAdministrador = async (req, res) => {
+// POST /api/configuracion/administradores/:id/acciones  { accion }  (o /configuradores/...)
+const accionCuenta = (tipo) => async (req, res) => {
   const id = leerId(req.params.id);
   const accion = String(req.body?.accion || '');
   if (!id || !ACCIONES.includes(accion)) return res.status(400).json({ error: 'Acción no válida' });
+  // La propia cuenta se gestiona en "Mi cuenta", donde se pide la contraseña.
+  if (id === req.usuario.id) return res.status(400).json({ error: 'Tu propia cuenta se gestiona desde Mi cuenta' });
 
   try {
     const admin = await prisma.usuario.findUnique({ where: { id }, select: { ...selectAdmin, rol: true } });
-    if (!admin || admin.rol !== 'ADMIN') return res.status(404).json({ error: 'Administrador no encontrado' });
+    if (!admin || admin.rol !== tipo.rol) return res.status(404).json({ error: tipo.textos.noEncontrado });
 
     let respuesta = { mensaje: 'Hecho' };
     if (accion === 'restablecer') {
@@ -170,26 +208,38 @@ const accionAdministrador = async (req, res) => {
       const { count } = await revocarTodas(id);
       respuesta = { mensaje: `Se cerraron ${count} sesión(es)` };
     } else if (accion === 'desactivar') {
-      const otrosActivos = await prisma.usuario.count({ where: { rol: 'ADMIN', id: { not: id }, ...ACTIVO } });
+      const otrosActivos = await prisma.usuario.count({ where: { rol: tipo.rol, id: { not: id }, ...ACTIVO } });
       if (otrosActivos === 0) {
-        return res.status(409).json({ error: 'Debe quedar al menos un administrador activo' });
+        return res.status(409).json({ error: tipo.textos.ultimoActivo });
       }
       await prisma.usuario.update({ where: { id }, data: { estado: 'inactivo' } });
       await revocarTodas(id);
-      respuesta = { mensaje: 'Administrador desactivado' };
+      respuesta = { mensaje: tipo.textos.desactivado };
     } else if (accion === 'activar') {
       await prisma.usuario.update({ where: { id }, data: { estado: 'activo' } });
-      respuesta = { mensaje: 'Administrador activado' };
+      respuesta = { mensaje: tipo.textos.activado };
     }
 
     invalidarCacheUsuario(id);
     await registrarEvento(req, { usuarioId: id, email: admin.email, tipo: 'accion_configurador', detalle: accion });
     return res.json(respuesta);
   } catch (error) {
-    console.error('[configuracion.accionAdministrador]', error);
+    console.error(`[configuracion.accion ${tipo.clave}]`, error);
     return res.status(500).json({ error: 'No se pudo completar la acción' });
   }
 };
+
+const listarAdministradores = listarCuentas(ADMINISTRADORES);
+const invitarAdministrador = invitarCuenta(ADMINISTRADORES);
+const reenviarInvitacionAdmin = reenviarInvitacionCuenta(ADMINISTRADORES);
+const eliminarInvitacionAdmin = eliminarInvitacionCuenta(ADMINISTRADORES);
+const accionAdministrador = accionCuenta(ADMINISTRADORES);
+
+const listarConfiguradores = listarCuentas(CONFIGURADORES);
+const invitarConfigurador = invitarCuenta(CONFIGURADORES);
+const reenviarInvitacionConfigurador = reenviarInvitacionCuenta(CONFIGURADORES);
+const eliminarInvitacionConfigurador = eliminarInvitacionCuenta(CONFIGURADORES);
+const accionConfigurador = accionCuenta(CONFIGURADORES);
 
 // GET /api/configuracion/correo/plantillas  -> correos del sistema, textos de fabrica y variables
 const plantillasCorreo = (_req, res) => res.json({ plantillas: correo.catalogoPlantillas() });
@@ -328,6 +378,11 @@ module.exports = {
   reenviarInvitacionAdmin,
   eliminarInvitacionAdmin,
   accionAdministrador,
+  listarConfiguradores,
+  invitarConfigurador,
+  reenviarInvitacionConfigurador,
+  eliminarInvitacionConfigurador,
+  accionConfigurador,
   correoPrueba,
   estadoSistema,
 };

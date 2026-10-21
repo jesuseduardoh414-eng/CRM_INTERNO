@@ -2,7 +2,7 @@
 //  Públicas: GET /publica, GET /archivos/:clave  (las necesita el login)
 //  Solo CONFIGURADOR: GET /, PUT /, POST /restablecer,
 //                     POST /archivos/:clave, DELETE /archivos/:clave,
-//                     /administradores (listar, invitar, acciones),
+//                     /administradores y /configuradores (listar, invitar, acciones),
 //                     POST /correo/prueba, POST /correo/verificar, GET /estado,
 //                     GET /correo/plantillas, POST /correo/vista-previa,
 //                     /drive (Google Drive y respaldos)
@@ -38,6 +38,13 @@ router.post('/administradores', limiteAccionSensible, sistema.invitarAdministrad
 router.post('/administradores/invitaciones/:id/reenviar', limiteAccionSensible, sistema.reenviarInvitacionAdmin);
 router.delete('/administradores/invitaciones/:id', sistema.eliminarInvitacionAdmin);
 router.post('/administradores/:id/acciones', limiteAccionSensible, sistema.accionAdministrador);
+
+// Otras cuentas de configuración (la primera se crea por consola)
+router.get('/configuradores', sistema.listarConfiguradores);
+router.post('/configuradores', limiteAccionSensible, sistema.invitarConfigurador);
+router.post('/configuradores/invitaciones/:id/reenviar', limiteAccionSensible, sistema.reenviarInvitacionConfigurador);
+router.delete('/configuradores/invitaciones/:id', sistema.eliminarInvitacionConfigurador);
+router.post('/configuradores/:id/acciones', limiteAccionSensible, sistema.accionConfigurador);
 
 // Correo y estado del sistema
 router.post('/correo/prueba', limiteAccionSensible, sistema.correoPrueba);

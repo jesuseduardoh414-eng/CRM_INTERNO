@@ -1022,9 +1022,14 @@ const vigenciaInvitacionMs = () => reglasAcceso().invitacionHoras * 60 * 60 * 10
  * Crea (o renueva) la invitación de un correo y devuelve el token nuevo.
  * Si ya habia invitaciones no aceptadas para ese correo se reutiliza la mas
  * reciente y se borran las duplicadas. Los datos deben llegar ya validados
- * (area dentro del enum, rol ADMIN/MIEMBRO, correo normalizado).
- * La usan `invitar` (auth) y `crear` (usuarios) para que ambos flujos
- * terminen en la misma tabla y el enlace /invitacion/:token funcione.
+ * (area dentro del enum, rol ADMIN/MIEMBRO/CONFIGURADOR, correo normalizado).
+ * La usan `invitar` (auth), `crear` (usuarios) y el panel de configuracion
+ * para que todos los flujos terminen en la misma tabla y el enlace
+ * /invitacion/:token funcione.
+ *
+ * Una invitacion de configuracion solo la reemplaza otra de configuracion:
+ * si el equipo invita al mismo correo, se guarda aparte y gana la primera
+ * que se acepte.
  */
 const generarInvitacion = async ({ nombre, email, area, rol, creadoPor, empresaId = null }) => {
   const emailNormalizado = normalizarEmail(email);
@@ -1043,7 +1048,11 @@ const generarInvitacion = async ({ nombre, email, area, rol, creadoPor, empresaI
   };
 
   const invitacionesExistentes = await prisma.invitacion.findMany({
-    where: { email: emailNormalizado, estado: { not: 'aceptada' } },
+    where: {
+      email: emailNormalizado,
+      estado: { not: 'aceptada' },
+      ...(datos.rol !== 'configurador' && { rol: { not: 'configurador' } }),
+    },
     orderBy: { creadoEn: 'desc' },
     select: { id: true },
   });
@@ -1148,11 +1157,14 @@ const verificarInvitacion = async (req, res) => {
     if (esCliente && !(await moduloActivoConfig('portalClientes'))) {
       return res.status(410).json({ error: 'El portal de clientes ya no está disponible, esta invitación no se puede usar.' });
     }
+    // La cuenta de configuracion no es de ningun area del equipo.
+    const esConfigurador = invitacion.rol === 'configurador';
     return res.json({
       nombre: invitacion.nombre,
       email: invitacion.email,
-      area: esCliente ? null : invitacion.area,
+      area: esCliente || esConfigurador ? null : invitacion.area,
       esCliente,
+      esConfigurador,
       empresa: esCliente ? (invitacion.empresa?.nombreComercial || invitacion.empresa?.nombre || null) : null,
     });
   } catch (error) {
@@ -1213,6 +1225,10 @@ const aceptarInvitacion = async (req, res) => {
     }
 
     const passwordHash = await bcrypt.hash(password, BCRYPT_COSTE);
+    // Las de configuracion (las manda el panel) llevan el area general, como
+    // las que crea `npm run crear-configurador`.
+    const ROLES_INVITACION = { cliente: 'CLIENTE', admin: 'ADMIN', configurador: 'CONFIGURADOR' };
+    const rolNuevo = ROLES_INVITACION[String(invitacion.rol).toLowerCase()] || 'MIEMBRO';
 
     // Crear el usuario y marcar la invitacion en una sola transaccion: si
     // dos peticiones llegan a la vez con el mismo token, solo una gana.
@@ -1234,7 +1250,7 @@ const aceptarInvitacion = async (req, res) => {
           password: passwordHash,
           // Las cuentas del portal no pertenecen a ningún área del equipo.
           area: esCliente ? '' : String(invitacion.area).toUpperCase(),
-          rol: esCliente ? 'CLIENTE' : (String(invitacion.rol).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'MIEMBRO'),
+          rol: rolNuevo,
           empresaId: esCliente ? invitacion.empresaId : null,
           estado: 'activo',
           verificado: true,
@@ -1254,6 +1270,10 @@ const aceptarInvitacion = async (req, res) => {
   }
 };
 
+// Invitaciones que no se gestionan desde Usuarios: las del portal de clientes
+// (ficha de la empresa) y las de configuracion (panel del configurador).
+const ROLES_FUERA_DEL_EQUIPO = ['cliente', 'configurador'];
+
 const reenviarInvitacion = async (req, res) => {
   const { email } = req.body;
 
@@ -1266,7 +1286,7 @@ const reenviarInvitacion = async (req, res) => {
       where: {
         email: normalizarEmail(email),
         estado: { not: 'aceptada' },
-        rol: { not: 'cliente' },
+        rol: { notIn: ROLES_FUERA_DEL_EQUIPO },
         ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area })
       }
     });
@@ -1299,10 +1319,13 @@ const reenviarInvitacion = async (req, res) => {
 const listarInvitaciones = async (req, res) => {
   try {
     const invitaciones = await prisma.invitacion.findMany({
-      // Las del portal de clientes se gestionan desde la ficha de la empresa.
-      where: { rol: { not: 'cliente' }, ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area }) },
+      where: { rol: { notIn: ROLES_FUERA_DEL_EQUIPO }, ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area }) },
       orderBy: { creadoEn: 'desc' },
-      include: { creador: { select: { nombre: true } } }
+      // Sin el token: con el se podria aceptar la invitacion de otra persona.
+      select: {
+        id: true, nombre: true, email: true, area: true, rol: true, estado: true, creadoEn: true, expiraEn: true,
+        creador: { select: { nombre: true } },
+      },
     });
     return res.json(invitaciones);
   } catch (error) {
@@ -1322,7 +1345,7 @@ const eliminarInvitacion = async (req, res) => {
   try {
     const invitacion = await prisma.invitacion.findUnique({ where: { id } });
 
-    if (!invitacion) {
+    if (!invitacion || ROLES_FUERA_DEL_EQUIPO.includes(invitacion.rol)) {
       return res.status(404).json({ error: 'Invitación no encontrada' });
     }
 

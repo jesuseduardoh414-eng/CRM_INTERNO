@@ -3,7 +3,7 @@
 // entra directamente (el backend abre la sesión).
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Briefcase, Building2, LinkIcon, LockKeyhole, Mail, Sparkles } from 'lucide-react';
+import { Briefcase, Building2, LinkIcon, LockKeyhole, Mail, Settings2, Sparkles } from 'lucide-react';
 import { authService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -62,7 +62,8 @@ const InvitationPage = () => {
     try {
       const data = await authService.aceptarInvitacion(token, form);
       login(data);
-      navigate(data?.usuario?.rol === 'CLIENTE' ? '/portal' : '/dashboard', { replace: true });
+      const inicio = { CLIENTE: '/portal', CONFIGURADOR: '/configuracion' }[data?.usuario?.rol] || '/dashboard';
+      navigate(inicio, { replace: true });
     } catch (err) {
       setError({ texto: err.message, detalles: err.detalles });
       setSubmitting(false);
@@ -82,7 +83,7 @@ const InvitationPage = () => {
 
   return (
     <AuthLayout>
-      <AuthHeader icono={Sparkles} titulo={t('authInviteTitle')} subtitulo={t('authInviteSubtitle')} />
+      <AuthHeader icono={Sparkles} titulo={t('authInviteTitle')} subtitulo={invitacion?.esConfigurador ? t('authInviteSubtitleConfig') : t('authInviteSubtitle')} />
 
       <div className="mb-6 rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
         <p className="text-xs font-medium uppercase tracking-wider text-[var(--color-text-muted)]">{t('authInviteFor')}</p>
@@ -94,14 +95,18 @@ const InvitationPage = () => {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <CampoTexto label={t('authEmail')} icono={Mail} value={invitacion?.email || ''} readOnly tabIndex={-1} autoComplete="username" />
-          {/* Invitación al portal de clientes: en vez del área, su empresa */}
-          <CampoTexto
-            label={invitacion?.esCliente ? t('authCompany') : t('authArea')}
-            icono={invitacion?.esCliente ? Building2 : Briefcase}
-            value={invitacion?.esCliente ? (invitacion.empresa || '') : (invitacion?.area ? nombreArea(invitacion.area) : '')}
-            readOnly
-            tabIndex={-1}
-          />
+          {/* En vez del área: su empresa (portal de clientes) o el tipo de cuenta (configuración) */}
+          {invitacion?.esConfigurador ? (
+            <CampoTexto label={t('authAccountType')} icono={Settings2} value={t('authAccountConfig')} readOnly tabIndex={-1} />
+          ) : (
+            <CampoTexto
+              label={invitacion?.esCliente ? t('authCompany') : t('authArea')}
+              icono={invitacion?.esCliente ? Building2 : Briefcase}
+              value={invitacion?.esCliente ? (invitacion.empresa || '') : (invitacion?.area ? nombreArea(invitacion.area) : '')}
+              readOnly
+              tabIndex={-1}
+            />
+          )}
         </div>
 
         <div>

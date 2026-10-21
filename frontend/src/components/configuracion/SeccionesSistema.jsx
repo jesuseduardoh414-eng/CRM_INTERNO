@@ -1,7 +1,8 @@
 // Secciones de sistema del panel de configuración: usuarios y seguridad,
 // documentos y archivos, correo y avisos, proyectos y horarios, más el panel
 // lateral de estado del sistema. Las reglas se editan en el borrador de la
-// página (`cambiar`); la gestión de administradores actúa al momento.
+// página (`cambiar`); la gestión de administradores y de cuentas de
+// configuración actúa al momento.
 import { useCallback, useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
@@ -116,25 +117,41 @@ const CajaEnlace = ({ enlace, onCerrar }) => {
 
 // ── Usuarios y seguridad ─────────────────────────────────────────────────
 
-const Administradores = () => {
+// Cuentas que da de alta el configurador: los administradores de la empresa
+// (con área) y otras cuentas de configuración (sin área). Mismo flujo:
+// invitación por correo con enlace para copiar si el correo falla.
+const TIPOS_CUENTA = {
+  administradores: {
+    prefijo: 'adm', conArea: true,
+    titulo: 'admTitle', ayuda: 'admHint', invitar: 'admInvite', vacio: 'admEmpty', textoDesactivar: 'admConfirmDeactivateText',
+  },
+  configuradores: {
+    prefijo: 'cfgr', conArea: false,
+    titulo: 'cfgrTitle', ayuda: 'cfgrHint', invitar: 'cfgrInvite', vacio: null, textoDesactivar: 'cfgrConfirmDeactivateText',
+  },
+};
+
+const Cuentas = ({ tipo }) => {
+  const cfg = TIPOS_CUENTA[tipo];
   const { t, language } = usePreferences();
   const { showToast } = useToast();
   const { confirmar, dialogo } = useConfirmacion();
   const { areas } = useConfiguracion();
+  const formVacio = { nombre: '', email: '', ...(cfg.conArea && { area: 'ADMINISTRACION' }) };
   const [datos, setDatos] = useState(null);
   const [formAbierto, setFormAbierto] = useState(false);
-  const [form, setForm] = useState({ nombre: '', email: '', area: 'ADMINISTRACION' });
+  const [form, setForm] = useState(formVacio);
   const [enviando, setEnviando] = useState(false);
   const [enlace, setEnlace] = useState(null);
   const locale = language === 'en' ? enUS : es;
   const hace = (fecha) => formatDistanceToNow(new Date(fecha), { addSuffix: true, locale });
 
-  const cargar = useCallback(() => configuracionService.administradores().then(setDatos).catch((e) => showToast(e.message, 'error')), [showToast]);
+  const cargar = useCallback(() => configuracionService.cuentas(tipo).then(setDatos).catch((e) => showToast(e.message, 'error')), [tipo, showToast]);
   useEffect(() => {
     let cancelado = false;
-    configuracionService.administradores().then((d) => { if (!cancelado) setDatos(d); }).catch(() => {});
+    configuracionService.cuentas(tipo).then((d) => { if (!cancelado) setDatos(d); }).catch(() => {});
     return () => { cancelado = true; };
-  }, []);
+  }, [tipo]);
 
   const mostrarResultado = (r) => {
     showToast(r.mensaje, r.correoEnviado === false ? 'info' : 'success');
@@ -145,8 +162,8 @@ const Administradores = () => {
     e.preventDefault();
     setEnviando(true);
     try {
-      mostrarResultado(await configuracionService.invitarAdministrador(form));
-      setForm({ nombre: '', email: '', area: 'ADMINISTRACION' });
+      mostrarResultado(await configuracionService.invitarCuenta(tipo, form));
+      setForm(formVacio);
       setFormAbierto(false);
       cargar();
     } catch (err) {
@@ -156,77 +173,84 @@ const Administradores = () => {
     }
   };
 
-  const accion = async (admin, tipo) => {
+  const accion = async (cuenta, nombreAccion) => {
     const confirmaciones = {
-      quitar2fa: { titulo: t('admConfirmRemove2fa', { name: admin.nombre }), descripcion: t('admConfirmRemove2faText'), peligro: true },
-      desactivar: { titulo: t('admConfirmDeactivate', { name: admin.nombre }), descripcion: t('admConfirmDeactivateText'), peligro: true },
-      cerrarSesiones: { titulo: t('admConfirmClose', { name: admin.nombre }) },
+      quitar2fa: { titulo: t('admConfirmRemove2fa', { name: cuenta.nombre }), descripcion: t('admConfirmRemove2faText'), peligro: true },
+      desactivar: { titulo: t('admConfirmDeactivate', { name: cuenta.nombre }), descripcion: t(cfg.textoDesactivar), peligro: true },
+      cerrarSesiones: { titulo: t('admConfirmClose', { name: cuenta.nombre }) },
     };
-    if (confirmaciones[tipo] && !(await confirmar({ ...confirmaciones[tipo], textoConfirmar: t('secContinue') }))) return;
+    if (confirmaciones[nombreAccion] && !(await confirmar({ ...confirmaciones[nombreAccion], textoConfirmar: t('secContinue') }))) return;
     try {
-      mostrarResultado(await configuracionService.accionAdministrador(admin.id, tipo));
+      mostrarResultado(await configuracionService.accionCuenta(tipo, cuenta.id, nombreAccion));
       cargar();
     } catch (err) {
       showToast(err.message, 'error');
     }
   };
 
-  const admins = datos?.administradores || [];
+  const cuentas = datos?.[tipo] || [];
   const invitaciones = datos?.invitaciones || [];
 
   return (
     <Fila
-      titulo={t('admTitle')}
-      descripcion={t('admHint')}
-      extra={!formAbierto && <button type="button" className="cfg-btn cfg-btn-primario" onClick={() => setFormAbierto(true)}><UserPlus size={14} /> {t('admInvite')}</button>}
+      titulo={t(cfg.titulo)}
+      descripcion={t(cfg.ayuda)}
+      extra={!formAbierto && <button type="button" className="cfg-btn cfg-btn-primario" onClick={() => setFormAbierto(true)}><UserPlus size={14} /> {t(cfg.invitar)}</button>}
     >
       {dialogo}
       {formAbierto && (
-        <form onSubmit={invitar} className="mb-5 grid grid-cols-1 gap-3 rounded-[8px] border border-[var(--cfg-linea)] bg-[var(--color-surface-3)] p-4 sm:grid-cols-[1fr_1fr_10rem]">
-          <Campo etiqueta={t('admName')} htmlFor="adm-nombre"><input id="adm-nombre" className="cfg-input" required minLength={3} maxLength={100} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} autoFocus /></Campo>
-          <Campo etiqueta={t('admEmail')} htmlFor="adm-email"><input id="adm-email" type="email" className="cfg-input" required maxLength={191} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Campo>
-          <Campo etiqueta={t('admArea')} htmlFor="adm-area">
-            <SelectorSimple
-              id="adm-area"
-              valor={form.area}
-              onCambio={(v) => setForm({ ...form, area: v })}
-              opciones={areas.map((a) => ({ valor: a.clave, etiqueta: a.nombre }))}
-            />
-          </Campo>
-          <div className="flex justify-end gap-2 sm:col-span-3">
+        <form onSubmit={invitar} className={`mb-5 grid grid-cols-1 gap-3 rounded-[8px] border border-[var(--cfg-linea)] bg-[var(--color-surface-3)] p-4 ${cfg.conArea ? 'sm:grid-cols-[1fr_1fr_10rem]' : 'sm:grid-cols-2'}`}>
+          <Campo etiqueta={t('admName')} htmlFor={`${cfg.prefijo}-nombre`}><input id={`${cfg.prefijo}-nombre`} className="cfg-input" required minLength={3} maxLength={100} value={form.nombre} onChange={(e) => setForm({ ...form, nombre: e.target.value })} autoFocus /></Campo>
+          <Campo etiqueta={t('admEmail')} htmlFor={`${cfg.prefijo}-email`}><input id={`${cfg.prefijo}-email`} type="email" className="cfg-input" required maxLength={191} value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Campo>
+          {cfg.conArea && (
+            <Campo etiqueta={t('admArea')} htmlFor={`${cfg.prefijo}-area`}>
+              <SelectorSimple
+                id={`${cfg.prefijo}-area`}
+                valor={form.area}
+                onCambio={(v) => setForm({ ...form, area: v })}
+                opciones={areas.map((a) => ({ valor: a.clave, etiqueta: a.nombre }))}
+              />
+            </Campo>
+          )}
+          <div className={`flex justify-end gap-2 ${cfg.conArea ? 'sm:col-span-3' : 'sm:col-span-2'}`}>
             <button type="button" className="cfg-btn cfg-btn-texto" onClick={() => setFormAbierto(false)}>{t('admCancel')}</button>
             <button type="submit" className="cfg-btn cfg-btn-primario" disabled={enviando}><Send size={14} /> {enviando ? t('admSending') : t('admSend')}</button>
           </div>
         </form>
       )}
 
-      {datos && admins.length === 0 && <p className="rounded-[8px] border border-dashed border-[var(--cfg-linea-fuerte)] p-5 text-center text-[13.5px] text-[var(--color-text-dim)]">{t('admEmpty')}</p>}
+      {datos && cuentas.length === 0 && cfg.vacio && <p className="rounded-[8px] border border-dashed border-[var(--cfg-linea-fuerte)] p-5 text-center text-[13.5px] text-[var(--color-text-dim)]">{t(cfg.vacio)}</p>}
 
       <ul className="cfg-lista">
-        {admins.map((a) => (
+        {cuentas.map((a) => (
           <li key={a.id} className="flex flex-wrap items-center gap-3 sm:flex-nowrap">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-[13px] font-bold text-[var(--color-on-primary)]">
               {a.nombre.split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase()}
             </span>
-            <div className="min-w-0 flex-1">
+            {/* En el teléfono el nombre ocupa su fila y las etiquetas bajan debajo de él */}
+            <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] sm:basis-0">
               <p className="truncate text-[14px] font-semibold text-[var(--color-text)]">{a.nombre}</p>
               <p className="truncate text-[12.5px] text-[var(--color-text-dim)]">{a.email} · {a.ultimoLoginEn ? t('admLastLogin', { when: hace(a.ultimoLoginEn) }) : t('admNeverLogged')}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex flex-1 flex-wrap items-center gap-1.5 pl-[3.25rem] sm:flex-none sm:pl-0">
+              {a.esTuCuenta && <span className="badge-info">{t('cfgrYou')}</span>}
               <span className={a.estado === 'inactivo' ? 'badge-neutral' : 'badge-success'}>{a.estado === 'inactivo' ? t('admInactive') : t('admActive')}</span>
               <span className={a.dosFactoresActivo ? 'badge-info' : 'badge-warning'}>{a.dosFactoresActivo ? t('adm2faOn') : t('adm2faOff')}</span>
               {a.bloqueado && <span className="badge-danger">{t('admLocked')}</span>}
               {a.sesionesActivas > 0 && <span className="badge-neutral">{t('admSessions', { n: a.sesionesActivas })}</span>}
             </div>
-            <ActionMenu items={[
-              { label: t('admActReset'), icon: <KeyRound size={14} />, onSelect: () => accion(a, 'restablecer') },
-              a.bloqueado && { label: t('admActUnlock'), icon: <Unlock size={14} />, onSelect: () => accion(a, 'desbloquear') },
-              a.dosFactoresActivo && { label: t('admActRemove2fa'), icon: <ShieldOff size={14} />, onSelect: () => accion(a, 'quitar2fa') },
-              a.sesionesActivas > 0 && { label: t('admActCloseSessions'), icon: <LogOut size={14} />, onSelect: () => accion(a, 'cerrarSesiones') },
-              a.estado === 'inactivo'
-                ? { label: t('admActActivate'), icon: <UserCheck size={14} />, onSelect: () => accion(a, 'activar') }
-                : { label: t('admActDeactivate'), icon: <UserX size={14} />, onSelect: () => accion(a, 'desactivar'), danger: true },
-            ]} />
+            {/* La propia cuenta se gestiona en "Mi cuenta" (pide la contraseña). */}
+            {!a.esTuCuenta && (
+              <ActionMenu items={[
+                { label: t('admActReset'), icon: <KeyRound size={14} />, onSelect: () => accion(a, 'restablecer') },
+                a.bloqueado && { label: t('admActUnlock'), icon: <Unlock size={14} />, onSelect: () => accion(a, 'desbloquear') },
+                a.dosFactoresActivo && { label: t('admActRemove2fa'), icon: <ShieldOff size={14} />, onSelect: () => accion(a, 'quitar2fa') },
+                a.sesionesActivas > 0 && { label: t('admActCloseSessions'), icon: <LogOut size={14} />, onSelect: () => accion(a, 'cerrarSesiones') },
+                a.estado === 'inactivo'
+                  ? { label: t('admActActivate'), icon: <UserCheck size={14} />, onSelect: () => accion(a, 'activar') }
+                  : { label: t('admActDeactivate'), icon: <UserX size={14} />, onSelect: () => accion(a, 'desactivar'), danger: true },
+              ]} />
+            )}
           </li>
         ))}
       </ul>
@@ -238,12 +262,12 @@ const Administradores = () => {
             {invitaciones.map((inv) => (
               <li key={inv.id} className="flex flex-wrap items-center gap-3 rounded-[8px] border border-dashed border-[var(--cfg-linea-fuerte)] px-3 py-2.5">
                 <Mail size={16} className="shrink-0 text-[var(--color-text-muted)]" />
-                <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--color-text)]"><strong className="font-semibold">{inv.nombre}</strong> · {inv.email}</span>
+                <span className="min-w-0 flex-1 basis-[calc(100%-1.75rem)] truncate text-[13.5px] text-[var(--color-text)] sm:basis-0"><strong className="font-semibold">{inv.nombre}</strong> · {inv.email}</span>
                 <span className={inv.vencida ? 'badge-danger' : 'badge-neutral'}>{inv.vencida ? t('admExpired') : t('admExpires', { when: hace(inv.expiraEn) })}</span>
-                <button type="button" className="cfg-btn" onClick={async () => { try { mostrarResultado(await configuracionService.reenviarInvitacionAdmin(inv.id)); cargar(); } catch (e) { showToast(e.message, 'error'); } }}>
+                <button type="button" className="cfg-btn" onClick={async () => { try { mostrarResultado(await configuracionService.reenviarInvitacionCuenta(tipo, inv.id)); cargar(); } catch (e) { showToast(e.message, 'error'); } }}>
                   <RefreshCcw size={13} /> {t('admResend')}
                 </button>
-                <button type="button" className="cfg-btn cfg-btn-texto cfg-btn-peligro" onClick={async () => { try { await configuracionService.eliminarInvitacionAdmin(inv.id); cargar(); } catch (e) { showToast(e.message, 'error'); } }}>
+                <button type="button" className="cfg-btn cfg-btn-texto cfg-btn-peligro" onClick={async () => { try { await configuracionService.eliminarInvitacionCuenta(tipo, inv.id); cargar(); } catch (e) { showToast(e.message, 'error'); } }}>
                   {t('admDelete')}
                 </button>
               </li>
@@ -261,7 +285,8 @@ export const SeccionAccesos = ({ seguridad, cambiar }) => {
   const set = (campo) => (valor) => cambiar('seguridad', campo, valor);
   return (
     <>
-      <Administradores />
+      <Cuentas tipo="administradores" />
+      <Cuentas tipo="configuradores" />
       <Fila titulo={t('secRules2fa')} descripcion={t('secRules2faHint')}>
         <OpcionesTarjeta
           nombre={t('secRules2fa')}

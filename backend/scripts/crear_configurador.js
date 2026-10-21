@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Crea (o restablece) la cuenta CONFIGURADOR de esta instalacion: la que entra
- * al panel de configuracion (marca, colores, login, modulos). No se puede
- * crear desde la interfaz a proposito: es la cuenta de quien instala el CRM.
+ * al panel de configuracion (marca, colores, login, modulos). La primera se
+ * crea aqui a proposito: es la cuenta de quien instala el CRM. Despues, desde
+ * el panel (Usuarios y seguridad -> Cuentas de configuracion) se invita a
+ * otras. Este script sigue sirviendo para restablecer una si nadie puede entrar.
  *
  * Uso (desde backend/):
  *   npm run crear-configurador -- --email config@empresa.com --nombre "Configuración"

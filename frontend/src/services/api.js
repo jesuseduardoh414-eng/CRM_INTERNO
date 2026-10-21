@@ -1125,24 +1125,25 @@ export const configuracionService = {
     const res = await apiFetch(`${API_URL}/configuracion/archivos/${encodeURIComponent(clave)}`, { method: 'DELETE', headers: getHeaders() });
     return handleResponse(res);
   },
-  administradores: async () => {
-    const res = await apiFetch(`${API_URL}/configuracion/administradores`, { headers: getHeaders() });
+  // Cuentas que da de alta el configurador. `tipo`: 'administradores' o 'configuradores'.
+  cuentas: async (tipo) => {
+    const res = await apiFetch(`${API_URL}/configuracion/${tipo}`, { headers: getHeaders() });
     return handleResponse(res);
   },
-  invitarAdministrador: async (datos) => {
-    const res = await apiFetch(`${API_URL}/configuracion/administradores`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(datos) });
+  invitarCuenta: async (tipo, datos) => {
+    const res = await apiFetch(`${API_URL}/configuracion/${tipo}`, { method: 'POST', headers: getHeaders(), body: JSON.stringify(datos) });
     return handleResponse(res);
   },
-  reenviarInvitacionAdmin: async (id) => {
-    const res = await apiFetch(`${API_URL}/configuracion/administradores/invitaciones/${encodeURIComponent(id)}/reenviar`, { method: 'POST', headers: getHeaders() });
+  reenviarInvitacionCuenta: async (tipo, id) => {
+    const res = await apiFetch(`${API_URL}/configuracion/${tipo}/invitaciones/${encodeURIComponent(id)}/reenviar`, { method: 'POST', headers: getHeaders() });
     return handleResponse(res);
   },
-  eliminarInvitacionAdmin: async (id) => {
-    const res = await apiFetch(`${API_URL}/configuracion/administradores/invitaciones/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getHeaders() });
+  eliminarInvitacionCuenta: async (tipo, id) => {
+    const res = await apiFetch(`${API_URL}/configuracion/${tipo}/invitaciones/${encodeURIComponent(id)}`, { method: 'DELETE', headers: getHeaders() });
     return handleResponse(res);
   },
-  accionAdministrador: async (id, accion) => {
-    const res = await apiFetch(`${API_URL}/configuracion/administradores/${id}/acciones`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ accion }) });
+  accionCuenta: async (tipo, id, accion) => {
+    const res = await apiFetch(`${API_URL}/configuracion/${tipo}/${id}/acciones`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ accion }) });
     return handleResponse(res);
   },
   correoPrueba: async (email, plantilla) => {

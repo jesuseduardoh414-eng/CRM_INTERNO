@@ -408,3 +408,31 @@ Codigo: catalogo y resolucion en `backend/src/utils/permisosArea.utils.js`
 los permisos ya resueltos en `usuario.permisos` y el frontend los lee con
 `frontend/src/utils/permisos.js` para mostrar u ocultar menus y botones.
 Migracion: `20261017120000_permisos_por_area` (MySQL y Postgres).
+
+## Cuentas de configuracion y administradores
+
+- La **cuenta de configuracion** (rol `CONFIGURADOR`) solo entra al panel de
+  configuracion; no ve proyectos ni datos de la empresa. La **primera** se crea
+  por consola, desde `backend/`:
+  `npm run crear-configurador -- --email config@empresa.com --nombre "Configuracion"`
+  (contrasena aleatoria que se muestra una vez; `--restablecer` le da otra).
+- Desde el panel (**Usuarios y seguridad**) el configurador invita por correo:
+  - **Administradores**, eligiendo el area. Con el area Administracion es el
+    **administrador general**.
+  - **Otras cuentas de configuracion** (desde el 2026-10-21). Sin area: llevan
+    la general, como las del script.
+  Si el correo no sale, el panel muestra el enlace para copiarlo. En ambas
+  listas puede reenviar o eliminar invitaciones, mandar un enlace de nueva
+  contrasena, desbloquear, quitar la 2FA, cerrar sesiones y desactivar (siempre
+  queda al menos una cuenta activa de cada tipo; la propia se gestiona en
+  **Mi cuenta**).
+- Las invitaciones de configuracion no aparecen en **Usuarios** ni se pueden
+  reenviar o borrar desde ahi. Si el equipo invita al mismo correo, se guarda
+  aparte y gana la primera que se acepte. La lista de invitaciones de Usuarios
+  ya no devuelve el token.
+
+Codigo: `backend/src/controllers/configuracionSistema.controller.js`
+(`/api/configuracion/administradores` y `/api/configuracion/configuradores`),
+aceptacion en `auth.controller.js` (`aceptarInvitacion`), plantilla de correo
+`invitacionConfiguracion`; panel en
+`frontend/src/components/configuracion/SeccionesSistema.jsx` (`Cuentas`).
