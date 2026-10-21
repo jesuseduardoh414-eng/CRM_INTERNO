@@ -37,6 +37,8 @@ const MODULOS = ['contratos', 'clientes', 'portalClientes', 'agenda', 'plantilla
 const MODULOS_RETIRADOS = ['portalClientes'];
 // Lo que puede hacer un MIEMBRO (los administradores siempre pueden).
 const PERMISOS = ['crearProyectos', 'verTodosProyectos', 'crearTareas', 'editarTareas', 'borrarTareas', 'guardarPlantillas', 'subirAdjuntos'];
+// Pasos de la tarjeta "Personalización" del panel (pasosMarca en ConfiguracionPage).
+const PASOS_PERSONALIZACION = ['nombre', 'empresa', 'logoOscuro', 'logoClaro', 'favicon', 'colores', 'login'];
 const SEGURIDAD_SMTP = ['starttls', 'ssl', 'ninguna'];
 const REGEX_HOST = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*$/i;
 const REGEX_EMAIL = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
@@ -141,6 +143,10 @@ const DEFECTO = Object.freeze({
   },
   // Textos propios por plantilla: { invitacion: { asunto, titulo, cuerpo, boton, nota } }.
   textosCorreo: {},
+  // Pasos de "Personalización" que se dieron por buenos con lo que ya tenían.
+  // Un paso cuenta solo si cambia lo de fábrica; una instalación que usa la
+  // marca de fábrica (OMNIS) los marca aquí con "Así está bien".
+  personalizacion: { revisados: [] },
   reglas: {
     idiomaPorDefecto: 'es',
     temaPorDefecto: 'sistema',
@@ -464,6 +470,11 @@ const validar = (entrada = {}, base = DEFECTO) => {
       textoLegal: textoLargo(dc.textoLegal, 600, bdc.textoLegal),
     },
     textosCorreo: validarTextosCorreo(e.textosCorreo, b.textosCorreo),
+    personalizacion: {
+      revisados: Array.isArray(e.personalizacion?.revisados)
+        ? [...new Set(e.personalizacion.revisados)].filter((paso) => PASOS_PERSONALIZACION.includes(paso))
+        : [...(b.personalizacion?.revisados || [])],
+    },
     reglas: {
       idiomaPorDefecto: deLista(r.idiomaPorDefecto, IDIOMAS, br.idiomaPorDefecto),
       temaPorDefecto: deLista(r.temaPorDefecto, TEMAS, br.temaPorDefecto),

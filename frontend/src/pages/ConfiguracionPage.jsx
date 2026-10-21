@@ -110,6 +110,7 @@ const aBorrador = (c) => ({
   // Valores de fábrica por si el servidor todavía no manda este grupo.
   disenoCorreo: { ...DISENO_CORREO_FABRICA, ...(c.disenoCorreo || {}) },
   textosCorreo: JSON.parse(JSON.stringify(c.textosCorreo || {})),
+  personalizacion: { revisados: [...(c.personalizacion?.revisados || [])] },
   operacion: {
     ...c.operacion,
     diasLaborales: [...(c.operacion.diasLaborales || [])],
@@ -139,7 +140,11 @@ const contarCambios = (a, b) => {
   return [...new Set([...Object.keys(pa), ...Object.keys(pb)])].filter((k) => (pa[k] || null) !== (pb[k] || null)).length;
 };
 
-/** Pasos de personalización de la marca respecto a la instalación de fábrica. */
+/**
+ * Pasos de personalización de la marca respecto a la instalación de fábrica.
+ * Uno que se dio por bueno con "Así está bien" (personalizacion.revisados)
+ * también cuenta: la instalación de OMNIS usa justo los valores de fábrica.
+ */
 const pasosMarca = (borrador, archivos) => [
   { id: 'nombre', ok: borrador.marca.nombreSistema !== 'OMNIS CRM', seccion: 'marca', foco: 'cfg-sistema', texto: 'cfgTodoName' },
   { id: 'empresa', ok: borrador.marca.nombreEmpresa !== 'OMNIS Proyectos Globales', seccion: 'marca', foco: 'cfg-empresa', texto: 'cfgTodoCompany' },
@@ -148,7 +153,7 @@ const pasosMarca = (borrador, archivos) => [
   { id: 'favicon', ok: Boolean(archivos.favicon || archivos.isotipo), seccion: 'marca', foco: 'img-favicon', texto: 'cfgTodoFavicon' },
   { id: 'colores', ok: !esColorFabrica(borrador.colores), seccion: 'colores', foco: 'cfg-primario', texto: 'cfgTodoColors' },
   { id: 'login', ok: Boolean(borrador.login.titulo || borrador.login.texto || borrador.login.etiqueta), seccion: 'login', foco: 'cfg-titulo', texto: 'cfgTodoLogin' },
-];
+].map((p) => ({ ...p, ok: p.ok || borrador.personalizacion.revisados.includes(p.id) }));
 
 const AnilloProgreso = ({ valor }) => {
   const r = 17;
@@ -189,6 +194,7 @@ const ConfiguracionPage = () => {
   const [previaEn, setPreviaEn] = useState(null);
   const pestanasMovil = useRef(null);
   const [salto, setSalto] = useState(0); // cuenta los clics en "Siguiente paso"
+  const [dandoPorBueno, setDandoPorBueno] = useState(false); // "Así está bien" guardándose
   const [intentoPlantillas, setIntentoPlantillas] = useState(0);
 
   useEffect(() => {
@@ -317,6 +323,22 @@ const ConfiguracionPage = () => {
     if (!tira || !activa || !tira.clientWidth) return;
     tira.scrollTo({ left: activa.offsetLeft - (tira.clientWidth - activa.clientWidth) / 2, behavior: 'smooth' });
   }, [seccion]);
+
+  // "Así está bien": da el paso por listo con lo que ya tiene y se guarda al
+  // momento, solo ese dato (lo demás que esté sin guardar sigue en el borrador).
+  const darPorBueno = async (paso) => {
+    setDandoPorBueno(true);
+    try {
+      const revisados = [...new Set([...(servidor.personalizacion?.revisados || []), paso.id])];
+      const data = await configuracionService.guardar({ personalizacion: { revisados } });
+      setServidor((prev) => ({ ...prev, ...data.configuracion }));
+      setBorrador((b) => ({ ...b, personalizacion: { revisados: [...(data.configuracion.personalizacion?.revisados || revisados)] } }));
+    } catch (err) {
+      showToast(err.message, 'error');
+    } finally {
+      setDandoPorBueno(false);
+    }
+  };
 
   const irA = (paso) => {
     enfocarDespues.current = paso.foco;
@@ -727,13 +749,24 @@ const ConfiguracionPage = () => {
               </div>
             </div>
             {siguiente ? (
-              <button type="button" className="cfg-sugerencia" onClick={() => irA(siguiente)}>
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[10.5px] uppercase tracking-[0.1em] text-white/40">{t('cfgNext')}</span>
-                  <span className="block font-medium leading-snug">{t(siguiente.texto)}</span>
-                </span>
-                <ArrowRight size={14} className="shrink-0 text-[var(--color-gold)]" />
-              </button>
+              <>
+                <button type="button" className="cfg-sugerencia" onClick={() => irA(siguiente)}>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[10.5px] uppercase tracking-[0.1em] text-white/40">{t('cfgNext')}</span>
+                    <span className="block font-medium leading-snug">{t(siguiente.texto)}</span>
+                  </span>
+                  <ArrowRight size={14} className="shrink-0 text-[var(--color-gold)]" />
+                </button>
+                <button
+                  type="button"
+                  className="mt-1.5 inline-flex min-h-[28px] items-center gap-1.5 rounded-[5px] px-1.5 text-[11.5px] font-medium text-white/60 transition-colors hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  onClick={() => darPorBueno(siguiente)}
+                  disabled={dandoPorBueno}
+                  title={t('cfgKeepAsIsHint')}
+                >
+                  {dandoPorBueno ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />} {t('cfgKeepAsIs')}
+                </button>
+              </>
             ) : (
               <p className="cfg-sugerencia !cursor-default"><Check size={13} className="text-[var(--color-gold)]" /> {t('cfgProgressDone')}</p>
             )}
@@ -803,18 +836,29 @@ const ConfiguracionPage = () => {
           {/* Avance de la puesta en marcha en móvil: la tarjeta completa vive
               en el menú lateral, que aquí no se muestra. */}
           {borrador && siguiente && (
-            <button
-              type="button"
-              onClick={() => irA(siguiente)}
-              className="mb-4 flex min-h-[44px] w-full items-center gap-3 rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-left lg:hidden"
-            >
-              <span className="text-[12px] font-bold text-[var(--color-gold)]">{Math.round((hechos / pasos.length) * 100)}%</span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">{t('cfgNext')}</span>
-                <span className="block truncate text-[13px] font-medium text-[var(--color-text)]">{t(siguiente.texto)}</span>
-              </span>
-              <ArrowRight size={14} className="shrink-0 text-[var(--color-gold)]" aria-hidden="true" />
-            </button>
+            <div className="mb-4 flex overflow-hidden rounded-[8px] border border-[var(--color-border)] bg-[var(--color-surface)] lg:hidden">
+              <button
+                type="button"
+                onClick={() => irA(siguiente)}
+                className="flex min-h-[44px] min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left"
+              >
+                <span className="text-[12px] font-bold text-[var(--color-gold)]">{Math.round((hechos / pasos.length) * 100)}%</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[11px] uppercase tracking-[0.1em] text-[var(--color-text-muted)]">{t('cfgNext')}</span>
+                  <span className="block truncate text-[13px] font-medium text-[var(--color-text)]">{t(siguiente.texto)}</span>
+                </span>
+                <ArrowRight size={14} className="shrink-0 text-[var(--color-gold)]" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={() => darPorBueno(siguiente)}
+                disabled={dandoPorBueno}
+                title={t('cfgKeepAsIsHint')}
+                className="flex shrink-0 items-center gap-1.5 border-l border-[var(--color-border)] px-3 text-[12px] font-medium text-[var(--color-text-dim)] hover:bg-[var(--color-surface-3)] disabled:opacity-50"
+              >
+                {dandoPorBueno ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} {t('cfgKeepAsIs')}
+              </button>
+            </div>
           )}
 
           {/* Secciones en móvil (en escritorio están en el menú lateral) */}

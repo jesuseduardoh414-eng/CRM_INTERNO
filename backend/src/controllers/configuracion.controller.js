@@ -36,7 +36,8 @@ const publica = async (_req, res) => {
     const datos = await servicio.obtener();
     // Ni el remitente, ni el servidor, ni el diseño de los correos hacen falta fuera del panel.
     // Las tablas de permisos tampoco: cada persona recibe los suyos ya resueltos (/auth/me).
-    const { reglas, correo: _correo, disenoCorreo: _diseno, textosCorreo: _textos, permisosAreas: _permisos, ...resto } = respuesta(datos);
+    // Ni el avance de la personalización, que solo usa el panel.
+    const { reglas, correo: _correo, disenoCorreo: _diseno, textosCorreo: _textos, permisosAreas: _permisos, personalizacion: _avance, ...resto } = respuesta(datos);
     const { remitenteCorreo: _remitente, ...reglasPublicas } = reglas;
     res.set('Cache-Control', 'no-cache');
     return res.json({ ...resto, reglas: reglasPublicas });
