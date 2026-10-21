@@ -14,6 +14,7 @@ import { AREA_GENERAL, CLAVE_TRADUCCION_AREA, nombreDesdeClave } from '../../uti
 import { Campo, Fila, Interruptor } from './PiezasConfiguracion';
 import { CampoNumero, OpcionesTarjeta } from './SeccionesSistema';
 import PermisosPorArea from './PermisosPorArea';
+import GuiaGmail from './GuiaGmail';
 
 const MAX_AREAS = 20;
 const COLORES_AREA = ['#2563eb', '#f59e0b', '#8b5cf6', '#db2777', '#0d9488', '#ea580c', '#0891b2', '#65a30d', '#dc2626', '#4f46e5', '#ca8a04', '#64748b'];
@@ -237,6 +238,7 @@ export const ServidorCorreo = ({ correo, reglas, cambiar, nombreSistema, onQuita
   const [prueba, setPrueba] = useState(null); // { ok, mensaje, detalle } | 'probando'
   const set = (campo) => (valor) => { cambiar('correo', campo, valor); setPrueba(null); };
   const preset = PRESETS.find((p) => p.host && p.host === correo.host);
+  const esGmail = preset?.id === 'gmail';
 
   const aplicarPreset = (p) => {
     cambiar('correo', 'puerto', p.puerto);
@@ -276,6 +278,7 @@ export const ServidorCorreo = ({ correo, reglas, cambiar, nombreSistema, onQuita
         })}
       </div>
       {preset && <p className="mb-4 flex items-start gap-2 rounded-[8px] bg-[var(--color-surface-3)] p-3 text-[12.5px] leading-snug text-[var(--color-text-dim)]"><TriangleAlert size={14} className="mt-0.5 shrink-0 text-[var(--color-warning)]" /> {t(`smtpPresetNote_${preset.id}`)}</p>}
+      {esGmail && <GuiaGmail abiertaAlInicio={!correo.passwordGuardada} nombreSistema={nombreSistema} />}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_7rem_10rem]">
         <Campo etiqueta={t('smtpHost')} htmlFor="smtp-host">
@@ -308,7 +311,8 @@ export const ServidorCorreo = ({ correo, reglas, cambiar, nombreSistema, onQuita
               maxLength={200}
               placeholder={correo.passwordGuardada ? '••••••••••' : ''}
               value={correo.password || ''}
-              onChange={(e) => set('password')(e.target.value)}
+              // Google muestra la contraseña de aplicación en grupos de 4 con espacios.
+              onChange={(e) => set('password')(esGmail ? e.target.value.replace(/\s+/g, '') : e.target.value)}
               autoComplete="new-password"
             />
             <button type="button" className="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-[6px] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]" onClick={() => setVerPassword((v) => !v)} aria-label={verPassword ? t('hidePassword') : t('showPassword')}>

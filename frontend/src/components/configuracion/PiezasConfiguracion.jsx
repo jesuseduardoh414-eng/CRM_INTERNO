@@ -1,9 +1,9 @@
 // Piezas del panel de configuración: fila de ajustes (enlazada con la vista
 // previa), campo, interruptor, color con contraste, imagen de marca con
-// arrastrar y soltar, la paleta generada y el botón de copiar. Estilos en
-// src/configuracion.css.
+// arrastrar y soltar, la paleta generada, el botón de copiar y las piezas de
+// las guías paso a paso (Google Cloud, Gmail). Estilos en src/configuracion.css.
 import { useRef, useState } from 'react';
-import { CheckCircle2, Copy, Info, Loader2, UploadCloud } from 'lucide-react';
+import { CheckCircle2, Copy, ExternalLink, Info, Loader2, UploadCloud } from 'lucide-react';
 import { usePreferences } from '../../context/PreferencesContext';
 import { ajustarContraste, contraste, generarVariables } from '../../utils/temaMarca';
 
@@ -225,3 +225,64 @@ export const CampoImagen = ({ clave, etiqueta, ayuda, url, fabrica, maxKb, acept
     </div>
   );
 };
+
+// ── Guías paso a paso ────────────────────────────────────────────────────
+
+/** Un valor para copiar tal cual en la pantalla de otro servicio. */
+export const Valor = ({ etiqueta, valor }) => (
+  <div className="mt-2">
+    {etiqueta && <p className="cfg-label !mb-1 text-[12px]">{etiqueta}</p>}
+    <div className="flex gap-2">
+      <input readOnly value={valor} aria-label={etiqueta} className="cfg-input font-mono text-[12.5px]" onFocus={(e) => e.target.select()} />
+      <BotonCopiar texto={valor} />
+    </div>
+  </div>
+);
+
+export const Enlace = ({ href, children }) => (
+  <a href={href} target="_blank" rel="noopener noreferrer" className="cfg-btn shrink-0 !h-8 text-[12.5px]">
+    {children} <ExternalLink size={12} />
+  </a>
+);
+
+export const Paso = ({ numero, hecho, titulo, enlaces = [], children }) => (
+  <li className="flex gap-3 py-4 first:pt-1">
+    <span
+      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12.5px] font-bold tabular-nums ${hecho
+        ? 'bg-[var(--badge-success-bg)] text-[var(--badge-success-fg)]'
+        : 'bg-[var(--color-primary-10)] text-[var(--color-primary)]'}`}
+      aria-hidden="true"
+    >
+      {hecho ? <CheckCircle2 size={15} /> : numero}
+    </span>
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[14px] font-semibold text-[var(--color-text)]">{titulo}</p>
+        {enlaces.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {enlaces.map((e) => <Enlace key={e.href} href={e.href}>{e.texto}</Enlace>)}
+          </div>
+        )}
+      </div>
+      <div className="mt-1 space-y-1.5 text-[13px] leading-relaxed text-[var(--color-text-dim)]">{children}</div>
+    </div>
+  </li>
+);
+
+/** Texto con **negritas** marcadas así en los textos traducidos. */
+export const Rico = ({ texto, como: Etiqueta = 'p' }) => (
+  <Etiqueta>
+    {String(texto).split(/(\*\*[^*]+\*\*)/g).map((parte, i) => (
+      parte.startsWith('**') && parte.endsWith('**')
+        ? <strong key={i} className="font-semibold text-[var(--color-text)]">{parte.slice(2, -2)}</strong>
+        : <span key={i}>{parte}</span>
+    ))}
+  </Etiqueta>
+);
+
+/** Sub-pasos (a, b, c…) de una misma pantalla. */
+export const SubPasos = ({ textos }) => (
+  <ol className="list-[lower-alpha] space-y-1.5 pl-5 marker:font-semibold marker:text-[var(--color-text)]">
+    {textos.map((texto) => <Rico key={texto} como="li" texto={texto} />)}
+  </ol>
+);
