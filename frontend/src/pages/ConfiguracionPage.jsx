@@ -207,6 +207,11 @@ const ConfiguracionPage = () => {
   }, [seccion, plantillasCorreo, intentoPlantillas, pestanaCorreo]);
 
   const refrescarEstado = useCallback(() => configuracionService.estado().then(setEstado).catch(() => {}), []);
+  // "Documentos y archivos" dice dónde se guardan: al entrar se vuelve a leer
+  // por si Google Drive se conectó o desconectó en otra sección.
+  useEffect(() => {
+    if (seccion === 'archivos') refrescarEstado();
+  }, [seccion, refrescarEstado]);
   useEffect(() => {
     let cancelado = false;
     configuracionService.estado().then((e) => { if (!cancelado) setEstado(e); }).catch(() => {});
@@ -573,7 +578,7 @@ const ConfiguracionPage = () => {
     }
 
     if (seccion === 'accesos') return <SeccionAccesos seguridad={borrador.seguridad} cambiar={cambiar} />;
-    if (seccion === 'archivos') return <SeccionArchivos archivos={borrador.subidas} cambiar={cambiar} estado={estado} />;
+    if (seccion === 'archivos') return <SeccionArchivos archivos={borrador.subidas} cambiar={cambiar} estado={estado} onIrDrive={() => setSeccion('drive')} />;
     if (seccion === 'permisos') {
       return (
         <SeccionPermisos

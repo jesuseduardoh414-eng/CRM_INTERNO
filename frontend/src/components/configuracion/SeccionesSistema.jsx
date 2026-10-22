@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { enUS, es } from 'date-fns/locale';
 import {
-  Archive, ArrowRight, BookOpen, CalendarOff, CheckCircle2, Clock, Copy, Database, FileImage, FileSignature, FileSpreadsheet, FileText, FileType, KeyRound, Lock, LogOut,
+  Archive, ArrowRight, BookOpen, CalendarOff, CheckCircle2, Clock, Cloud, Copy, Database, ExternalLink, FileImage, FileSignature, FileSpreadsheet, FileText, FileType, KeyRound, Lock, LogOut,
   HardDrive, Mail, MailCheck, Minus, Paperclip, Plus, Receipt, RefreshCcw, Send, ShieldCheck, ShieldOff, TriangleAlert, Unlock, UserCheck, UserPlus, UserX, Users,
 } from 'lucide-react';
 import { configuracionService } from '../../services/api';
@@ -363,10 +363,15 @@ const tamano = (bytes) => {
   return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${u[i]}`;
 };
 
-export const SeccionArchivos = ({ archivos, cambiar, estado }) => {
+export const SeccionArchivos = ({ archivos, cambiar, estado, onIrDrive }) => {
   const { t } = usePreferences();
   const set = (campo) => (valor) => cambiar('subidas', campo, valor);
   const almacen = estado?.almacenamiento;
+  // Con Google Drive activo los archivos nuevos van ahí; conectado pero sin
+  // funcionar (permiso retirado, sin carpeta), se guardan en el disco.
+  const drive = estado?.drive;
+  const enDrive = Boolean(drive?.activo);
+  const driveConProblema = Boolean(drive?.conectado && !drive.activo);
   return (
     <>
       <Fila titulo={t('filesTypes')} descripcion={t('filesTypesHint')}>
@@ -401,14 +406,43 @@ export const SeccionArchivos = ({ archivos, cambiar, estado }) => {
           <CampoNumero id="arc-comprobantes" etiqueta={t('filesMaxReceipts')} valor={archivos.comprobantesMaxMB ?? 10} min={1} max={50} unidad={t('unitMb')} onChange={set('comprobantesMaxMB')} />
         </div>
       </Fila>
-      <Fila titulo={t('filesStorage')} descripcion={t('filesStorageHint')}>
+      <Fila titulo={t('filesStorage')} descripcion={enDrive ? t('filesStorageHintDrive', { cuenta: drive.cuenta || '' }) : driveConProblema ? t('filesStorageHintDriveError') : t('filesStorageHint')}>
+        {/* Google Drive: con la conexión activa los archivos nuevos van ahí y el disco queda de respaldo */}
+        {drive?.conectado && (
+          <div className={`mb-4 rounded-[8px] border p-4 ${enDrive ? 'border-[var(--cfg-linea-fuerte)]' : 'border-[var(--color-warning)]'}`}>
+            <div className="flex flex-wrap items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-primary)] text-[var(--color-on-primary)]"><Cloud size={18} /></span>
+              {/* En el teléfono el enlace baja a su propia línea, bajo el nombre */}
+              <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] sm:basis-0">
+                <p className="flex flex-wrap items-center gap-2 text-[14px] font-semibold text-[var(--color-text)]">
+                  {t('filesDriveTitle')} <Estado ok={enDrive}>{enDrive ? t('filesDriveOk') : t('filesDriveProblem')}</Estado>
+                </p>
+                {drive.cuenta && <p className="mt-1 break-all text-[12.5px] text-[var(--color-text-dim)]">{drive.cuenta}</p>}
+              </div>
+              {drive.carpetaUrl && (
+                <a href={drive.carpetaUrl} target="_blank" rel="noopener noreferrer" className="cfg-btn ml-[3.25rem] shrink-0 !h-8 text-[12.5px] sm:ml-0">
+                  {t('drvAbrirCarpeta')} <ExternalLink size={12} />
+                </a>
+              )}
+            </div>
+            <p className="cfg-ayuda !mt-3">{enDrive ? t('filesDriveHint') : t('filesDriveProblemHint')}</p>
+            {!enDrive && onIrDrive && <button type="button" className="cfg-btn mt-3" onClick={onIrDrive}>{t('filesDriveGo')}</button>}
+          </div>
+        )}
+        {drive && !drive.conectado && (
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[8px] bg-[var(--color-surface-3)] p-3">
+            <Cloud size={16} className="shrink-0 text-[var(--color-text-muted)]" />
+            <p className="min-w-0 flex-1 text-[12.5px] leading-snug text-[var(--color-text-dim)]">{t('filesDriveOff')}</p>
+            {onIrDrive && <button type="button" className="cfg-btn shrink-0" onClick={onIrDrive}>{t('filesDriveConnect')}</button>}
+          </div>
+        )}
         {almacen && (
           <div className="mb-4 rounded-[8px] border border-[var(--cfg-linea-fuerte)] p-4">
             <div className="flex items-start gap-3">
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[8px] bg-[var(--color-primary)] text-[var(--color-on-primary)]"><HardDrive size={18} /></span>
               <div className="min-w-0 flex-1">
                 <p className="flex flex-wrap items-center gap-2 text-[14px] font-semibold text-[var(--color-text)]">
-                  {t('filesDiskTitle')} <Estado ok={almacen.adjuntos.ok}>{almacen.adjuntos.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>
+                  {enDrive ? t('filesDiskTitleDrive') : t('filesDiskTitle')} <Estado ok={almacen.adjuntos.ok}>{almacen.adjuntos.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>
                 </p>
                 <p className="mt-1 break-all font-mono text-[12px] text-[var(--color-text-dim)]">{almacen.adjuntos.ruta}</p>
               </div>
@@ -421,31 +455,38 @@ export const SeccionArchivos = ({ archivos, cambiar, estado }) => {
                 </div>
               ))}
             </dl>
-            <p className="cfg-ayuda !mt-3">{t('filesDiskHint')}</p>
+            <p className="cfg-ayuda !mt-3">{enDrive ? t('filesDiskHintDrive') : t('filesDiskHint')}</p>
           </div>
         )}
         <ul className="cfg-lista">
           <li className="flex items-center gap-3">
             <Paperclip size={16} className="shrink-0 text-[var(--color-text-muted)]" />
-            <span className="flex-1 text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreAttachments')}</span>
-            {almacen && <Estado ok={almacen.adjuntos.ok}>{t('filesDiskShort')}</Estado>}
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreAttachments')}</span>
+              {enDrive && <span className="block truncate text-[11.5px] text-[var(--color-text-muted)]">{t('filesStoreInDrive', { carpeta: 'Proyectos' })}</span>}
+            </span>
+            {enDrive ? <Estado ok>{t('filesDriveTitle')}</Estado> : almacen && <Estado ok={almacen.adjuntos.ok}>{t('filesDiskShort')}</Estado>}
           </li>
           <li className="flex items-center gap-3">
             <FileSignature size={16} className="shrink-0 text-[var(--color-text-muted)]" />
             <span className="min-w-0 flex-1">
               <span className="block text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreContracts')}</span>
-              {almacen && <span className="block truncate font-mono text-[11.5px] text-[var(--color-text-muted)]">{almacen.contratos.ruta}</span>}
+              {enDrive
+                ? <span className="block truncate text-[11.5px] text-[var(--color-text-muted)]">{t('filesStoreInDrive', { carpeta: 'Contratos' })}</span>
+                : almacen && <span className="block truncate font-mono text-[11.5px] text-[var(--color-text-muted)]">{almacen.contratos.ruta}</span>}
             </span>
-            {almacen && <Estado ok={almacen.contratos.ok}>{almacen.contratos.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>}
+            {enDrive ? <Estado ok>{t('filesDriveTitle')}</Estado> : almacen && <Estado ok={almacen.contratos.ok}>{almacen.contratos.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>}
           </li>
           {almacen?.comprobantes && (
             <li className="flex items-center gap-3">
               <Receipt size={16} className="shrink-0 text-[var(--color-text-muted)]" />
               <span className="min-w-0 flex-1">
                 <span className="block text-[13.5px] font-medium text-[var(--color-text)]">{t('filesStoreReceipts')}</span>
-                <span className="block truncate font-mono text-[11.5px] text-[var(--color-text-muted)]">{almacen.comprobantes.ruta}</span>
+                {enDrive
+                  ? <span className="block truncate text-[11.5px] text-[var(--color-text-muted)]">{t('filesStoreInDrive', { carpeta: 'Comprobantes' })}</span>
+                  : <span className="block truncate font-mono text-[11.5px] text-[var(--color-text-muted)]">{almacen.comprobantes.ruta}</span>}
               </span>
-              <Estado ok={almacen.comprobantes.ok}>{almacen.comprobantes.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>
+              {enDrive ? <Estado ok>{t('filesDriveTitle')}</Estado> : <Estado ok={almacen.comprobantes.ok}>{almacen.comprobantes.ok ? t('sysOk') : t('filesStoreNoWrite')}</Estado>}
             </li>
           )}
           <li className="flex items-center gap-3">
