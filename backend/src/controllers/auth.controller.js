@@ -35,6 +35,11 @@ const { moduloActivo: moduloActivoConfig } = require('../services/configuracion.
 const {
   ErrorSesion,
   datosCliente,
+  ponerCookieRefresh,
+  borrarCookieRefresh,
+  refreshDePeticion,
+  ponerCookieArchivos,
+  borrarCookieArchivos,
   crearSesion,
   rotarSesion,
   revocarPorRefresh,
@@ -146,6 +151,22 @@ const generarCodigosRespaldo = () => Array.from({ length: TOTAL_CODIGOS_RESPALDO
 const contextoCorreo = (req) => ({ ...datosCliente(req), fecha: new Date() });
 
 /**
+ * El refresh token va en la cookie httpOnly; al JSON solo el access token.
+ * Tambien se renueva la cookie para abrir adjuntos y fotos (crm_archivos).
+ */
+const tokensEnCookie = (req, res, { refreshToken, ...tokens }) => {
+  ponerCookieRefresh(req, res, refreshToken, tokens.sesionExpiraEn);
+  const { sub, sid } = jwt.decode(tokens.token) || {};
+  ponerCookieArchivos(req, res, { usuarioId: sub, sesionId: sid, expiraEn: tokens.sesionExpiraEn });
+  return tokens;
+};
+
+const borrarCookiesSesion = (req, res) => {
+  borrarCookieRefresh(req, res);
+  borrarCookieArchivos(req, res);
+};
+
+/**
  * Suma un intento fallido (contraseña o 2FA) y bloquea la cuenta cada
  * INTENTOS_POR_BLOQUEO fallos, con duracion que se duplica: 15, 30, 60 min...
  * hasta 24 h. El contador se reinicia al entrar bien o al restablecer la
@@ -194,7 +215,7 @@ const completarLogin = async (req, res, usuario, { recordar }) => {
     correo.enviarAvisoNuevoInicio({ email: usuario.email, nombre: usuario.nombre, contexto: contextoCorreo(req) });
   }
 
-  return res.json({ mensaje: 'Inicio de sesión correcto', ...tokens, usuario: usuarioPublico(usuario) });
+  return res.json({ mensaje: 'Inicio de sesión correcto', ...tokensEnCookie(req, res, tokens), usuario: usuarioPublico(usuario) });
 };
 
 /** Comprueba la contraseña actual de alguien ya autenticado. */
@@ -474,32 +495,14 @@ const reenviarCodigo = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// GET /api/auth/verify/:token  (enlace antiguo, se mantiene por compatibilidad)
+// GET /api/auth/verify/:token  (enlace antiguo, ya no verifica nada)
 // ---------------------------------------------------------------------------
-const verifyAccount = async (req, res) => {
-  const { token } = req.params;
-  if (!esTexto(token, 200)) return res.status(400).json({ error: 'Token de verificación inválido o ya utilizado' });
-
-  try {
-    const usuario = await prisma.usuario.findFirst({ where: { verificationToken: token } });
-    if (!usuario) {
-      return res.status(400).json({ error: 'Token de verificación inválido o ya utilizado' });
-    }
-    if (usuario.verificationTokenExpires && usuario.verificationTokenExpires < new Date()) {
-      return res.status(400).json({ error: 'El enlace de verificación ha expirado' });
-    }
-
-    await prisma.usuario.update({
-      where: { id: usuario.id },
-      data: { verificado: true, verificationToken: null },
-    });
-
-    return res.json({ mensaje: 'Cuenta verificada correctamente. Ya puedes iniciar sesión.' });
-  } catch (error) {
-    console.error('[verifyAccount]', error);
-    return res.status(500).json({ error: 'Error al verificar cuenta' });
-  }
-};
+// `verificationToken` guarda ahora el SHA-256 del codigo de 6 digitos: buscar
+// por el valor que llega aceptaria el hash leido de la base (o de un
+// respaldo) como si fuera el enlace. La pagina del frontend muestra el error.
+const verifyAccount = (_req, res) => res.status(410).json({
+  error: 'Este enlace de verificación ya no se usa. Inicia sesión o pide un código nuevo.',
+});
 
 // ---------------------------------------------------------------------------
 // POST /api/auth/login  { email, password, recordar }
@@ -619,14 +622,16 @@ const login2fa = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// POST /api/auth/refresh  { refreshToken }
+// POST /api/auth/refresh  (cookie crm_refresh; o { refreshToken } de antes)
 // ---------------------------------------------------------------------------
 const refresh = async (req, res) => {
   try {
-    const tokens = await rotarSesion(req.body?.refreshToken, req);
-    return res.json(tokens);
+    const tokens = await rotarSesion(refreshDePeticion(req), req);
+    return res.json(tokensEnCookie(req, res, tokens));
   } catch (error) {
     if (error instanceof ErrorSesion) {
+      // 409: otra pestaña la esta rotando y la cookie nueva ya va en camino.
+      if (error.status === 401) borrarCookiesSesion(req, res);
       if (error.reutilizado) {
         const { usuarioId } = error.reutilizado;
         invalidarCacheUsuario(usuarioId);
@@ -642,12 +647,13 @@ const refresh = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// POST /api/auth/logout  { refreshToken }
+// POST /api/auth/logout  (cookie crm_refresh; o { refreshToken } de antes)
 // ---------------------------------------------------------------------------
 // No exige access token: puede haber caducado y aun asi hay que poder cerrar.
 const logout = async (req, res) => {
+  borrarCookiesSesion(req, res);
   try {
-    const sesionId = await revocarPorRefresh(req.body?.refreshToken);
+    const sesionId = await revocarPorRefresh(refreshDePeticion(req));
     if (sesionId) {
       const sesion = await prisma.sesion.findUnique({ where: { id: sesionId }, select: { usuarioId: true } });
       if (sesion) {
@@ -675,6 +681,9 @@ const me = async (req, res) => {
       },
     });
     if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
+    // El frontend pide /me al abrir: asi las sesiones abiertas antes de la
+    // cookie de archivos tambien la reciben sin volver a entrar.
+    ponerCookieArchivos(req, res, { usuarioId: req.usuario.id, sesionId: req.sesionId, expiraEn: req.sesionExpiraEn });
     const { permisosFinanzas: _pf, permisos: _p, ...publico } = usuario;
     return res.json({ usuario: { ...publico, ...usuarioPublico(usuario) } });
   } catch (error) {
@@ -1046,7 +1055,8 @@ const generarInvitacion = async ({ nombre, email, area, rol, creadoPor, empresaI
     // Una o varias areas separadas por coma ('' en las del portal de clientes).
     area: areasDeTexto(area).join(','),
     rol: String(rol).toLowerCase(),
-    token,
+    // En la base solo el hash: el token en claro va unicamente en el correo.
+    token: sha256(token),
     expiraEn,
     estado: 'pendiente',
     creadoPor,
@@ -1143,7 +1153,7 @@ const verificarInvitacion = async (req, res) => {
 
   try {
     const invitacion = await prisma.invitacion.findUnique({
-      where: { token },
+      where: { token: sha256(token) },
       include: { empresa: { select: { nombre: true, nombreComercial: true } } },
     });
 
@@ -1191,9 +1201,10 @@ const aceptarInvitacion = async (req, res) => {
   if (password !== confirmar_password) {
     return res.status(400).json({ error: 'Las contraseñas no coinciden' });
   }
+  if (!esTexto(token, 200)) return res.status(400).json({ error: 'Invitación inválida o expirada' });
 
   try {
-    const invitacion = await prisma.invitacion.findUnique({ where: { token } });
+    const invitacion = await prisma.invitacion.findUnique({ where: { token: sha256(token) } });
 
     if (!invitacion || invitacion.estado !== 'pendiente' || invitacion.expiraEn < new Date()) {
       return res.status(400).json({ error: 'Invitación inválida o expirada' });
@@ -1309,7 +1320,7 @@ const reenviarInvitacion = async (req, res) => {
     await prisma.invitacion.update({
       where: { id: invitacion.id },
       data: {
-        token: nuevoToken,
+        token: sha256(nuevoToken),
         expiraEn: nuevaExpiracion,
         estado: 'pendiente'
       }

@@ -121,7 +121,26 @@ const limiteAccionSensible = rateLimit({
   ...cabeceras,
 });
 
+// Techo general de toda la API: frena inundaciones y que una sesion robada
+// descargue la base a base de peticiones. Por persona si trae sesion valida
+// (token o cookie de archivos), por IP si no. Holgado a proposito: una
+// oficina entera puede salir por la misma IP. El de salud no cuenta.
+const claveSesion = (req) => {
+  // eslint-disable-next-line global-require
+  const datos = require('../services/sesiones.service').sesionDeArchivos(req);
+  return datos && Number.isInteger(datos.usuarioId) ? `usuario:${datos.usuarioId}` : null;
+};
+const limiteGeneral = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: (req) => (claveSesion(req) ? 2000 : 1000),
+  keyGenerator: (req) => claveSesion(req) || `ip:${ipKeyGenerator(req.ip || '')}`,
+  skip: (req) => req.path === '/health',
+  message: { error: 'Demasiadas peticiones seguidas. Espera unos minutos y vuelve a intentarlo.' },
+  ...cabeceras,
+});
+
 module.exports = {
+  limiteGeneral,
   authLimiter,
   loginLimiter,
   limitePorCorreo,

@@ -4,7 +4,7 @@
 const XLSX = require('xlsx');
 const prisma = require('../lib/prisma');
 const { esAdminGlobal, buildFiltroAreaProyecto } = require('../utils/permissions.utils');
-const { areasDe, areasDeTexto } = require('../utils/permisosArea.utils');
+const { areasDe, areasDeTexto, puede } = require('../utils/permisosArea.utils');
 
 // Alcance de los reportes: el administrador general ve todo; el resto, sus areas.
 const scopeReporte = (usuario) => (esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(areasDe(usuario)));
@@ -136,6 +136,8 @@ const personas = async (req, res) => {
 const clientes = async (req, res) => {
   try {
     const scope = scopeReporte(req.usuario);
+    // Los contratos (y sus montos) solo cuentan para quien los ve en su modulo.
+    const veContratos = puede(req.usuario, 'contratos.ver') && configEnCache().modulos?.contratos !== false;
     const empresas = await prisma.empresa.findMany({
       where: { tipo: { in: ['CLIENTE', 'AMBOS'] } },
       orderBy: { nombre: 'asc' },
@@ -145,7 +147,7 @@ const clientes = async (req, res) => {
           where: scope && Object.keys(scope).length ? scope : undefined,
           select: { id: true, nombre: true, estado: true, tareas: { select: { estado: true, venceEn: true } } },
         },
-        contratos: { select: { estado: true, monto: true, moneda: true, fechaFin: true } },
+        contratos: { ...(veContratos ? {} : { where: { id: -1 } }), select: { estado: true, monto: true, moneda: true, fechaFin: true } },
       },
     });
     const ahora = new Date();

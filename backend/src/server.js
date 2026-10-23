@@ -21,6 +21,17 @@ const variablesObligatorias = ['JWT_SECRET', 'DATABASE_URL'].filter((nombre) => 
 if (variablesObligatorias.length > 0) {
   throw new Error(`Faltan variables de entorno obligatorias: ${variablesObligatorias.join(', ')}. Revisa backend/.env.example.`);
 }
+// Con un JWT_SECRET corto se pueden adivinar por fuerza bruta las firmas de
+// las sesiones (y fabricar una de cualquier persona). Sin AUTH_ENCRYPTION_KEY
+// los secretos cifrados (2FA, Google, SMTP) dependen del mismo JWT_SECRET.
+// OJO al cambiarlos: con AUTH_ENCRYPTION_KEY vacia, otro JWT_SECRET deja
+// ilegible lo ya cifrado. El orden seguro esta en DESPLIEGUE_CPANEL.md.
+if (String(process.env.JWT_SECRET).length < 32) {
+  console.warn('⚠️  JWT_SECRET tiene menos de 32 caracteres: cámbialo por uno largo y aleatorio siguiendo el orden de DESPLIEGUE_CPANEL.md (nota sobre las claves), para no perder el 2FA ni el SMTP guardados.');
+}
+if (!process.env.AUTH_ENCRYPTION_KEY) {
+  console.warn('⚠️  AUTH_ENCRYPTION_KEY no está definido: los secretos cifrados (2FA, SMTP, Google) usan una clave derivada de JWT_SECRET. No pongas una nueva sin leer DESPLIEGUE_CPANEL.md (nota sobre las claves).');
+}
 
 const authRoutes                        = require('./routes/auth.routes');
 const proyectosRoutes                   = require('./routes/proyectos.routes');
@@ -41,6 +52,12 @@ const PORT = process.env.PORT || 3000;
 // Confiar en el proxy (Vercel, Render, cPanel) para que express-rate-limit vea la IP real
 app.set('trust proxy', 1);
 
+// Parametros de la URL solo como texto (o lista si se repiten). El lector de
+// fabrica (qs) convierte `?estado[not]=x` en un objeto, y un objeto que llegue
+// a un `where` de Prisma es un operador colado (`not`, `contains`...). El
+// frontend arma las URLs con URLSearchParams, asi que no usa esa sintaxis.
+app.set('query parser', 'simple');
+
 // Middlewares globales
 app.use(helmet({
   contentSecurityPolicy: {
@@ -59,33 +76,36 @@ app.use(helmet({
   },
 })); // Seguridad de headers
 
-// CORS con lista blanca. Si FRONTEND_URL no esta definido se mantiene el
-// comportamiento anterior (cualquier origen) y se avisa por consola.
+// CORS con lista blanca, siempre. Sin FRONTEND_URL solo valen los origenes de
+// desarrollo (antes se aceptaba cualquiera, y con la cookie de sesion eso ya
+// no es aceptable).
+// Los de desarrollo solo si el frontend no es https (en produccion sobran).
+const enProduccionHttps = /^https:/i.test(process.env.FRONTEND_URL || '');
 const origenesPermitidos = [
   process.env.FRONTEND_URL,
-  'http://localhost:5173',
-  'http://localhost:3000',
-  // Vite puede servir en 127.0.0.1 (--host 127.0.0.1): para el navegador es
-  // otro origen distinto de localhost.
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:3000',
+  ...(enProduccionHttps ? [] : [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    // Vite puede servir en 127.0.0.1 (--host 127.0.0.1): para el navegador es
+    // otro origen distinto de localhost.
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+  ]),
 ].filter(Boolean).map((origen) => origen.replace(/\/+$/, ''));
 
 if (!process.env.FRONTEND_URL) {
-  console.warn('⚠️  FRONTEND_URL no está definido: CORS acepta cualquier origen. Defínelo en producción.');
+  console.warn('⚠️  FRONTEND_URL no está definido: CORS solo acepta localhost. Defínelo en producción.');
 }
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL
-    ? (origin, callback) => {
-        // Peticiones sin cabecera Origin (curl, health checks, mismo origen) pasan.
-        if (!origin || origenesPermitidos.includes(origin)) return callback(null, true);
-        const error = new Error('Origen no permitido por CORS');
-        error.esErrorCliente = true;
-        error.statusCode = 403;
-        return callback(error);
-      }
-    : true,
+  origin: (origin, callback) => {
+    // Peticiones sin cabecera Origin (curl, health checks, mismo origen) pasan.
+    if (!origin || origenesPermitidos.includes(origin)) return callback(null, true);
+    const error = new Error('Origen no permitido por CORS');
+    error.esErrorCliente = true;
+    error.statusCode = 403;
+    return callback(error);
+  },
   credentials: true,
   // Para que el navegador pueda leer el nombre de archivo en las descargas
   // (`descargarArchivo` del frontend lee Content-Disposition).
@@ -95,6 +115,9 @@ app.use(cors({
 // Cuerpo JSON. 1 MB porque la confirmacion de importaciones grandes supera
 // los 100 KB que trae express por defecto.
 app.use(express.json({ limit: '1mb' }));
+
+// Techo general de peticiones (middlewares/rateLimit.middleware.js).
+app.use('/api', require('./middlewares/rateLimit.middleware').limiteGeneral);
 
 // Rutas
 app.use('/api/auth',                        authRoutes);
@@ -177,10 +200,29 @@ app.use((err, _req, res, _next) => {
 // proyecto tiene desactivadas las variables de sistema, por la de AWS Lambda
 // (donde corren las funciones de Vercel). En cualquier otro sitio (local,
 // Render, cPanel) hay que escuchar, tambien en produccion.
+// Si JWT_SECRET o AUTH_ENCRYPTION_KEY cambiaron sin seguir el orden de
+// DESPLIEGUE_CPANEL.md, los secretos guardados ya no se descifran: el 2FA de
+// todos dice "código incorrecto" sin mas pista. Se comprueba uno al arrancar.
+const comprobarClaveCifrado = async () => {
+  let secreto;
+  try {
+    secreto = (await require('./lib/prisma').usuario.findFirst({ where: { dosFactoresSecreto: { not: null } }, select: { dosFactoresSecreto: true } }))?.dosFactoresSecreto;
+  } catch (_e) {
+    return; // sin base todavia: ya lo dira la primera peticion
+  }
+  if (!secreto) return;
+  try {
+    require('./utils/cifrado.utils').descifrar(secreto);
+  } catch (_e) {
+    console.error('❌ La clave de cifrado no coincide con la de los secretos guardados (2FA, SMTP, Google). Vuelve a poner el JWT_SECRET / AUTH_ENCRYPTION_KEY anteriores (ver la nota sobre las claves en DESPLIEGUE_CPANEL.md).');
+  }
+};
+
 const enServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 if (!enServerless) {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Servidor CRM corriendo en el puerto ${PORT}`);
+    comprobarClaveCifrado();
     // Recordatorios de eventos y resumen diario por correo (cada minuto).
     require('./services/avisosCorreo.service').iniciarAvisosProgramados();
     // Respaldo diario de la base en Google Drive (si esta conectado).

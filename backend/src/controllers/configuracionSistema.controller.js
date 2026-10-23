@@ -302,6 +302,7 @@ const verificarCorreo = async (req, res) => {
       ETIMEDOUT: 'El servidor no respondió a tiempo: revisa el puerto o el firewall.',
       ESOCKET: 'Falló la conexión segura: prueba otro tipo de seguridad (SSL en 465, STARTTLS en 587).',
       EDNS: 'No existe ese servidor: revisa el nombre.',
+      ESINPASSWORD: 'Cambiaste el servidor o el usuario: escribe la contraseña para probarlo.',
     }[codigo] || 'No se pudo verificar el servidor de correo.';
     return res.status(502).json({ error: explicacion, detalle: escapeHtml(String(error?.message || '')).slice(0, 200) });
   }

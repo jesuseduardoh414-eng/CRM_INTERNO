@@ -119,11 +119,26 @@ const transporteActual = (c) => {
 };
 
 /**
+ * ¿Mismo servidor y usuario que la contraseña guardada? Si cambian, la
+ * guardada no se usa: si no, bastaria poner otro servidor para que el CRM le
+ * entregara la contraseña al iniciar sesion.
+ */
+const mismaCuentaSmtp = (datos) => {
+  const actual = configEnCache().correo || {};
+  const igual = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+  return igual(datos.host ?? actual.host, actual.host) && igual(datos.usuario ?? actual.usuario, actual.usuario);
+};
+
+/**
  * Prueba la conexion y el inicio de sesion con unos datos (los del panel,
- * aunque aun no esten guardados). Sin password usa la guardada.
+ * aunque aun no esten guardados). Sin password usa la guardada, si es del
+ * mismo servidor y usuario.
  */
 const verificarSmtp = async (datos) => {
   const guardada = configEnCache().correo?.passwordCifrada;
+  if (!datos.password && guardada && datos.usuario && !mismaCuentaSmtp(datos)) {
+    throw Object.assign(new Error('Cambiaste el servidor o el usuario: escribe la contraseña'), { code: 'ESINPASSWORD' });
+  }
   const password = datos.password || (guardada ? descifrar(guardada) : '');
   const transporte = crearTransporte({ ...datos, password });
   try {
@@ -417,6 +432,7 @@ module.exports = {
   enviarPlantillaSinBloquear,
   proveedorCorreo,
   resumenCorreo,
+  mismaCuentaSmtp,
   verificarSmtp,
   enviarCorreoPrueba,
   sendEmailViaAPI,

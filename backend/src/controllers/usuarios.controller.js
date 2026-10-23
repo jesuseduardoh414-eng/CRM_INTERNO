@@ -445,6 +445,8 @@ const actualizarPerfil = async (req, res) => {
     const data = {
       nombre: String(nombre).trim(),
       email: emailNormalizado,
+      // Un enlace de recuperacion enviado al correo anterior deja de valer.
+      ...(cambiaEmail && { resetToken: null, resetTokenExpires: null }),
     };
     if (telefono !== undefined) data.telefono = String(telefono).trim() || null;
     if (puesto !== undefined) data.puesto = String(puesto).trim() || null;
@@ -592,6 +594,14 @@ const editar = async (req, res) => {
     const vieneArea = area !== undefined && area !== null && area !== '' && !(Array.isArray(area) && !area.length);
     const areaNormalizada = vieneArea ? validarAreas(area) : undefined;
     const cambiaPassword = typeof password === 'string' && password.trim() !== '';
+    const cambiaEmail = email !== undefined && String(email).toLowerCase().trim() !== objetivo.email.toLowerCase();
+
+    // El correo y la contraseña propios se cambian desde el perfil, que pide
+    // la contraseña actual: si no, una sesion robada bastaria para quedarse
+    // con la cuenta.
+    if (id === req.usuario.id && (cambiaEmail || cambiaPassword)) {
+      return res.status(400).json({ error: 'Tu correo y tu contraseña se cambian desde tu perfil, donde se pide la contraseña actual' });
+    }
 
     if (rolNormalizado !== undefined && !esRolValido(rolNormalizado)) {
       return res.status(400).json({ error: 'Rol no válido' });
@@ -615,6 +625,11 @@ const editar = async (req, res) => {
       }
       if (cambiaPassword) {
         return res.status(403).json({ error: 'Solo el administrador global puede cambiar contraseñas' });
+      }
+      // Con el correo cambiado, "olvide mi contraseña" mandaria el enlace a
+      // quien edito: seria entrar como la otra persona.
+      if (cambiaEmail) {
+        return res.status(403).json({ error: 'Solo el administrador global puede cambiar el correo de acceso de otra persona' });
       }
     }
 
@@ -662,6 +677,9 @@ const editar = async (req, res) => {
           select: { id: true },
         });
         if (duplicado) return res.status(409).json({ error: 'Ese correo ya está en uso' });
+        // Un enlace de recuperacion enviado al correo anterior deja de valer.
+        data.resetToken = null;
+        data.resetTokenExpires = null;
       }
       data.email = emailNormalizado;
     }
@@ -694,6 +712,18 @@ const editar = async (req, res) => {
     // cambió su correo de acceso o su contraseña. Si el admin se edita a sí
     // mismo, el texto no dice "un administrador".
     const porAdmin = id !== req.usuario.id;
+    const cambiosCuenta = [
+      usuario.rol !== objetivo.rol && `rol ${objetivo.rol} → ${usuario.rol}`,
+      usuario.area !== objetivo.area && `áreas ${objetivo.area} → ${usuario.area}`,
+    ].filter(Boolean);
+    if (cambiosCuenta.length) {
+      await registrarEvento(req, {
+        usuarioId: id,
+        email: usuario.email,
+        tipo: TIPOS.CUENTA_EDITADA,
+        detalle: `Por ${req.usuario.email}: ${cambiosCuenta.join('; ')}`,
+      });
+    }
     const cambioEmail = usuario.email !== objetivo.email.toLowerCase();
     if (cambioEmail) {
       await registrarEvento(req, {
@@ -764,6 +794,7 @@ const eliminar = async (req, res) => {
 
     if (objetivo.estado !== 'inactivo') {
       await prisma.usuario.update({ where: { id }, data: { estado: 'inactivo' } });
+      await registrarEvento(req, { usuarioId: id, tipo: TIPOS.CUENTA_DESACTIVADA, detalle: `Por ${req.usuario.email}` });
     }
     await revocarTodas(id);
 
@@ -817,6 +848,14 @@ const toggleEstado = async (req, res) => {
     });
 
     if (estado === 'inactivo') await revocarTodas(id);
+    if (estado !== objetivo.estado) {
+      await registrarEvento(req, {
+        usuarioId: id,
+        email: objetivo.email,
+        tipo: estado === 'activo' ? TIPOS.CUENTA_ACTIVADA : TIPOS.CUENTA_DESACTIVADA,
+        detalle: `Por ${req.usuario.email}`,
+      });
+    }
     const eraRegistroPendiente = ['pendiente', 'pendiente_verificacion'].includes(objetivo.estado);
     if (estado === 'activo' && eraRegistroPendiente) {
       enviarCuentaAprobada({ email: objetivo.email, nombre: objetivo.nombre });
@@ -918,6 +957,12 @@ const guardarPermisos = async (req, res) => {
       where: { id: objetivo.id },
       data: { permisos: ajustes, permisosFinanzas: Prisma.DbNull },
       select: SELECT_PERMISOS,
+    });
+    const claves = Object.entries(ajustes).map(([clave, valor]) => `${clave}=${valor}`);
+    await registrarEvento(req, {
+      usuarioId: objetivo.id,
+      tipo: TIPOS.PERMISOS_CAMBIADOS,
+      detalle: `Por ${req.usuario.email}: ${claves.length ? claves.join(', ') : 'como su área'}`,
     });
     limpiarCacheUsuarios();
     invalidarCacheUsuario(objetivo.id);

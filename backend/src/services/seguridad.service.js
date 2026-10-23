@@ -30,6 +30,12 @@ const TIPOS = Object.freeze({
   EMAIL_VERIFICADO: 'email_verificado',
   INVITACION_ACEPTADA: 'invitacion_aceptada',
   ACCION_CONFIGURADOR: 'accion_configurador',
+  // Cambios que otra persona hace en la cuenta (Usuarios): quedan en la
+  // bitacora de la afectada con quien lo hizo.
+  CUENTA_EDITADA: 'cuenta_editada',
+  PERMISOS_CAMBIADOS: 'permisos_cambiados',
+  CUENTA_DESACTIVADA: 'cuenta_desactivada',
+  CUENTA_ACTIVADA: 'cuenta_activada',
 });
 
 const registrarEvento = async (req, { usuarioId = null, email = null, tipo, detalle = null }) => {

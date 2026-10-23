@@ -12,10 +12,13 @@
  *
  * Genera una contraseña aleatoria fuerte y la muestra UNA sola vez. Si pasas
  * --password "..." se usa esa (debe cumplir la politica de contraseñas).
+ * --restablecer tambien quita la verificacion en dos pasos (telefono perdido);
+ * al entrar, el CRM pide activarla de nuevo.
  */
 require('dotenv').config();
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
+const { Prisma } = require('@prisma/client');
 const prisma = require('../src/lib/prisma');
 const { validarPassword, esEmailValido } = require('../src/utils/security.utils');
 const { revocarTodas } = require('../src/services/sesiones.service');
@@ -75,8 +78,12 @@ const generarPassword = () => {
     intentosFallidos: 0,
     bloqueadoHasta: null,
   };
+  // Restablecer tambien quita la verificacion en dos pasos: es obligatoria
+  // para esta cuenta y, si se perdio el telefono, no habria otra forma de
+  // entrar. Al iniciar sesion el CRM pide activarla de nuevo.
+  const sin2fa = { dosFactoresActivo: false, dosFactoresSecreto: null, dosFactoresPendiente: null, dosFactoresUltimoPaso: null, codigosRespaldo: Prisma.DbNull };
   const usuario = existente
-    ? await prisma.usuario.update({ where: { id: existente.id }, data: datos })
+    ? await prisma.usuario.update({ where: { id: existente.id }, data: { ...datos, ...sin2fa } })
     : await prisma.usuario.create({ data: { ...datos, email, area: 'ADMINISTRACION' } });
   if (existente) await revocarTodas(usuario.id);
 

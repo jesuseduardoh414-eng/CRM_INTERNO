@@ -39,6 +39,14 @@ Options -Indexes -MultiViews
   Header always set X-Content-Type-Options "nosniff"
   Header always set Referrer-Policy "strict-origin-when-cross-origin"
   Header always set X-Frame-Options "SAMEORIGIN"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+  # Solo corre el JavaScript del propio CRM (y el de Google para conectar
+  # Calendar o Drive): si alguien lograra colar un <script> en una pagina, el
+  # navegador no lo ejecuta. El marcador de script-src lo cambia el build por
+  # los hashes de los scripts en linea de index.html (vite.config.js).
+  Header always set Content-Security-Policy "default-src 'self'; script-src 'self' __CSP_SCRIPTS__ https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://accounts.google.com/gsi/; frame-src 'self' blob: https://accounts.google.com/gsi/; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'"
 
   # index.html se revisa siempre para que una version nueva se vea al momento.
   <Files "index.html">

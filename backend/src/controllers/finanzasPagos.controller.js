@@ -239,6 +239,12 @@ const crear = async (req, res) => {
   }
 };
 
+// Quien edita ventas sin poder verlas no recibe el pago de vuelta: con
+// "editar" sobre ids ajenos se podia leer cualquiera.
+const respuestaPago = (usuario, pago) => (F.puedeVer(usuario, 'ventas')
+  ? { pago: serializar(pago) }
+  : { pago: { id: pago.id, folio: pago.folio } });
+
 // ---------------------------------------------------------------------------
 // PUT /api/finanzas/pagos/:id
 // ---------------------------------------------------------------------------
@@ -260,7 +266,7 @@ const editar = async (req, res) => {
 
     const pago = await prisma.pago.update({ where: { id }, data, include: incluirDetalle });
     F.registrarFinanzas(req.usuario, 'pago', id, 'EDITAR', `Editó el pago ${pago.folio} (${Object.keys(data).join(', ')})`);
-    return res.json({ mensaje: 'Pago actualizado', pago: serializar(pago) });
+    return res.json({ mensaje: 'Pago actualizado', ...respuestaPago(req.usuario, pago) });
   } catch (error) {
     console.error('[finanzas.pagos.editar]', error);
     return res.status(500).json({ error: 'Error al actualizar el pago' });
@@ -281,7 +287,7 @@ const anular = async (req, res) => {
     const motivo = F.textoOpcional(req.body?.motivo, 255);
     const pago = await prisma.pago.update({ where: { id }, data: { estado: 'ANULADO', motivoAnulacion: motivo }, include: incluirDetalle });
     F.registrarFinanzas(req.usuario, 'pago', id, 'ANULAR', `Anuló el pago ${pago.folio}${motivo ? `: ${motivo}` : ''}`);
-    return res.json({ mensaje: `Pago ${pago.folio} anulado`, pago: serializar(pago) });
+    return res.json({ mensaje: `Pago ${pago.folio} anulado`, ...respuestaPago(req.usuario, pago) });
   } catch (error) {
     console.error('[finanzas.pagos.anular]', error);
     return res.status(500).json({ error: 'Error al anular el pago' });

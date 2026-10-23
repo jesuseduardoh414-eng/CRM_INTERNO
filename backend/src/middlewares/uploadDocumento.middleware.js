@@ -21,7 +21,7 @@ const fileFilter = (_req, file, cb) => {
  */
 const subidaDocumento = (limiteMB) => (campo) => (req, res, next) => multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: limiteMB(configEnCache()) * 1024 * 1024, files: 1, fields: 20 },
+  limits: { fileSize: Math.floor(limiteMB(configEnCache()) * 1024 * 1024), files: 1, fields: 20 },
   fileFilter,
 }).single(campo)(req, res, next);
 

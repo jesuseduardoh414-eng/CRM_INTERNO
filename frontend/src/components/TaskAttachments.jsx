@@ -120,13 +120,14 @@ const getFileIcon = (tipo = '', nombre = '') => {
 };
 
 /**
- * Descarga desde la URL publica del adjunto. Se pasa por un blob en memoria
- * para que el navegador respete el nombre original; si el navegador no deja
- * leerla (CORS), se abre en una pestaña nueva como respaldo.
+ * Descarga desde la URL del adjunto. Se pasa por un blob en memoria para que
+ * el navegador respete el nombre original; si el navegador no deja leerla
+ * (CORS), se abre en una pestaña nueva como respaldo. Lleva la cookie de
+ * archivos (crm_archivos): sin sesion el servidor ya no la entrega.
  */
 const descargarDesdeUrl = async (url, nombre) => {
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { credentials: 'include' });
     if (!res.ok) throw new Error('No se pudo descargar');
     const blob = await res.blob();
     const objectUrl = URL.createObjectURL(blob);

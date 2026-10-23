@@ -5,8 +5,9 @@
 // cancelarla y suspender o reactivar cuentas.
 //
 // Proyecto (/api/proyectos/:id/portal): la conversación con el cliente y los
-// documentos compartidos. Lo ve quien puede ver el proyecto; compartir o
-// dejar de compartir un archivo, solo un administrador del proyecto.
+// documentos compartidos. Lo ve quien puede ver el proyecto y tiene
+// "clientes.ver"; compartir o dejar de compartir un archivo, solo un
+// administrador del proyecto.
 const prisma = require('../lib/prisma');
 const { generarInvitacion } = require('./auth.controller');
 const correo = require('../services/email.service');
@@ -14,6 +15,7 @@ const { esEmailValido } = require('../utils/security.utils');
 const { revocarTodas } = require('../services/sesiones.service');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
 const { cargarProyectoVisible, puedeAdministrarProyecto } = require('../utils/permissions.utils');
+const { puede, sinPermiso } = require('../utils/permisosArea.utils');
 
 const REGEX_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_MENSAJE = 4000;
@@ -202,8 +204,18 @@ const selectMensaje = {
   autor: { select: { id: true, nombre: true, puesto: true, fotoPerfilUrl: true } },
 };
 
+// La pestaña "Cliente" (quien es el cliente, sus contactos y la conversacion)
+// es del directorio de clientes: solo para quien tiene "clientes.ver", como
+// el cliente en el resto del proyecto. Decision del usuario (2026-10-23).
+const sinClientes = (req, res) => {
+  if (puede(req.usuario, 'clientes.ver')) return false;
+  sinPermiso(res);
+  return true;
+};
+
 // GET /api/proyectos/:id/portal
 const verPortalProyecto = async (req, res) => {
+  if (sinClientes(req, res)) return undefined;
   try {
     const { proyecto, permitido } = await cargarProyectoVisible(prisma, req.usuario, req.params.id);
     if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
@@ -235,6 +247,7 @@ const verPortalProyecto = async (req, res) => {
 
 // POST /api/proyectos/:id/portal/mensajes   { contenido }
 const responderCliente = async (req, res) => {
+  if (sinClientes(req, res)) return undefined;
   const contenido = typeof req.body?.contenido === 'string' ? req.body.contenido.replace(/\r\n/g, '\n').trim() : '';
   if (!contenido) return res.status(400).json({ error: 'Escribe un mensaje' });
   if (contenido.length > MAX_MENSAJE) return res.status(400).json({ error: `El mensaje no puede pasar de ${MAX_MENSAJE} caracteres` });

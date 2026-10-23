@@ -6,6 +6,7 @@ const servicio = require('../services/configuracion.service');
 const { ARCHIVOS_MARCA, validarArchivoMarca } = require('../utils/configuracion.utils');
 const { catalogoPublico, defectos } = require('../utils/permisosArea.utils');
 const { cifrar } = require('../utils/cifrado.utils');
+const { mismaCuentaSmtp } = require('../services/email.service');
 
 /** URLs (relativas al backend) de las imagenes subidas, con version para la cache. */
 const urlsArchivos = (archivos) => Object.fromEntries(
@@ -64,6 +65,12 @@ const obtener = async (_req, res) => {
   }
 };
 
+// ¿Con estos cambios el CRM iniciaria sesion en algun servidor? (hay servidor y usuario)
+const envioConLogin = (correo) => {
+  const actual = servicio.configEnCache().correo || {};
+  return Boolean((correo.host === undefined ? actual.host : correo.host) && (correo.usuario === undefined ? actual.usuario : correo.usuario));
+};
+
 // PUT /api/configuracion  (parcial: solo las secciones que se manden)
 const guardar = async (req, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
@@ -80,6 +87,10 @@ const guardar = async (req, res) => {
         correo.passwordCifrada = cifrar(password);
       } else if (password === null) {
         correo.passwordCifrada = null;
+      } else if (servicio.configEnCache().correo?.passwordCifrada && envioConLogin(correo) && !mismaCuentaSmtp(correo)) {
+        // Conservar la contraseña con otro servidor o usuario se la mandaria
+        // a ese servidor en el siguiente envio.
+        return res.status(400).json({ error: 'Cambiaste el servidor o el usuario del correo: escribe también la contraseña' });
       }
       cambios.correo = correo;
     }

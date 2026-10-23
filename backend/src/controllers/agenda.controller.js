@@ -11,8 +11,8 @@ const {
 } = require('../services/google-calendar.service');
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
-const { cargarProyectoVisible } = require('../utils/permissions.utils');
-const { puede } = require('../utils/permisosArea.utils');
+const { cargarProyectoVisible, compartenArea } = require('../utils/permissions.utils');
+const { puede, alcanceDe, areasDelAlcance } = require('../utils/permisosArea.utils');
 const { borrarBlobs } = require('../utils/blob.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { categoriasVisibles } = require('../utils/finanzas.utils');
@@ -22,6 +22,8 @@ const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 // Tope de dias que se aceptan en un rango (listar, dias especiales). Sin esto
 // una peticion con un rango de anos recorria dia a dia y tumbaba la funcion.
 const MAX_DIAS_RANGO = 366;
+// Personas por consulta de disponibilidad (invitados de un evento).
+const MAX_USUARIOS_DISPONIBILIDAD = 100;
 // Hasta cuanto tiempo adelante se buscan eventos con alerta. Cada evento aplica
 // despues su propio `alertaMinutos`; esto solo acota la consulta.
 const VENTANA_RECORDATORIOS_MS = 7 * ONE_DAY_MS;
@@ -972,12 +974,17 @@ const consultarDisponibilidad = async (req, res) => {
   try {
     const ids = [...new Set(parsearEnteros(String(usuarios_ids).split(',')))];
     if (ids.length === 0) return res.status(400).json({ error: 'usuarios_ids invalido' });
+    if (ids.length > MAX_USUARIOS_DISPONIBILIDAD) {
+      return res.status(400).json({ error: `Consulta como máximo ${MAX_USUARIOS_DISPONIBILIDAD} personas a la vez` });
+    }
 
     const start = parsearFecha(inicio);
     const end = fin ? parsearFecha(fin) : (start ? new Date(start.getTime() + ONE_DAY_MS) : null);
     if (!start || !end || end <= start) {
       return res.status(400).json({ error: 'Rango de fechas invalido' });
     }
+    const errorRango = validarRango(start, end);
+    if (errorRango) return res.status(400).json({ error: errorRango });
 
     let excluirEventoId = null;
     if (excluir_id) {
@@ -1119,11 +1126,19 @@ const consultarDisponibilidad = async (req, res) => {
       }))),
     ];
 
-    // Privacidad: de los demas solo se devuelve el bloque ocupado, sin titulo
-    // (salvo a quien ve la agenda del equipo)
-    const solicitanteEsAdmin = puede(req.usuario, 'agenda.equipo');
+    // Privacidad: de los demas solo se devuelve el bloque ocupado, sin titulo,
+    // salvo a quien ve la agenda del equipo, y solo de las personas a las que
+    // llega su alcance (como la agenda del equipo: todos o sus areas).
+    const alcanceEquipo = alcanceDe(req.usuario, 'agenda.equipo');
+    const conDetalle = new Set([req.usuario.id]);
+    if (alcanceEquipo === 'todos') ids.forEach((id) => conDetalle.add(id));
+    else if (alcanceEquipo === 'area') {
+      const areas = areasDelAlcance(req.usuario, 'agenda.equipo');
+      const personas = await prisma.usuario.findMany({ where: { id: { in: ids } }, select: { id: true, area: true } });
+      personas.filter((p) => compartenArea(p.area, areas)).forEach((p) => conDetalle.add(p.id));
+    }
     const ocultarDetalle = (conflicto) => (
-      solicitanteEsAdmin || conflicto.usuarioId === req.usuario.id
+      conDetalle.has(conflicto.usuarioId)
         ? conflicto
         : {
           id: conflicto.id,

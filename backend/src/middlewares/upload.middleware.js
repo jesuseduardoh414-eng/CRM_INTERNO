@@ -71,7 +71,8 @@ const fileFilter = (req, file, cb) => {
 
 const crear = () => multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: configEnCache().subidas.adjuntosMaxMB * 1024 * 1024 },
+  // files/fields: tope de lo que se lee de una peticion (antes sin limite).
+  limits: { fileSize: Math.floor(configEnCache().subidas.adjuntosMaxMB * 1024 * 1024), files: 20, fields: 100 },
   fileFilter,
 });
 

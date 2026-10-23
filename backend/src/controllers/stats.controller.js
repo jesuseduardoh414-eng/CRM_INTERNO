@@ -4,7 +4,7 @@ const prisma = require('../lib/prisma');
 const { esPostgres } = require('../lib/baseDatos');
 const { sortTareas } = require('../utils/sort.utils');
 const { buildScopeProyectoParaAdmin, buildFiltroAreaProyecto, esAdminGlobal } = require('../utils/permissions.utils');
-const { areasDe, areasDeTexto } = require('../utils/permisosArea.utils');
+const { areasDe, areasDeTexto, puede } = require('../utils/permisosArea.utils');
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { rangoDiaMexico, rangoSemanaMexico, claveDiaMexico, zonaHoraria } = require('../utils/fechas.utils');
 const { configEnCache } = require('../services/configuracion.service');
@@ -223,7 +223,9 @@ const getActividadMiembros = async (usuario, fecha = null) => {
         miembros: { select: { id: true } },
       },
     }),
-    prisma.evento.findMany({
+    // Los eventos de agenda (con su titulo) solo para quien ve la agenda del
+    // equipo: "reportes.ver" sin "agenda.equipo" no los recibe.
+    !puede(usuario, 'agenda.equipo') ? [] : prisma.evento.findMany({
       where: {
         AND: [
           {

@@ -288,12 +288,14 @@ export const SeccionAccesos = ({ seguridad, cambiar }) => {
       <Cuentas tipo="administradores" />
       <Cuentas tipo="configuradores" />
       <Fila titulo={t('secRules2fa')} descripcion={t('secRules2faHint')}>
+        {/* Administradores y configuración la necesitan siempre (servidor:
+            politicas.utils.js); aquí solo se elige si también el equipo. Un
+            "ninguno" guardado de antes vale lo mismo que "admins". */}
         <OpcionesTarjeta
           nombre={t('secRules2fa')}
-          valor={seguridad.dosFactores}
+          valor={seguridad.dosFactores === 'todos' ? 'todos' : 'admins'}
           onChange={set('dosFactores')}
           opciones={[
-            { valor: 'ninguno', titulo: t('secRules2faNone'), texto: t('secRules2faNoneText'), icono: ShieldOff },
             { valor: 'admins', titulo: t('secRules2faAdmins'), texto: t('secRules2faAdminsText'), icono: ShieldCheck },
             { valor: 'todos', titulo: t('secRules2faAll'), texto: t('secRules2faAllText'), icono: Users },
           ]}

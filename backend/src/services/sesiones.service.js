@@ -64,6 +64,90 @@ const verificarAccess = (token) => {
 
 const nuevoRefresh = () => crypto.randomBytes(32).toString('base64url');
 
+// El refresh token viaja en una cookie httpOnly: el JavaScript de la pagina
+// no puede leerlo, asi que un script inyectado no se lleva una sesion de
+// semanas (solo el access token de 15 min). Solo se manda a /api/auth y nunca
+// desde otro sitio (SameSite=Strict). En produccion el frontend y la API
+// comparten dominio; en desarrollo (5173 -> 3000) son el mismo "sitio".
+const COOKIE_REFRESH = 'crm_refresh';
+const RUTA_COOKIE = '/api/auth';
+
+const opcionesCookie = (req) => ({
+  httpOnly: true,
+  sameSite: 'strict',
+  secure: Boolean(req.secure) || /^https:/i.test(process.env.FRONTEND_URL || ''),
+  path: RUTA_COOKIE,
+});
+
+const ponerCookieRefresh = (req, res, refreshToken, expiraEn) => {
+  res.cookie(COOKIE_REFRESH, refreshToken, { ...opcionesCookie(req), expires: new Date(expiraEn) });
+};
+
+const borrarCookieRefresh = (req, res) => res.clearCookie(COOKIE_REFRESH, opcionesCookie(req));
+
+const leerCookie = (req, buscada) => {
+  for (const cookie of String(req.headers?.cookie || '').split(';')) {
+    const [nombre, ...resto] = cookie.trim().split('=');
+    if (nombre === buscada && resto.length) {
+      try {
+        return decodeURIComponent(resto.join('='));
+      } catch (_e) {
+        return null;
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * Refresh token de la peticion: el de la cookie y, si no hay, el del cuerpo
+ * (pestañas abiertas antes de pasar a cookie, que lo guardaban en el navegador).
+ */
+const refreshDePeticion = (req) => leerCookie(req, COOKIE_REFRESH)
+  ?? (typeof req.body?.refreshToken === 'string' ? req.body.refreshToken : null);
+
+// Adjuntos y fotos se abren con <img>, <iframe> y enlaces, que no pueden mandar
+// el token: llevan esta otra cookie httpOnly, solo para /api/archivos. Dura lo
+// que la sesion, y en cada archivo el servidor comprueba que la sesion siga
+// abierta y que la persona pueda ver ese archivo.
+const COOKIE_ARCHIVOS = 'crm_archivos';
+const RUTA_ARCHIVOS = '/api/archivos';
+const AUDIENCIA_ARCHIVOS = 'omnis-crm-archivos';
+
+const ponerCookieArchivos = (req, res, { usuarioId, sesionId, expiraEn }) => {
+  if (!usuarioId || !sesionId || !expiraEn) return;
+  const segundos = Math.max(Math.floor((new Date(expiraEn).getTime() - Date.now()) / 1000), 60);
+  const valor = jwt.sign(
+    { sid: sesionId, typ: 'archivos' },
+    process.env.JWT_SECRET,
+    { algorithm: 'HS256', expiresIn: segundos, issuer: EMISOR, audience: AUDIENCIA_ARCHIVOS, subject: String(usuarioId) },
+  );
+  res.cookie(COOKIE_ARCHIVOS, valor, { ...opcionesCookie(req), path: RUTA_ARCHIVOS, expires: new Date(expiraEn) });
+};
+
+const borrarCookieArchivos = (req, res) => res.clearCookie(COOKIE_ARCHIVOS, { ...opcionesCookie(req), path: RUTA_ARCHIVOS });
+
+/**
+ * `{ usuarioId, sesionId }` de la cookie de archivos o, si no hay, del access
+ * token de Authorization (descargas con fetch). null si no hay o no vale.
+ */
+const sesionDeArchivos = (req) => {
+  const cookie = leerCookie(req, COOKIE_ARCHIVOS);
+  if (cookie) {
+    try {
+      const payload = jwt.verify(cookie, process.env.JWT_SECRET, { algorithms: ['HS256'], issuer: EMISOR, audience: AUDIENCIA_ARCHIVOS });
+      if (payload.typ === 'archivos' && payload.sid) return { usuarioId: Number(payload.sub), sesionId: String(payload.sid) };
+    } catch (_e) { /* se prueba con el token */ }
+  }
+  const [esquema, token] = String(req.headers?.authorization || '').split(' ');
+  if (token && /^Bearer$/i.test(esquema)) {
+    try {
+      return verificarAccess(token);
+    } catch (_e) { /* sin sesion */ }
+  }
+  return null;
+};
+
 /** Respuesta comun de login/refresh para el frontend. */
 const paqueteTokens = ({ accessToken, refreshToken, sesion }) => ({
   token: accessToken,
@@ -180,7 +264,10 @@ const rotarSesion = async (refreshToken, req) => {
 
 const revocarPorRefresh = async (refreshToken) => {
   if (!refreshToken || typeof refreshToken !== 'string') return null;
-  const sesion = await prisma.sesion.findUnique({ where: { refreshHash: sha256(refreshToken) }, select: { id: true } });
+  // Tambien con el anterior: si otra pestaña acaba de rotarlo, salir con el
+  // viejo no debe dejar la sesion abierta.
+  const hash = sha256(refreshToken);
+  const sesion = await prisma.sesion.findFirst({ where: { OR: [{ refreshHash: hash }, { refreshHashAnterior: hash }] }, select: { id: true } });
   if (!sesion) return null;
   await prisma.sesion.update({ where: { id: sesion.id }, data: { revocadaEn: new Date() } });
   return sesion.id;
@@ -218,6 +305,12 @@ module.exports = {
   ACCESS_TTL_S,
   ErrorSesion,
   datosCliente,
+  ponerCookieRefresh,
+  borrarCookieRefresh,
+  refreshDePeticion,
+  ponerCookieArchivos,
+  borrarCookieArchivos,
+  sesionDeArchivos,
   verificarAccess,
   crearSesion,
   rotarSesion,

@@ -9,9 +9,9 @@
  * escribir en cualquier carpeta del servidor.
  *
  * Los archivos se sirven por GET /api/archivos/:carpeta/:nombre con un nombre
- * aleatorio (uuid) imposible de adivinar, igual que hacia Vercel Blob: el
- * frontend los muestra con <img>/<iframe>, que no pueden mandar el token.
- * Nunca se usa el nombre que manda el cliente para construir rutas.
+ * aleatorio (uuid) imposible de adivinar, y solo con sesion y permiso sobre el
+ * archivo (archivos.controller.js, cookie crm_archivos). Nunca se usa el
+ * nombre que manda el cliente para construir rutas.
  *
  * Con Google Drive conectado, los adjuntos van a Drive (almacenHibrido); las
  * fotos de perfil se quedan siempre en el disco (pesan poco y se cargan a
@@ -19,8 +19,8 @@
  *
  * Los adjuntos de proyectos y tareas que viven en sus carpetas de Drive
  * (driveProyectos.service.js) usan /api/archivos/drive/<id del archivo en
- * Drive>: el id de Drive es tan imposible de adivinar como un uuid, y asi se
- * leen y se borran sin buscar nada en la base.
+ * Drive>: el id de Drive es tan imposible de adivinar como un uuid. Al leer
+ * se comprueba que el id sea de un adjunto (adjuntos.drive_archivo_id).
  */
 const fs = require('fs/promises');
 const path = require('path');
@@ -148,6 +148,12 @@ const borrar = async (urls) => {
 const leer = async (carpeta, nombre) => {
   if (carpeta === 'drive') {
     if (!ID_DRIVE.test(String(nombre || '')) || !(await drive().activo())) return null;
+    // Solo adjuntos del CRM. La cuenta conectada llega a todo su Drive: sin
+    // esto, con el id de cualquier archivo (respaldos de la base, documentos
+    // compartidos con la empresa) se bajaba por esta ruta sin iniciar sesion.
+    // eslint-disable-next-line global-require
+    const esAdjunto = await require('../lib/prisma').adjunto.findFirst({ where: { driveArchivoId: nombre }, select: { id: true } });
+    if (!esAdjunto) return null;
     const archivo = await drive().bajarPorId(nombre);
     if (!archivo) return null;
     return {

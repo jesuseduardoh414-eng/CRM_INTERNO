@@ -397,13 +397,22 @@ const listar = async (req, res) => {
   }
 };
 
+// Areas cuyas plantillas puede ver y usar (filtro sobre `area`, que
+// PlantillaProyecto tambien tiene). null = todas, para quien ve todos los
+// proyectos. Una plantilla lleva los titulos y descripciones de las tareas
+// del proyecto de origen: antes "propios" veia las de todas las areas.
+const areasDePlantillas = (usuario) => {
+  const alcance = alcanceDe(usuario, 'proyectos.ver');
+  if (esAdminGlobal(usuario) || alcance === 'todos') return null;
+  return alcance === 'area' ? areasDelAlcance(usuario, 'proyectos.ver') : areasDe(usuario);
+};
+
 // GET /api/proyectos/plantillas
-// Quien ve los proyectos "de su area" ve las plantillas de su area (filtro
-// sobre `area`, que PlantillaProyecto tambien tiene); el resto, todas.
 const listarPlantillas = async (req, res) => {
   try {
+    const areas = areasDePlantillas(req.usuario);
     const plantillas = await prisma.plantillaProyecto.findMany({
-      where: alcanceDe(req.usuario, 'proyectos.ver') === 'area' ? buildFiltroAreaProyecto(areasDelAlcance(req.usuario, 'proyectos.ver')) : undefined,
+      where: areas ? buildFiltroAreaProyecto(areas) : undefined,
       orderBy: [{ creadoEn: 'desc' }],
       include: INCLUDE_PLANTILLA,
     });
@@ -433,11 +442,16 @@ const guardarComoPlantilla = async (req, res) => {
   if (!nombre) return res.status(400).json({ error: 'El nombre de la plantilla es requerido' });
 
   try {
+    // Con "tareas.ver" = propios la plantilla solo copia las tareas que la
+    // persona ve en el proyecto, igual que la lista de tareas.
+    const veTodas = alcanceDe(req.usuario, 'tareas.ver') === 'todos';
     const proyecto = await prisma.proyecto.findUnique({
       where: { id: proyectoId },
       include: {
         miembros: { select: { id: true } },
         tareas: {
+          // eslint-disable-next-line global-require
+          ...(veTodas ? {} : { where: require('./tareas.controller').visibilidadTareasPara(req.usuario.id) }),
           select: {
             id: true,
             titulo: true,
@@ -619,7 +633,8 @@ const crear = async (req, res) => {
       return res.status(404).json({ error: 'La plantilla seleccionada no existe' });
     }
 
-    if (plantilla && alcanceDe(req.usuario, 'proyectos.ver') === 'area' && !proyectoCoincideConArea(plantilla.area, areasDelAlcance(req.usuario, 'proyectos.ver'))) {
+    const areasPlantilla = plantilla ? areasDePlantillas(req.usuario) : null;
+    if (areasPlantilla && !proyectoCoincideConArea(plantilla.area, areasPlantilla)) {
       return res.status(403).json({ error: 'No tienes permiso para usar plantillas de otra área' });
     }
 
@@ -743,7 +758,11 @@ const editar = async (req, res) => {
       throw new ErrorValidacion(`Área inválida: ${areasInvalidas.join(', ')}. Valores permitidos: ${validas.join(', ')}`);
     }
     const cambiaArea = areas.join(',') !== areasActuales.join(',');
-    if (cambiaArea && !esAdminGlobal(req.usuario) && !areas.every((item) => areasDe(req.usuario).includes(item))) {
+    // Tanto las areas que se ponen como las que se quitan tienen que ser
+    // suyas: antes se miraban solo las nuevas, y quien llegaba al proyecto
+    // por ser miembro podia sacarlo de un area ajena.
+    const tocadas = [...areas.filter((a) => !areasActuales.includes(a)), ...areasActuales.filter((a) => !areas.includes(a))];
+    if (cambiaArea && !esAdminGlobal(req.usuario) && !tocadas.every((item) => areasDe(req.usuario).includes(item))) {
       throw new ErrorValidacion('Solo puedes mover el proyecto dentro de tus áreas', 403);
     }
 
@@ -785,6 +804,11 @@ const editar = async (req, res) => {
     });
     // Su carpeta de Google Drive lleva el mismo nombre (sin esperar a Drive).
     if (proyecto.nombre !== existente.nombre) void driveProyectos.renombrarCarpeta(proyecto.driveCarpetaId, proyecto.nombre);
+    // Con otro cliente, los documentos compartidos con el anterior dejan de
+    // verse en el portal: el nuevo los veria todos.
+    if (clienteNuevo !== undefined && clienteNuevo !== existente.clienteId) {
+      await prisma.adjunto.updateMany({ where: { proyectoId: id, visibleCliente: true }, data: { visibleCliente: false } });
+    }
 
     // Aviso por correo solo a quien se acaba de agregar al equipo.
     if (dataUpdate.miembros) {

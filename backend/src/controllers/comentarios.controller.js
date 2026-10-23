@@ -1,31 +1,10 @@
 const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
 const { configEnCache } = require('../services/configuracion.service');
-const { puedeAdministrarProyecto, puedeVerProyecto, cargarProyectoVisible } = require('../utils/permissions.utils');
+const { puedeAdministrarProyecto, cargarProyectoVisible, cargarTareaVisible: cargarTarea } = require('../utils/permissions.utils');
 
-const selectProyectoVisible = { id: true, nombre: true, area: true, creadorId: true, miembros: { select: { id: true } } };
-
-// Carga una tarea con lo minimo de su proyecto que necesita `puedeVerProyecto`
-// y aplica la regla unica de lectura. Devuelve { tarea, permitido }.
-// (Mismo helper en adjuntos.controller; candidato a permissions.utils.)
-const cargarTareaVisible = async (usuario, tareaId) => {
-  const id = Number(tareaId);
-  if (!Number.isInteger(id)) return { tarea: null, permitido: false };
-  const tarea = await prisma.tarea.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      titulo: true,
-      proyectoId: true,
-      asignadoId: true,
-      creadorId: true,
-      asignados: { select: { id: true } },
-      proyecto: { select: selectProyectoVisible },
-    },
-  });
-  if (!tarea) return { tarea: null, permitido: false };
-  return { tarea, permitido: await puedeVerProyecto(prisma, usuario, tarea.proyecto) };
-};
+// Regla unica de lectura de una tarea (permissions.utils). Devuelve { tarea, permitido }.
+const cargarTareaVisible = (usuario, tareaId) => cargarTarea(prisma, usuario, tareaId);
 
 const listar = async (req, res) => {
   const { id: parentId } = req.params;

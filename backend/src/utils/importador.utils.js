@@ -559,14 +559,35 @@ const parseJSONRows = (fileSource) => {
   }));
 };
 
+// Tope de lo que se lee de cada hoja. `sheet_to_json` recorre el rango entero
+// de la hoja aunque este vacio: un .xlsx de pocos KB con dos celdas en A1 y
+// XFD1048576 dejaba el servidor bloqueado horas. Muy por encima de lo que
+// admite una importacion (LIMITE_FILAS_IMPORTACION, unas 15 columnas).
+const MAX_FILAS_LEIDAS = 5000;
+const MAX_COLUMNAS_LEIDAS = 100;
+
+const recortarRangos = (workbook) => {
+  for (const nombre of workbook.SheetNames) {
+    const hoja = workbook.Sheets[nombre];
+    if (!hoja?.['!ref']) continue;
+    const rango = XLSX.utils.decode_range(hoja['!ref']);
+    rango.e.c = Math.min(rango.e.c, rango.s.c + MAX_COLUMNAS_LEIDAS - 1);
+    rango.e.r = Math.min(rango.e.r, rango.s.r + MAX_FILAS_LEIDAS - 1);
+    hoja['!ref'] = XLSX.utils.encode_range(rango);
+  }
+};
+
 const parseExcelRows = (fileSource) => {
   let workbook;
   try {
     // `cellDates: true`: las celdas con formato de fecha llegan como Date.
     // Sin esto llegan como numero de serie (45822) y `new Date(45822)` es 1970.
+    // `nodim`: el rango sale de las celdas reales, no del <dimension> que
+    // declara el archivo; `sheetRows` corta la lectura en MAX_FILAS_LEIDAS.
+    const opciones = { cellDates: true, nodim: true, sheetRows: MAX_FILAS_LEIDAS };
     workbook = Buffer.isBuffer(fileSource)
-      ? XLSX.read(fileSource, { type: 'buffer', cellDates: true })
-      : XLSX.readFile(fileSource, { cellDates: true });
+      ? XLSX.read(fileSource, { type: 'buffer', ...opciones })
+      : XLSX.readFile(fileSource, opciones);
   } catch {
     throw new ErrorImportacion('El archivo Excel no se pudo leer. Verifica que sea un .xlsx o .xls valido');
   }
@@ -574,6 +595,7 @@ const parseExcelRows = (fileSource) => {
   if (!workbook.SheetNames.length) {
     throw new ErrorImportacion('El archivo Excel no tiene ninguna hoja');
   }
+  recortarRangos(workbook);
 
   // Solo se importa la primera hoja. Si otra hoja trae datos se avisa en vez
   // de ignorarlos en silencio.

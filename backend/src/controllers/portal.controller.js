@@ -290,7 +290,7 @@ const mensajes = async (req, res) => {
 const avisarEquipo = async (proyectoBase, autor, empresa) => {
   try {
     const { normalizarAreas } = require('../utils/permissions.utils');
-    const { areasDe, AREA_GENERAL } = require('../utils/permisosArea.utils');
+    const { areasDe, AREA_GENERAL, puede } = require('../utils/permisosArea.utils');
     const areas = normalizarAreas(proyectoBase.area);
     const admins = await prisma.usuario.findMany({
       where: { rol: 'ADMIN', OR: [{ estado: 'activo' }, { estado: null }] },
@@ -304,10 +304,12 @@ const avisarEquipo = async (proyectoBase, autor, empresa) => {
     ]);
     destinatarios.delete(autor.id);
     if (!destinatarios.size) return;
-    const equipo = await prisma.usuario.findMany({
+    // Solo a quien puede abrir la conversacion (pestaña "Cliente": "clientes.ver").
+    const equipo = (await prisma.usuario.findMany({
       where: { id: { in: [...destinatarios] }, rol: { in: ['ADMIN', 'MIEMBRO'] }, OR: [{ estado: 'activo' }, { estado: null }] },
-      select: { id: true },
-    });
+      select: { id: true, rol: true, area: true, permisos: true, permisosFinanzas: true },
+    })).filter((u) => puede(u, 'clientes.ver'));
+    if (!equipo.length) return;
     const nombreEmpresa = empresa.nombreComercial || empresa.nombre;
     await prisma.notificacion.createMany({
       data: equipo.map(({ id }) => ({

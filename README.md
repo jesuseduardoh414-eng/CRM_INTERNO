@@ -252,6 +252,12 @@ se elimina el adjunto.
   Cotizaciones y base de conocimiento: PDF, imagenes y Office (Word, Excel,
   PowerPoint), tambien comprobados por contenido (`services/documentos.service.js`);
   usan el limite de comprobantes y el de adjuntos respectivamente.
+- Adjuntos y fotos se abren por `GET /api/archivos/:carpeta/:nombre` **solo con
+  sesion** (cookie httpOnly `crm_archivos`, o el token en las descargas con
+  fetch) y con permiso sobre el archivo: fotos, cualquier sesion; adjuntos,
+  quien ve la tarea, el proyecto o el evento, quien lo subio, o el cliente si se
+  le compartio (`controllers/archivos.controller.js`). Un enlace copiado fuera
+  del CRM no funciona; los adjuntos se revalidan en cada uso.
 
 ### Google Calendar (en los dos sentidos)
 
@@ -415,7 +421,12 @@ Migracion: `20261017120000_permisos_por_area` (MySQL y Postgres).
   configuracion; no ve proyectos ni datos de la empresa. La **primera** se crea
   por consola, desde `backend/`:
   `npm run crear-configurador -- --email config@empresa.com --nombre "Configuracion"`
-  (contrasena aleatoria que se muestra una vez; `--restablecer` le da otra).
+  (contrasena aleatoria que se muestra una vez; `--restablecer` le da otra y
+  le quita la verificacion en dos pasos, por si se perdio el telefono).
+- **Administradores y cuentas de configuracion necesitan siempre la
+  verificacion en dos pasos** (`utils/politicas.utils.js`, desde el
+  2026-10-23): sin ella solo pueden activarla. El panel solo decide si tambien
+  la necesitan los miembros.
 - Desde el panel (**Usuarios y seguridad**) el configurador invita por correo:
   - **Administradores**, eligiendo el area. Con el area Administracion es el
     **administrador general**.
@@ -436,3 +447,31 @@ Codigo: `backend/src/controllers/configuracionSistema.controller.js`
 aceptacion en `auth.controller.js` (`aceptarInvitacion`), plantilla de correo
 `invitacionConfiguracion`; panel en
 `frontend/src/components/configuracion/SeccionesSistema.jsx` (`Cuentas`).
+
+## Seguridad
+
+Auditoria del 2026-10-23 (detalle en `CONTEXTO_TRABAJO.md`, seccion 7). Donde
+vive cada defensa:
+
+- **Sesion:** access token de 15 min (Authorization) y refresh token rotatorio
+  en la cookie httpOnly `crm_refresh` (`Path=/api/auth`, `SameSite=Strict`);
+  el JavaScript no lo ve. En localStorage solo queda la marca `crm_refresh=cookie`.
+  Archivos con la cookie `crm_archivos`. Todo en `services/sesiones.service.js`.
+- **2FA** obligatoria para administradores y configuracion (ver arriba).
+- **Contrasenas** con bcrypt, bloqueo progresivo y comprobacion contra
+  filtraciones (HIBP); tokens de recuperacion, refresh e invitacion guardados
+  como SHA-256; 2FA, SMTP, Drive y Calendar cifrados con `AUTH_ENCRYPTION_KEY`
+  (ver la nota sobre las claves en `DESPLIEGUE_CPANEL.md` antes de cambiarla).
+- **Limites de peticiones** (`middlewares/rateLimit.middleware.js`): login,
+  2FA, recuperacion y un techo general de 2000 peticiones cada 5 min por
+  persona (1000 por IP sin sesion).
+- **Entrada:** CORS con lista blanca, parametros de URL solo como texto
+  (`query parser: simple`), subidas con tipos y tamanos cerrados (multer 2),
+  Excel con rango recortado, validacion de correo sin retroceso cuadratico.
+- **Navegador:** CSP, HSTS y Permissions-Policy de la SPA en
+  `frontend/cpanel/.htaccess`; el build cambia `__CSP_SCRIPTS__` por los hashes
+  de los scripts en linea de `index.html`. Un script o servicio externo nuevo
+  hay que agregarlo a la CSP. La API lleva las cabeceras de helmet.
+- **Bitacora** (`eventos_seguridad`): accesos, 2FA, sesiones y los cambios de
+  rol, areas, permisos y estado hechos por otra persona; cada quien la ve en
+  Perfil › Seguridad.

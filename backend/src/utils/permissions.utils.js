@@ -166,10 +166,41 @@ const cargarProyectoVisible = async (prisma, usuario, proyectoId) => {
   return { proyecto, permitido: await puedeVerProyecto(prisma, usuario, proyecto) };
 };
 
+/**
+ * Regla de lectura de una tarea (comentarios y adjuntos): la de su proyecto y,
+ * si "tareas.ver" no es "todos", ademas que sea de la persona (sin
+ * responsable, asignada a ella o creada por ella), igual que la lista de
+ * tareas (`visibilidadTareasPara`). Devuelve { tarea, permitido }.
+ */
+const cargarTareaVisible = async (prisma, usuario, tareaId) => {
+  const id = Number(tareaId);
+  if (!Number.isInteger(id)) return { tarea: null, permitido: false };
+  const tarea = await prisma.tarea.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      titulo: true,
+      proyectoId: true,
+      asignadoId: true,
+      creadorId: true,
+      asignados: { select: { id: true } },
+      proyecto: { select: { id: true, nombre: true, area: true, creadorId: true, miembros: { select: { id: true } } } },
+    },
+  });
+  if (!tarea) return { tarea: null, permitido: false };
+  const esSuya = !tarea.asignadoId
+    || tarea.asignadoId === usuario?.id
+    || tarea.creadorId === usuario?.id
+    || tarea.asignados.some((a) => a.id === usuario?.id);
+  if (alcanceDe(usuario, 'tareas.ver') !== 'todos' && !esSuya) return { tarea, permitido: false };
+  return { tarea, permitido: await puedeVerProyecto(prisma, usuario, tarea.proyecto) };
+};
+
 module.exports = {
   normalizarAreas,
   puedeVerProyecto,
   cargarProyectoVisible,
+  cargarTareaVisible,
   esAdmin,
   esAdminGlobal,
   compartenArea,

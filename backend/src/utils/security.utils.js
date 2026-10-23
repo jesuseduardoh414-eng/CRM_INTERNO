@@ -148,7 +148,14 @@ const validarAreas = (entrada) => {
 const esRolValido = (rol) => ROLES_VALIDOS.includes(String(rol || '').toUpperCase());
 
 // Validacion minima de formato de correo (no sustituye a la verificacion por enlace).
-const esEmailValido = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(email || '').trim());
+// Tope de 254 caracteres (RFC 5321) ANTES de la expresion, y el dominio por
+// etiquetas sin puntos: la anterior (`[^\s@]+\.[^\s@]+$`) retrocedia en
+// tiempo cuadratico y un correo de 1 MB de puntos en "olvide mi contraseña"
+// (publico) dejaba el servidor colgado varios minutos.
+const esEmailValido = (email) => {
+  const texto = String(email || '').trim();
+  return texto.length <= 254 && /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(texto);
+};
 
 module.exports = {
   PASSWORD_MIN,

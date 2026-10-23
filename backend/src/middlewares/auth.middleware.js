@@ -80,6 +80,47 @@ const RUTAS_CLIENTE = ['/api/auth', '/api/portal', '/api/notificaciones'];
 
 const rechazar = (res, codigo, error) => res.status(401).json({ error, codigo });
 
+// Lo que se deja en `req.usuario`: rol y area de la base, no los del token.
+const perfilDeSesion = (usuario) => ({
+  id: usuario.id,
+  nombre: usuario.nombre,
+  email: usuario.email,
+  area: usuario.area,
+  rol: usuario.rol,
+  estado: usuario.estado,
+  empresaId: usuario.empresaId ?? null,
+  // Ajustes de permisos de la persona sobre los de su area
+  // (utils/permisosArea.utils.js); los de finanzas anteriores cuentan
+  // mientras no tenga ajustes nuevos.
+  permisos: usuario.permisos ?? null,
+  permisosFinanzas: usuario.permisosFinanzas ?? null,
+});
+
+/**
+ * Comprueba que la sesion siga abierta y la cuenta activa. Devuelve
+ * `{ usuario, sesion, debeActivar2FA }` o `{ codigo, error }`. La usan este
+ * middleware y la ruta de archivos (que llega con cookie en vez de token).
+ */
+const usuarioDeSesion = async ({ usuarioId, sesionId }) => {
+  if (!Number.isInteger(usuarioId) || !sesionId) return { codigo: 'TOKEN_INVALIDO', error: 'Token inválido' };
+  const [sesion, usuario] = await Promise.all([cargarSesion(sesionId), cargarUsuario(usuarioId)]);
+
+  if (!sesion || sesion.usuarioId !== usuarioId || sesion.revocadaEn || sesion.expiraEn <= new Date()) {
+    return { codigo: 'SESION_REVOCADA', error: 'Tu sesión fue cerrada. Vuelve a iniciar sesión.' };
+  }
+  // `estado` puede venir nulo en usuarios antiguos (la columna se agrego
+  // despues) y esos siguen siendo validos.
+  if (!usuario || (usuario.estado && usuario.estado !== 'activo')) {
+    return { codigo: 'CUENTA_INACTIVA', error: 'Tu cuenta no está activa o ya no existe' };
+  }
+  // Portal de clientes retirado: las sesiones de cliente que quedaron
+  // abiertas se cortan (el frontend cierra la sesion con el 401).
+  if (usuario.rol === 'CLIENTE' && !portalActivo()) {
+    return { codigo: 'SESION_REVOCADA', error: 'El portal de clientes ya no está disponible.' };
+  }
+  return { usuario: perfilDeSesion(usuario), sesion, debeActivar2FA: debeActivar2FA(usuario) };
+};
+
 const verificarToken = async (req, res, next) => {
   // El token viene unicamente en el header: "Authorization: Bearer <token>".
   // No se acepta por `?token=`: quedaria en logs y en el historial.
@@ -100,28 +141,10 @@ const verificarToken = async (req, res, next) => {
     return rechazar(res, 'TOKEN_INVALIDO', 'Token inválido');
   }
 
-  if (!Number.isInteger(datos.usuarioId)) {
-    return rechazar(res, 'TOKEN_INVALIDO', 'Token inválido');
-  }
-
   try {
-    const [sesion, usuario] = await Promise.all([cargarSesion(datos.sesionId), cargarUsuario(datos.usuarioId)]);
-
-    if (!sesion || sesion.usuarioId !== datos.usuarioId || sesion.revocadaEn || sesion.expiraEn <= new Date()) {
-      return rechazar(res, 'SESION_REVOCADA', 'Tu sesión fue cerrada. Vuelve a iniciar sesión.');
-    }
-
-    // `estado` puede venir nulo en usuarios antiguos (la columna se agrego
-    // despues) y esos siguen siendo validos.
-    if (!usuario || (usuario.estado && usuario.estado !== 'activo')) {
-      return rechazar(res, 'CUENTA_INACTIVA', 'Tu cuenta no está activa o ya no existe');
-    }
-
-    // Portal de clientes retirado: las sesiones de cliente que quedaron
-    // abiertas se cortan (el frontend cierra la sesion con el 401).
-    if (usuario.rol === 'CLIENTE' && !portalActivo()) {
-      return rechazar(res, 'SESION_REVOCADA', 'El portal de clientes ya no está disponible.');
-    }
+    const resultado = await usuarioDeSesion(datos);
+    if (resultado.codigo) return rechazar(res, resultado.codigo, resultado.error);
+    const { usuario, sesion } = resultado;
 
     // La cuenta CONFIGURADOR solo puede usar su propia cuenta (/api/auth) y el
     // panel de configuracion: nada de proyectos, tareas, usuarios ni contratos.
@@ -137,26 +160,13 @@ const verificarToken = async (req, res, next) => {
 
     // La política exige verificación en dos pasos y aún no la activó: solo
     // puede usar su cuenta (/api/auth) para configurarla.
-    if (debeActivar2FA(usuario) && req.baseUrl !== '/api/auth') {
+    if (resultado.debeActivar2FA && req.baseUrl !== '/api/auth') {
       return res.status(403).json({ error: 'Debes activar la verificación en dos pasos para continuar', codigo: 'REQUIERE_2FA' });
     }
 
-    // Se usan rol y area de la base, no los del token.
-    req.usuario = {
-      id: usuario.id,
-      nombre: usuario.nombre,
-      email: usuario.email,
-      area: usuario.area,
-      rol: usuario.rol,
-      estado: usuario.estado,
-      empresaId: usuario.empresaId ?? null,
-      // Ajustes de permisos de la persona sobre los de su area
-      // (utils/permisosArea.utils.js); los de finanzas anteriores cuentan
-      // mientras no tenga ajustes nuevos.
-      permisos: usuario.permisos ?? null,
-      permisosFinanzas: usuario.permisosFinanzas ?? null,
-    };
+    req.usuario = usuario;
     req.sesionId = sesion.id;
+    req.sesionExpiraEn = sesion.expiraEn;
     return next();
   } catch (error) {
     console.error('[verificarToken]', error);
@@ -164,4 +174,4 @@ const verificarToken = async (req, res, next) => {
   }
 };
 
-module.exports = { verificarToken, invalidarCacheUsuario };
+module.exports = { verificarToken, invalidarCacheUsuario, usuarioDeSesion };

@@ -4,6 +4,9 @@
 const prisma = require('../lib/prisma');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const { esEmailValido } = require('../utils/security.utils');
+const { puede } = require('../utils/permisosArea.utils');
+const { filtroProyectosVisibles } = require('../utils/permissions.utils');
+const { moduloActivo } = require('../services/configuracion.service');
 
 const TIPOS = ['CLIENTE', 'PROVEEDOR', 'AMBOS'];
 const ESTADOS = ['ACTIVO', 'INACTIVO'];
@@ -185,16 +188,21 @@ const obtener = async (req, res) => {
   const id = idDe(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID no válido' });
   try {
+    // Contratos (con montos) solo para quien los ve en su modulo, y de los
+    // proyectos solo los que la persona ve.
+    const veContratos = puede(req.usuario, 'contratos.ver') && await moduloActivo('contratos');
     const empresa = await prisma.empresa.findUnique({
       where: { id },
       include: {
         creadoPor: { select: { id: true, nombre: true } },
         contactos: { orderBy: [{ principal: 'desc' }, { nombre: 'asc' }] },
         contratos: {
+          ...(veContratos ? {} : { where: { id: -1 } }),
           orderBy: { creadoEn: 'desc' },
           select: { id: true, folio: true, titulo: true, tipo: true, estado: true, monto: true, moneda: true, fechaInicio: true, fechaFin: true },
         },
         proyectos: {
+          where: filtroProyectosVisibles(req.usuario),
           orderBy: { creadoEn: 'desc' },
           select: { id: true, nombre: true, estado: true, area: true, fechaInicio: true, fechaFin: true, tareas: { select: { estado: true } } },
         },

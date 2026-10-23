@@ -5,8 +5,15 @@ const API_URL = import.meta.env.VITE_API_URL || '/api';
 const PUBLIC_BASE_URL = API_URL.startsWith('http') ? API_URL.replace(/\/api\/?$/, '') : '';
 // Access token (JWT de 15 min) y refresh token (rota en cada uso). Los dos
 // llevan el prefijo crm_ para que AuthContext los borre al cerrar sesion.
+// El refresh token ya no se guarda aqui: el backend lo pone en una cookie
+// httpOnly que el JavaScript no puede leer. En REFRESH_KEY queda solo una
+// marca de "hay sesion" (para el arranque y para cerrar en todas las pestañas).
 const TOKEN_KEY = 'crm_token';
 const REFRESH_KEY = 'crm_refresh';
+const MARCA_COOKIE = 'cookie';
+// La API de desarrollo esta en otro puerto: sin esto el navegador no guarda
+// ni manda la cookie. En produccion es el mismo origen.
+const CON_COOKIE = { credentials: 'include' };
 
 // ── Helpers internos ──────────────────────────────────────────────────────
 
@@ -23,12 +30,21 @@ const construirQuery = (params = {}) => {
 };
 
 const getToken = () => localStorage.getItem(TOKEN_KEY);
-const getRefreshToken = () => localStorage.getItem(REFRESH_KEY);
+// Refresh token de una sesion abierta antes de pasar a cookie (si queda).
+const getRefreshToken = () => {
+  const guardado = localStorage.getItem(REFRESH_KEY);
+  return guardado && guardado !== MARCA_COOKIE ? guardado : null;
+};
+const cuerpoRefresh = () => {
+  const refreshToken = getRefreshToken();
+  return refreshToken ? JSON.stringify({ refreshToken }) : '{}';
+};
 
-/** Guarda el par de tokens que devuelven login, 2FA, invitacion y refresh. */
-export const guardarTokens = ({ token, refreshToken }) => {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  if (refreshToken) localStorage.setItem(REFRESH_KEY, refreshToken);
+/** Guarda el access token que devuelven login, 2FA, invitacion y refresh. */
+export const guardarTokens = ({ token }) => {
+  if (!token) return;
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(REFRESH_KEY, MARCA_COOKIE);
 };
 
 export const borrarTokens = () => {
@@ -36,7 +52,8 @@ export const borrarTokens = () => {
   localStorage.removeItem(REFRESH_KEY);
 };
 
-export const hayTokens = () => Boolean(getToken() && getRefreshToken());
+// Access token y marca de sesion (o el refresh token de una sesion de antes).
+export const hayTokens = () => Boolean(getToken() && localStorage.getItem(REFRESH_KEY));
 export const REFRESH_STORAGE_KEY = REFRESH_KEY;
 
 const esperar = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
@@ -57,13 +74,13 @@ const renovarSesion = (tokenUsado) => {
     for (let intento = 0; intento < 3; intento += 1) {
       const actual = getToken();
       if (actual && actual !== tokenUsado) return true; // otra pestaña ya renovo
-      const refreshToken = getRefreshToken();
-      if (!refreshToken) return false;
+      if (!localStorage.getItem(REFRESH_KEY)) return false;
 
       const res = await fetch(`${API_URL}/auth/refresh`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refreshToken }),
+        body: cuerpoRefresh(),
+        ...CON_COOKIE,
       });
       if (res.ok) {
         guardarTokens(await res.json());
@@ -148,6 +165,12 @@ export class ApiError extends Error {
  * simplemente "credenciales incorrectas".
  */
 const avisarSesionInvalida = (mensaje) => {
+  // La sesion tambien se cierra en el servidor: las cookies httpOnly
+  // (crm_refresh, crm_archivos) no se pueden borrar desde aqui y en un equipo
+  // compartido seguirian abriendo la sesion y los archivos. Sin esperar.
+  if (localStorage.getItem(REFRESH_KEY)) {
+    fetch(`${API_URL}/auth/logout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: cuerpoRefresh(), ...CON_COOKIE }).catch(() => {});
+  }
   borrarTokens();
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent('crm:sesion-invalida', { detail: { mensaje } }));
@@ -232,6 +255,7 @@ const pedirAuth = async (ruta, { metodo = 'GET', cuerpo, publica = false } = {})
     method: metodo,
     headers: publica ? { 'Content-Type': 'application/json' } : getHeaders(),
     ...(cuerpo !== undefined ? { body: JSON.stringify(cuerpo) } : {}),
+    ...CON_COOKIE,
   });
   return handleResponse(res, { publica });
 };
@@ -251,10 +275,11 @@ export const authService = {
   resetPassword: (token, password) => pedirAuth(`/reset-password/${segmento(token)}`, { metodo: 'POST', cuerpo: { password }, publica: true }),
   verifyAccount: (token) => pedirAuth(`/verify/${segmento(token)}`, { publica: true }),
   // Cierra la sesion en el servidor. No necesita access token (puede haber caducado).
+  // La cookie va sola; el cuerpo solo lleva el token de una sesion de antes.
   logout: () => {
+    if (!localStorage.getItem(REFRESH_KEY)) return Promise.resolve();
     const refreshToken = getRefreshToken();
-    if (!refreshToken) return Promise.resolve();
-    return pedirAuth('/logout', { metodo: 'POST', cuerpo: { refreshToken }, publica: true }).catch(() => {});
+    return pedirAuth('/logout', { metodo: 'POST', cuerpo: refreshToken ? { refreshToken } : {}, publica: true }).catch(() => {});
   },
 
   // Invitaciones

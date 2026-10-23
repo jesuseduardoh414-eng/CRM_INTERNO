@@ -340,15 +340,27 @@ const editar = async (req, res) => {
     }
     if (errores.length) return res.status(400).json({ error: 'Revisa los datos del gasto', detalles: errores });
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No hay cambios que guardar' });
+    // Sacar un gasto de su categoria es quitarlo de ella: pide "eliminar" en
+    // la de origen. Si no, con "editar" aqui y "crear" + "eliminar" en otra
+    // se borraban gastos de esta. Decision del usuario (2026-10-23).
+    if (data.categoria && data.categoria !== actual.categoria && !F.puedeGasto(req.usuario, actual.categoria, 'eliminar')) {
+      return res.status(403).json({ error: 'Para cambiar la categoría necesitas permiso de eliminar en la categoría actual del gasto', codigo: 'SIN_PERMISO' });
+    }
 
     const gasto = await prisma.gasto.update({ where: { id }, data, include: incluirDetalle });
     F.registrarFinanzas(req.usuario, 'gasto', id, 'EDITAR', `Editó el gasto ${gasto.folio} (${Object.keys(data).join(', ')})`);
-    return res.json({ mensaje: 'Gasto actualizado', gasto: serializar(gasto) });
+    return res.json({ mensaje: 'Gasto actualizado', ...respuestaGasto(req.usuario, gasto) });
   } catch (error) {
     console.error('[finanzas.gastos.editar]', error);
     return res.status(500).json({ error: 'Error al actualizar el gasto' });
   }
 };
+
+// Quien edita una categoria sin poder verla no recibe el gasto de vuelta:
+// con "editar" sobre ids ajenos se podia leer cualquiera.
+const respuestaGasto = (usuario, gasto) => (F.puedeGasto(usuario, gasto.categoria)
+  ? { gasto: serializar(gasto) }
+  : { gasto: { id: gasto.id, folio: gasto.folio } });
 
 // Cambios de estado: pagar, reabrir (volver a pendiente) y anular.
 const cambiarEstado = (accion) => async (req, res) => {
@@ -386,7 +398,7 @@ const cambiarEstado = (accion) => async (req, res) => {
     if (count === 0) return res.status(409).json({ error: 'El gasto cambió mientras tanto. Recarga y vuelve a intentarlo.' });
     const gasto = await prisma.gasto.findUnique({ where: { id }, include: incluirDetalle });
     F.registrarFinanzas(req.usuario, 'gasto', id, accion.toUpperCase(), descripcion);
-    return res.json({ mensaje: descripcion, gasto: serializar(gasto) });
+    return res.json({ mensaje: descripcion, ...respuestaGasto(req.usuario, gasto) });
   } catch (error) {
     console.error(`[finanzas.gastos.${accion}]`, error);
     return res.status(500).json({ error: 'Error al cambiar el estado del gasto' });
@@ -403,7 +415,8 @@ const duplicar = async (req, res) => {
   try {
     const actual = await prisma.gasto.findUnique({ where: { id } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
-    if (!F.puedeGasto(req.usuario, actual.categoria, 'crear')) return F.sinPermiso(res);
+    // Duplicar copia el gasto entero: hace falta poder verlo, no solo crear.
+    if (!F.puedeGasto(req.usuario, actual.categoria, 'crear') || !F.puedeGasto(req.usuario, actual.categoria)) return F.sinPermiso(res);
 
     const meses = Math.max(1, Math.min(12, Number.parseInt(req.body?.meses, 10) || 1));
     const fecha = F.sumarMeses(actual.fecha, meses);

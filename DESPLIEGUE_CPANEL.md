@@ -177,6 +177,15 @@ dos archivos en `paquete_cpanel/`:
    >   SMTP y Google Calendar dejan de funcionar.
    > - **Si empiezas de cero**: genera las dos (distintas) con
    >   `node -e "console.log(require('crypto').randomBytes(48).toString('base64'))"`.
+   > - **Si `JWT_SECRET` es corto** (el servidor avisa al arrancar si tiene
+   >   menos de 32 caracteres) y `AUTH_ENCRYPTION_KEY` está vacía, cámbialo
+   >   **en este orden** para no perder lo cifrado: (1) pon en
+   >   `AUTH_ENCRYPTION_KEY` el valor actual de `JWT_SECRET` seguido de
+   >   `|cifrado-2fa` (por ejemplo `miSecretoViejo|cifrado-2fa`: da la misma
+   >   clave que antes); (2) pon en `JWT_SECRET` uno nuevo de 48 bytes con el
+   >   comando de arriba; (3) **Restart**. Todos tendrán que volver a iniciar
+   >   sesión (las sesiones se firman con `JWT_SECRET`); el 2FA, el SMTP y
+   >   Google siguen funcionando.
 
 4. **Create**. Después, en la página de la aplicación:
    1. **Run NPM Install**. Instala las dependencias y genera el cliente de
@@ -287,6 +296,16 @@ curl -fsS -o /dev/null https://crm.omnispg.com/api/health >/dev/null 2>&1
 - [ ] Desde el panel de configuración, **Correo y avisos** envía un correo de prueba.
 - [ ] Si usan la verificación en dos pasos, alguien que la tenga activa puede
       entrar (confirma que las claves del paso 5 son las correctas).
+- [ ] **Administradores y cuentas de configuración necesitan la verificación
+      en dos pasos** (siempre, aunque el panel diga otra cosa): la primera vez
+      que entren sin ella, el CRM los lleva a activarla con una app de
+      códigos (Google Authenticator, Microsoft Authenticator…) y no deja usar
+      nada más hasta hacerlo. Avísales antes y que tengan el teléfono a mano.
+- [ ] Las fotos y los adjuntos solo se abren con sesión iniciada: un enlace
+      `/api/archivos/...` copiado fuera del CRM ya no funciona (es a propósito).
+- [ ] Al arrancar, el registro de la aplicación no avisa de `JWT_SECRET` corto
+      ni de `AUTH_ENCRYPTION_KEY` vacía; si avisa, sigue la nota sobre las
+      claves del paso 5.
 
 ## 10. Correo
 

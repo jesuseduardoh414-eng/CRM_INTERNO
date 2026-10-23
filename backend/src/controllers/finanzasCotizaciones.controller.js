@@ -263,6 +263,12 @@ const nuevaVersion = async (req, res) => {
   }
 };
 
+// Quien edita o aprueba sin poder ver cotizaciones no recibe el detalle de
+// vuelta: con ids ajenos se podia leer cualquiera.
+const respuestaCotizacion = (usuario, cotizacion) => (F.puedeVer(usuario, 'cotizaciones')
+  ? { cotizacion: serializarDetalle(cotizacion) }
+  : { cotizacion: { id: cotizacion.id, folio: cotizacion.folio } });
+
 // ---------------------------------------------------------------------------
 // PUT /api/finanzas/cotizaciones/:id  (permiso "editar"; no toca archivos)
 // ---------------------------------------------------------------------------
@@ -279,7 +285,7 @@ const editar = async (req, res) => {
     if (Object.keys(data).length === 0) return res.status(400).json({ error: 'No hay cambios que guardar' });
     const cotizacion = await prisma.cotizacion.update({ where: { id }, data, include: incluirDetalle });
     F.registrarFinanzas(req.usuario, 'cotizacion', id, 'EDITAR', `Corrigió los datos de ${cotizacion.folio} (${Object.keys(data).join(', ')})`);
-    return res.json({ mensaje: 'Cotización actualizada', cotizacion: serializarDetalle(cotizacion) });
+    return res.json({ mensaje: 'Cotización actualizada', ...respuestaCotizacion(req.usuario, cotizacion) });
   } catch (error) {
     console.error('[finanzas.cotizaciones.editar]', error);
     return res.status(500).json({ error: 'Error al actualizar la cotización' });
@@ -301,7 +307,7 @@ const cambiarEstado = async (req, res) => {
     const cotizacion = await prisma.cotizacion.update({ where: { id }, data: { estado }, include: incluirDetalle });
     const nombres = { PENDIENTE: 'pendiente', APROBADA: 'aprobada', RECHAZADA: 'rechazada' };
     F.registrarFinanzas(req.usuario, 'cotizacion', id, 'ESTADO', `Marcó ${actual.folio} como ${nombres[estado]} (antes ${nombres[actual.estado]})`);
-    return res.json({ mensaje: `Cotización ${nombres[estado]}`, cotizacion: serializarDetalle(cotizacion) });
+    return res.json({ mensaje: `Cotización ${nombres[estado]}`, ...respuestaCotizacion(req.usuario, cotizacion) });
   } catch (error) {
     console.error('[finanzas.cotizaciones.cambiarEstado]', error);
     return res.status(500).json({ error: 'Error al cambiar el estado' });

@@ -176,6 +176,11 @@ export const textosAuth = {
     secEvt_registro: 'Registro de la cuenta',
     secEvt_email_verificado: 'Correo verificado',
     secEvt_invitacion_aceptada: 'Invitación aceptada',
+    secEvt_accion_configurador: 'Acción de la cuenta de configuración',
+    secEvt_cuenta_editada: 'Rol o áreas cambiados por un administrador',
+    secEvt_permisos_cambiados: 'Permisos cambiados por un administrador',
+    secEvt_cuenta_desactivada: 'Cuenta desactivada',
+    secEvt_cuenta_activada: 'Cuenta activada',
   },
 
   en: {
@@ -343,5 +348,10 @@ export const textosAuth = {
     secEvt_registro: 'Account sign-up',
     secEvt_email_verificado: 'Email verified',
     secEvt_invitacion_aceptada: 'Invitation accepted',
+    secEvt_accion_configurador: 'Settings account action',
+    secEvt_cuenta_editada: 'Role or areas changed by an administrator',
+    secEvt_permisos_cambiados: 'Permissions changed by an administrator',
+    secEvt_cuenta_desactivada: 'Account deactivated',
+    secEvt_cuenta_activada: 'Account activated',
   },
 };

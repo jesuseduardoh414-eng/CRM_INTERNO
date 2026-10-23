@@ -13,6 +13,7 @@
 // o leyo: si lo que llega de Google trae ese mismo etag, es el eco del CRM. Si
 // los dos lados cambiaron, gana el ultimo cambio.
 const prisma = require('../lib/prisma');
+const { cifrar, descifrar } = require('../utils/cifrado.utils');
 const { zonaHoraria, desfaseMs, partesDiaMexico, instanteLocal, claveDiaMexico } = require('../utils/fechas.utils');
 
 // En pruebas se apuntan a un Google falso.
@@ -336,6 +337,24 @@ const limpiarTokensGoogle = async (usuarioId) => {
   }
 };
 
+// Los tokens de Google se guardan cifrados (cifrado.utils, como los de Drive):
+// con la base o un respaldo no se llega al calendario de nadie. Los guardados
+// antes en claro se leen tal cual y quedan cifrados en la siguiente
+// renovacion (cada hora como mucho, con la sincronizacion).
+const leerToken = (valor) => {
+  if (!valor || !String(valor).startsWith('v1:')) return valor || null;
+  try {
+    return descifrar(valor);
+  } catch (_error) {
+    return null; // clave cambiada: como si no estuviera conectado
+  }
+};
+const conTokensLegibles = (usuario) => usuario && {
+  ...usuario,
+  googleAccessToken: leerToken(usuario.googleAccessToken),
+  googleRefreshToken: leerToken(usuario.googleRefreshToken),
+};
+
 const saveGoogleTokens = async (usuarioId, tokenData) => {
   const accessToken = tokenData.access_token || null;
   const refreshToken = tokenData.refresh_token || null;
@@ -351,8 +370,8 @@ const saveGoogleTokens = async (usuarioId, tokenData) => {
     where: { id: usuarioId },
     data: {
       googleCalendarEmail: profile?.email || undefined,
-      googleAccessToken: accessToken,
-      googleRefreshToken: refreshToken || undefined,
+      googleAccessToken: accessToken ? cifrar(accessToken) : null,
+      googleRefreshToken: refreshToken ? cifrar(refreshToken) : undefined,
       googleTokenExpiresAt: expiresAt,
     },
     select: {
@@ -409,7 +428,7 @@ const refreshAccessToken = async (usuario) => {
 };
 
 const getValidAccessToken = async (usuarioId) => {
-  const usuario = await prisma.usuario.findUnique({
+  const usuario = conTokensLegibles(await prisma.usuario.findUnique({
     where: { id: usuarioId },
     select: {
       id: true,
@@ -418,7 +437,7 @@ const getValidAccessToken = async (usuarioId) => {
       googleTokenExpiresAt: true,
       googleCalendarEmail: true,
     },
-  });
+  }));
 
   if (!usuario?.googleAccessToken && !usuario?.googleRefreshToken) return null;
 
@@ -440,7 +459,7 @@ const getValidAccessToken = async (usuarioId) => {
 // rechazar un token que segun nuestra fecha sigue vigente (revocado desde la
 // cuenta, cambio de contrasena...), y `getValidAccessToken` lo devolvia tal cual.
 const forzarRenovacionAccessToken = async (usuarioId) => {
-  const usuario = await prisma.usuario.findUnique({
+  const usuario = conTokensLegibles(await prisma.usuario.findUnique({
     where: { id: usuarioId },
     select: {
       id: true,
@@ -448,7 +467,7 @@ const forzarRenovacionAccessToken = async (usuarioId) => {
       googleRefreshToken: true,
       googleCalendarEmail: true,
     },
-  });
+  }));
   if (!usuario?.googleRefreshToken) {
     if (usuario?.googleAccessToken) await limpiarTokensGoogle(usuarioId);
     return null;
@@ -690,10 +709,10 @@ const connectGoogleCalendar = async ({ usuarioId, code }) => {
 };
 
 const disconnectGoogleCalendar = async (usuarioId) => {
-  const usuario = await prisma.usuario.findUnique({
+  const usuario = conTokensLegibles(await prisma.usuario.findUnique({
     where: { id: usuarioId },
     select: { googleAccessToken: true, googleRefreshToken: true },
-  });
+  }));
 
   const token = usuario?.googleRefreshToken || usuario?.googleAccessToken;
   if (token) {

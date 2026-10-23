@@ -409,7 +409,8 @@ const ProyectoDetallePage = () => {
   // Borrar en lote solo se ofrece a quien tiene algun alcance para borrar.
   const puedeBorrarTareas = puede(usuario, 'tareas.eliminar');
   const adjuntosActivos = moduloActivo('adjuntos');
-  const portalActivo = moduloActivo('clientes') && moduloActivo('portalClientes');
+  // La pestaña "Cliente" es del directorio de clientes: sin "clientes.ver" no se ofrece.
+  const portalActivo = moduloActivo('clientes') && moduloActivo('portalClientes') && puede(usuario, 'clientes.ver');
   const puedeSubirAdjuntos = adjuntosActivos && puede(usuario, 'tareas.adjuntos');
   const diasPorVencer = reglasTareas.diasPorVencer;
 

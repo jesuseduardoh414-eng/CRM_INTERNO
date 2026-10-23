@@ -17,7 +17,7 @@ import { AvisoError, Campo, Seccion } from './piezas';
 import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
 import {
   ACEPTA_COMPROBANTE, METODOS_PAGO, MONEDAS, MONEDA_BASE, OPCIONES_SWR_FINANZAS, categoriasCon, comprobanteMaxBytes, comprobanteMaxMegas,
-  esComprobanteValido, hoyClave, nombreMesAnio,
+  esComprobanteValido, hoyClave, nombreMesAnio, puedeFinanzas,
 } from '../../utils/finanzas';
 
 const VACIO = {
@@ -44,10 +44,13 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
   const [error, setError] = useState(null);
   const refError = useRef(null);
   // Registrar pide "crear" en la categoría; al corregir un gasto también vale
-  // "editar" en la categoría destino (igual que el servidor).
-  const categorias = editando
-    ? [...new Set([...categoriasCon(usuario, 'crear'), ...categoriasCon(usuario, 'editar')])]
-    : categoriasCon(usuario, 'crear');
+  // "editar" en la categoría destino, y sacarlo de la suya pide "eliminar" en
+  // ella: sin ese permiso se queda donde está (igual que el servidor).
+  const categorias = !editando
+    ? categoriasCon(usuario, 'crear')
+    : puedeFinanzas(usuario, `gastos.${gasto.categoria}`, 'eliminar')
+      ? [...new Set([...categoriasCon(usuario, 'crear'), ...categoriasCon(usuario, 'editar')])]
+      : [gasto.categoria];
 
   useEffect(() => {
     if (error) refError.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
