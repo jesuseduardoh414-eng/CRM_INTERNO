@@ -7,61 +7,83 @@
 //            participa en alguna tarea)
 //   area     los de su area, mas los propios
 //   todos    cualquiera
-const { alcanceDe } = require('./permisosArea.utils');
+//
+// Proyectos, personas e invitaciones guardan sus areas en un texto separado
+// por comas ("DESARROLLO,MARKETING"). "area" llega a lo que comparte alguna
+// area con las de la persona que da ese alcance (areasDelAlcance).
+const { alcanceDe, areasDelAlcance, areasDe, areasDeTexto, esAdminGeneral } = require('./permisosArea.utils');
 
-const normalizarAreas = (value) => String(value || '')
-  .split(',')
-  .map((area) => area.trim())
-  .filter(Boolean);
+const normalizarAreas = areasDeTexto;
 
 const esAdmin = (usuario) => usuario?.rol === 'ADMIN';
 
-const esAdminGlobal = (usuario) => esAdmin(usuario) && usuario?.area === 'ADMINISTRACION';
+const esAdminGlobal = esAdminGeneral;
 
-const proyectoCoincideConArea = (areaProyecto, areaUsuario) => {
-  if (!areaUsuario) return false;
-  return normalizarAreas(areaProyecto).includes(areaUsuario);
+/** ¿Comparten alguna area? Cada lado es un texto con comas o una lista. */
+const compartenArea = (a, b) => {
+  const lista = areasDeTexto(b);
+  return areasDeTexto(a).some((area) => lista.includes(area));
 };
 
-const buildFiltroAreaProyecto = (area, campo = 'area') => ({
-  OR: [
+const proyectoCoincideConArea = (areaProyecto, areasUsuario) => compartenArea(areaProyecto, areasUsuario);
+
+// Filtro de Prisma: el texto de areas del campo incluye alguna de `areas`
+// (una clave, un texto con comas o una lista). Sin areas no coincide nada.
+const buildFiltroAreaProyecto = (areas, campo = 'area') => ({
+  OR: areasDeTexto(areas).flatMap((area) => [
     { [campo]: area },
     { [campo]: { startsWith: `${area},` } },
     { [campo]: { endsWith: `,${area}` } },
     { [campo]: { contains: `,${area},` } },
-  ],
+  ]),
 });
 
 // Recorte de los tableros del equipo (inicio del admin, Reportes): el
-// administrador general ve todo; cualquier otra persona, solo su area.
+// administrador general ve todo; cualquier otra persona, solo sus areas.
 const buildScopeProyectoParaAdmin = (usuario, campo = 'area') => {
   if (esAdminGlobal(usuario)) return {};
-  return buildFiltroAreaProyecto(usuario?.area, campo);
+  return buildFiltroAreaProyecto(areasDe(usuario), campo);
 };
 
 // Gestion de personas e invitaciones ("usuarios.ver"): con "todos" cualquier
-// area; si no, solo la propia.
+// area; con "area", las suyas cuya tabla lo da; sin ese permiso (las acciones
+// tienen el suyo: usuarios.editar, ...), sus areas. Para ver o gestionar a
+// alguien basta compartir una de sus areas; para darle areas hay que llegar a
+// todas las que se le dan (gestionaTodasLasAreas).
 const veTodosLosUsuarios = (usuario) => esAdminGlobal(usuario) || alcanceDe(usuario, 'usuarios.ver') === 'todos';
-const gestionaUsuariosDe = (usuario, area) => veTodosLosUsuarios(usuario) || (Boolean(area) && area === usuario?.area);
+const areasGestionables = (usuario) => (veTodosLosUsuarios(usuario) ? null
+  : alcanceDe(usuario, 'usuarios.ver') === 'area' ? areasDelAlcance(usuario, 'usuarios.ver') : areasDe(usuario));
+const gestionaUsuariosDe = (usuario, area) => veTodosLosUsuarios(usuario) || compartenArea(area, areasGestionables(usuario));
+const gestionaTodasLasAreas = (usuario, areas) => {
+  const lista = areasDeTexto(areas);
+  if (!lista.length) return false;
+  return veTodosLosUsuarios(usuario) || lista.every((area) => areasGestionables(usuario).includes(area));
+};
+/** Filtro de Prisma de las personas (o invitaciones) que gestiona. */
+const filtroUsuariosGestionados = (usuario, campo = 'area') => (veTodosLosUsuarios(usuario) ? {} : buildFiltroAreaProyecto(areasGestionables(usuario), campo));
 
 /** Miembro explicito del proyecto (`proyecto.miembros` = [{ id }]). */
 const esMiembroDe = (usuario, proyecto) => (proyecto?.miembros || []).some((m) => m.id === usuario?.id);
 
+/** ¿El proyecto es de alguna de las areas a las que llega `clave` con alcance "area"? */
+const proyectoEnSusAreas = (usuario, proyecto, clave) => proyectoCoincideConArea(proyecto.area, areasDelAlcance(usuario, clave));
+
 /**
- * ¿El alcance llega a este proyecto? Para "propios" cuenta ser creador o
- * miembro explicito (el proyecto debe traer `miembros` y `creadorId`).
+ * ¿El alcance de `clave` llega a este proyecto? Para "propios" cuenta ser
+ * creador o miembro explicito (el proyecto debe traer `miembros` y `creadorId`).
  */
-const alcanzaProyecto = (usuario, proyecto, alcance) => {
-  if (!usuario || !proyecto || !alcance || alcance === 'ninguno') return false;
+const alcanzaProyecto = (usuario, proyecto, clave) => {
+  const alcance = usuario ? alcanceDe(usuario, clave) : 'ninguno';
+  if (!usuario || !proyecto || alcance === 'ninguno') return false;
   if (alcance === 'todos') return true;
-  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
+  if (alcance === 'area' && proyectoEnSusAreas(usuario, proyecto, clave)) return true;
   return proyecto.creadorId === usuario.id || esMiembroDe(usuario, proyecto);
 };
 
 /** Editar el proyecto (datos, estado, equipo) segun "proyectos.editar". */
-const puedeAdministrarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, alcanceDe(usuario, 'proyectos.editar'));
+const puedeAdministrarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, 'proyectos.editar');
 
-const puedeEliminarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, alcanceDe(usuario, 'proyectos.eliminar'));
+const puedeEliminarProyecto = (usuario, proyecto) => alcanzaProyecto(usuario, proyecto, 'proyectos.eliminar');
 
 /**
  * Accion sobre tareas ("tareas.crear" | "tareas.editar" | "tareas.eliminar").
@@ -73,7 +95,7 @@ const puedeActuarEnTarea = (usuario, proyecto, permiso, tareaEsAccesible = true)
   const alcance = alcanceDe(usuario, permiso);
   if (alcance === 'ninguno' || !proyecto) return false;
   if (alcance === 'todos') return true;
-  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
+  if (alcance === 'area' && proyectoEnSusAreas(usuario, proyecto, permiso)) return true;
   return esMiembroDe(usuario, proyecto) && tareaEsAccesible;
 };
 
@@ -89,7 +111,7 @@ const filtroProyectosVisibles = (usuario) => {
     { tareas: { some: { asignados: { some: { id: usuario.id } } } } },
     { tareas: { some: { creadorId: usuario.id } } },
   ];
-  if (alcance === 'area') return { OR: [...buildFiltroAreaProyecto(usuario.area).OR, ...propios] };
+  if (alcance === 'area') return { OR: [...buildFiltroAreaProyecto(areasDelAlcance(usuario, 'proyectos.ver')).OR, ...propios] };
   return { OR: propios };
 };
 
@@ -104,7 +126,7 @@ const puedeVerProyecto = async (prisma, usuario, proyecto) => {
   const alcance = alcanceDe(usuario, 'proyectos.ver');
   if (alcance === 'ninguno') return false;
   if (alcance === 'todos') return true;
-  if (alcance === 'area' && proyectoCoincideConArea(proyecto.area, usuario.area)) return true;
+  if (alcance === 'area' && proyectoEnSusAreas(usuario, proyecto, 'proyectos.ver')) return true;
   if (proyecto.creadorId === usuario.id) return true;
 
   let miembros = proyecto.miembros;
@@ -150,11 +172,16 @@ module.exports = {
   cargarProyectoVisible,
   esAdmin,
   esAdminGlobal,
+  compartenArea,
   proyectoCoincideConArea,
+  proyectoEnSusAreas,
   buildFiltroAreaProyecto,
   buildScopeProyectoParaAdmin,
   veTodosLosUsuarios,
+  areasGestionables,
   gestionaUsuariosDe,
+  gestionaTodasLasAreas,
+  filtroUsuariosGestionados,
   puedeAdministrarProyecto,
   puedeEliminarProyecto,
   puedeActuarEnTarea,

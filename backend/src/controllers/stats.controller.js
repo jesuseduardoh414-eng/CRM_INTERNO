@@ -3,7 +3,8 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../lib/prisma');
 const { esPostgres } = require('../lib/baseDatos');
 const { sortTareas } = require('../utils/sort.utils');
-const { buildScopeProyectoParaAdmin, esAdminGlobal } = require('../utils/permissions.utils');
+const { buildScopeProyectoParaAdmin, buildFiltroAreaProyecto, esAdminGlobal } = require('../utils/permissions.utils');
+const { areasDe, areasDeTexto } = require('../utils/permisosArea.utils');
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { rangoDiaMexico, rangoSemanaMexico, claveDiaMexico, zonaHoraria } = require('../utils/fechas.utils');
 const { configEnCache } = require('../services/configuracion.service');
@@ -111,7 +112,7 @@ const getTopUsuariosProductividad = async (usuario) => {
   const { inicio: inicioSemanaActual } = rangoSemanaMexico();
   const semanasAnalizadas = 4;
   const inicioVentana = new Date(inicioSemanaActual.getTime() - ((semanasAnalizadas - 1) * 7 * ONE_DAY_MS));
-  const filtroAreaUsuarios = esAdminGlobal(usuario) ? {} : { area: usuario.area };
+  const filtroAreaUsuarios = esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(areasDe(usuario));
   const scopeProyecto = buildScopeProyectoParaAdmin(usuario);
 
   const [miembros, tareasHechas] = await Promise.all([
@@ -180,7 +181,7 @@ const getActividadMiembros = async (usuario, fecha = null) => {
   const calendarioFin = new Date(ahora);
   calendarioFin.setMonth(calendarioFin.getMonth() + 12);
   calendarioFin.setHours(23, 59, 59, 999);
-  const filtroAreaUsuarios = esAdminGlobal(usuario) ? {} : { area: usuario.area };
+  const filtroAreaUsuarios = esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(areasDe(usuario));
   const scopeProyecto = buildScopeProyectoParaAdmin(usuario);
   const projectScopeWhere = buildProjectScopeWhere(scopeProyecto);
 
@@ -650,8 +651,11 @@ const ETIQUETA_AREA = {
   COMUNICACION: 'Comunicación',
   MARKETING: 'Marketing',
 };
-// Nombre que el configurador le dio al area; si no, el de fabrica.
-const nombreArea = (clave) => configEnCache().reglas.areas.find((a) => a.clave === clave)?.nombre || ETIQUETA_AREA[clave] || clave || '';
+// Nombre que el configurador le dio al area; si no, el de fabrica. Con varias
+// areas ("MARKETING,DESARROLLO"), sus nombres separados por coma.
+const nombreArea = (claves) => areasDeTexto(claves)
+  .map((clave) => configEnCache().reglas.areas.find((a) => a.clave === clave)?.nombre || ETIQUETA_AREA[clave] || clave)
+  .join(', ');
 
 const horaMexico = (valor) => (valor
   ? new Date(valor).toLocaleTimeString('es-MX', {

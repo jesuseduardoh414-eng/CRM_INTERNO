@@ -12,7 +12,7 @@ import { aplicarCssDeMarca, cssDeMarca } from '../utils/temaMarca';
 import { fijarPasswordMin } from '../utils/politicaPassword';
 import { fijarPdfMaxMb } from '../utils/contratos';
 import { fijarComprobanteMaxMb } from '../utils/finanzas';
-import { AREAS_FABRICA, CLAVE_TRADUCCION_AREA, nombreDesdeClave } from '../utils/areas';
+import { AREAS_FABRICA, CLAVE_TRADUCCION_AREA, areasDeTexto, nombreDesdeClave } from '../utils/areas';
 
 // Módulos retirados: siempre apagados (espejo de MODULOS_RETIRADOS del backend).
 const MODULOS_RETIRADOS = ['portalClientes'];
@@ -156,13 +156,17 @@ export const ConfiguracionProvider = ({ children }) => {
       nombre: a.nombre || (CLAVE_TRADUCCION_AREA[a.clave] ? t(CLAVE_TRADUCCION_AREA[a.clave]) : nombreDesdeClave(a.clave)),
     }));
     const porClave = new Map(areas.map((a) => [a.clave, a]));
+    const nombreDeUna = (clave) => porClave.get(clave)?.nombre
+      || (CLAVE_TRADUCCION_AREA[clave] ? t(CLAVE_TRADUCCION_AREA[clave]) : nombreDesdeClave(clave));
     return {
       config,
       // Áreas configuradas, ya con nombre para mostrar.
       areas,
-      nombreArea: (clave) => porClave.get(clave)?.nombre
-        || (CLAVE_TRADUCCION_AREA[clave] ? t(CLAVE_TRADUCCION_AREA[clave]) : nombreDesdeClave(clave)),
-      colorArea: (clave) => porClave.get(clave)?.color || '#64748b',
+      // Aceptan una clave o varias separadas por coma (personas y proyectos
+      // con varias áreas): los nombres van separados por coma y el color es
+      // el de la primera.
+      nombreArea: (clave) => (String(clave || '').includes(',') ? areasDeTexto(clave).map(nombreDeUna).join(', ') : nombreDeUna(clave)),
+      colorArea: (clave) => porClave.get(areasDeTexto(clave)[0])?.color || '#64748b',
       // Los permisos de cada persona vienen ya resueltos en usuario.permisos
       // (utils/permisos.js).
       reglasTareas: { ...TAREAS_FABRICA, ...(config?.tareas || {}) },

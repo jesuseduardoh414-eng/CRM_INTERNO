@@ -290,6 +290,7 @@ const mensajes = async (req, res) => {
 const avisarEquipo = async (proyectoBase, autor, empresa) => {
   try {
     const { normalizarAreas } = require('../utils/permissions.utils');
+    const { areasDe, AREA_GENERAL } = require('../utils/permisosArea.utils');
     const areas = normalizarAreas(proyectoBase.area);
     const admins = await prisma.usuario.findMany({
       where: { rol: 'ADMIN', OR: [{ estado: 'activo' }, { estado: null }] },
@@ -299,7 +300,7 @@ const avisarEquipo = async (proyectoBase, autor, empresa) => {
       proyectoBase.creadorId,
       ...proyectoBase.miembros.map((m) => m.id),
       // Admin global (ADMINISTRACION) o de un área del proyecto.
-      ...admins.filter((a) => a.area === 'ADMINISTRACION' || areas.includes(a.area)).map((a) => a.id),
+      ...admins.filter((a) => areasDe(a).some((x) => x === AREA_GENERAL || areas.includes(x))).map((a) => a.id),
     ]);
     destinatarios.delete(autor.id);
     if (!destinatarios.size) return;

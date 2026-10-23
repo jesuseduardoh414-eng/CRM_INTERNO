@@ -7,6 +7,11 @@
 //
 //   efectivo = ajuste de la persona  ??  tabla de su area/rol  ??  valor de fabrica
 //
+// Una persona puede estar en varias areas (usuarios.area = "MARKETING,DESARROLLO",
+// como los proyectos). Tiene lo que le da cada una: de cada casilla, el valor
+// mas amplio de sus tablas; y un alcance "area" llega solo a las areas cuya
+// tabla lo da (areasDelAlcance), salvo que sea un ajuste de la persona.
+//
 // Tipos de casilla:
 //   bool     si / no
 //   alcance  hasta donde llega: ninguno | propios | area | todos (cada permiso
@@ -186,7 +191,15 @@ const desdeFinanzasAnteriores = (viejos) => {
 };
 
 const AREA_GENERAL = 'ADMINISTRACION';
-const esAdminGeneral = (usuario) => usuario?.rol === 'ADMIN' && usuario?.area === AREA_GENERAL;
+
+/** "MARKETING,DESARROLLO" (o ya una lista) -> ['MARKETING', 'DESARROLLO'] sin repetidas. */
+const areasDeTexto = (valor) => [...new Set((Array.isArray(valor) ? valor : String(valor || '').split(','))
+  .map((a) => String(a ?? '').trim().toUpperCase())
+  .filter(Boolean))];
+/** Areas de una persona. */
+const areasDe = (usuario) => areasDeTexto(usuario?.area);
+
+const esAdminGeneral = (usuario) => usuario?.rol === 'ADMIN' && areasDe(usuario).includes(AREA_GENERAL);
 const rolDe = (usuario) => (usuario?.rol === 'ADMIN' ? 'admin' : 'miembro');
 
 /** Ajustes de la persona: los nuevos o, si no hay, los de finanzas anteriores. */
@@ -195,11 +208,21 @@ const ajustesDe = (usuario) => {
   return desdeFinanzasAnteriores(usuario?.permisosFinanzas);
 };
 
-/** Lo que hereda una persona de su area y rol (sin sus ajustes). */
+/** Valor de una casilla en la tabla de un area para un rol (o el de fabrica). */
+const valorEnArea = (permiso, area, rol, config) => config?.permisosAreas?.[area]?.[rol]?.[permiso.clave]
+  ?? defectoDe(permiso, rol, config?.permisos || {});
+
+/** El mas amplio de varios valores de una casilla. */
+const masAmplio = (permiso, valores) => (permiso.tipo === 'bool'
+  ? valores.some((v) => v === true)
+  : valores.reduce((max, v) => (ALCANCES.indexOf(v) > ALCANCES.indexOf(max) ? v : max), 'ninguno'));
+
+/** Lo que hereda una persona de sus areas y su rol (sin sus ajustes). */
 const heredados = (usuario, config) => {
-  const viejos = config?.permisos || {};
-  const tabla = config?.permisosAreas?.[usuario?.area]?.[rolDe(usuario)] || {};
-  return Object.fromEntries(PERMISOS.map((p) => [p.clave, tabla[p.clave] ?? defectoDe(p, rolDe(usuario), viejos)]));
+  const rol = rolDe(usuario);
+  const areas = areasDe(usuario);
+  const lista = areas.length ? areas : [null];
+  return Object.fromEntries(PERMISOS.map((p) => [p.clave, masAmplio(p, lista.map((area) => valorEnArea(p, area, rol, config)))]));
 };
 
 const cache = new WeakMap();
@@ -236,6 +259,36 @@ const alcanceDe = (usuario, clave) => {
   return permisosEfectivos(usuario, configActual())[clave];
 };
 
+/**
+ * Areas a las que llega un alcance "area": las de la persona cuya tabla da al
+ * menos "area" en esa casilla; si la casilla es un ajuste de la persona, todas
+ * sus areas.
+ */
+const areasDelAlcance = (usuario, clave, config = configActual()) => {
+  const permiso = POR_CLAVE.get(clave);
+  if (!permiso || permiso.tipo !== 'alcance') throw new Error(`No es un permiso de alcance: ${clave}`);
+  const areas = areasDe(usuario);
+  if (esAdminGeneral(usuario) || Object.prototype.hasOwnProperty.call(ajustesDe(usuario), clave)) return areas;
+  const minimo = ALCANCES.indexOf('area');
+  return areas.filter((area) => ALCANCES.indexOf(valorEnArea(permiso, area, rolDe(usuario), config)) >= minimo);
+};
+
+/**
+ * Para el frontend: { clave: [areas] } de las casillas cuyo alcance es "area",
+ * cuando no llega a todas las areas de la persona.
+ */
+const alcancesPorArea = (usuario, config) => {
+  const mapa = permisosEfectivos(usuario, config);
+  const todas = areasDe(usuario);
+  const salida = {};
+  for (const p of PERMISOS) {
+    if (p.tipo !== 'alcance' || mapa[p.clave] !== 'area') continue;
+    const areas = areasDelAlcance(usuario, p.clave, config);
+    if (areas.length < todas.length) salida[p.clave] = areas;
+  }
+  return salida;
+};
+
 /** Lo que se manda al frontend: estructura del catalogo (sin funciones). */
 const catalogoPublico = () => CATALOGO.map((s) => ({
   seccion: s.seccion,
@@ -262,6 +315,11 @@ module.exports = {
   permisosEfectivos,
   puede,
   alcanceDe,
+  areasDelAlcance,
+  alcancesPorArea,
+  AREA_GENERAL,
+  areasDeTexto,
+  areasDe,
   esAdminGeneral,
   rolDe,
   sinPermiso,

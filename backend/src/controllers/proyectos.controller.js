@@ -17,7 +17,9 @@ const {
   puedeEliminarProyecto,
   cargarProyectoVisible,
 } = require('../utils/permissions.utils');
-const { puede, alcanceDe } = require('../utils/permisosArea.utils');
+const {
+  puede, alcanceDe, areasDe, areasDelAlcance,
+} = require('../utils/permisosArea.utils');
 const { ESTADOS_PROYECTO, ESTADO_PROYECTO_DEFAULT, normalizarEstadoProyecto, esEstadoProyectoValido } = require('../utils/estados.utils');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere, contiene } = require('../utils/paginacion.utils');
 const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
@@ -119,8 +121,8 @@ const areasDeProyecto = (area) => String(area || 'DESARROLLO')
   .filter(Boolean);
 
 // Devuelve la lista de areas ya normalizada. Rechaza areas fuera del catalogo
-// (400) y, salvo al administrador general, cualquier area que no sea la propia
-// (403).
+// (400) y, salvo al administrador general, cualquier area que no sea de las
+// suyas (403).
 const validarAreasProyecto = (area, usuario, mensajePermiso) => {
   const areas = areasDeProyecto(area);
   const validas = areasValidas();
@@ -128,7 +130,7 @@ const validarAreasProyecto = (area, usuario, mensajePermiso) => {
   if (invalidas.length > 0) {
     throw new ErrorValidacion(`Área inválida: ${invalidas.join(', ')}. Valores permitidos: ${validas.join(', ')}`);
   }
-  if (!esAdminGlobal(usuario) && !areas.every((item) => item === usuario.area)) {
+  if (!esAdminGlobal(usuario) && !areas.every((item) => areasDe(usuario).includes(item))) {
     throw new ErrorValidacion(mensajePermiso, 403);
   }
   return areas;
@@ -401,7 +403,7 @@ const listar = async (req, res) => {
 const listarPlantillas = async (req, res) => {
   try {
     const plantillas = await prisma.plantillaProyecto.findMany({
-      where: alcanceDe(req.usuario, 'proyectos.ver') === 'area' ? buildFiltroAreaProyecto(req.usuario.area) : undefined,
+      where: alcanceDe(req.usuario, 'proyectos.ver') === 'area' ? buildFiltroAreaProyecto(areasDelAlcance(req.usuario, 'proyectos.ver')) : undefined,
       orderBy: [{ creadoEn: 'desc' }],
       include: INCLUDE_PLANTILLA,
     });
@@ -583,12 +585,12 @@ const crear = async (req, res) => {
     const ids = normalizarIds(parseJsonArray(body.miembrosIds));
     const idsProyecto = ids.includes(req.usuario.id) ? ids : [...ids, req.usuario.id];
 
-    // Fuera del administrador general, cada quien crea solo en su propia area
-    // (y sin indicarla, ahi va).
+    // Fuera del administrador general, cada quien crea solo en sus areas (y sin
+    // indicarlas, en todas las suyas).
     const areas = validarAreasProyecto(
       body.area || (esAdminGlobal(req.usuario) ? undefined : req.usuario.area),
       req.usuario,
-      'Solo puedes crear proyectos en tu propia área',
+      'Solo puedes crear proyectos en tus áreas',
     );
     const areaProyecto = areas.join(',');
 
@@ -617,7 +619,7 @@ const crear = async (req, res) => {
       return res.status(404).json({ error: 'La plantilla seleccionada no existe' });
     }
 
-    if (plantilla && alcanceDe(req.usuario, 'proyectos.ver') === 'area' && !proyectoCoincideConArea(plantilla.area, req.usuario.area)) {
+    if (plantilla && alcanceDe(req.usuario, 'proyectos.ver') === 'area' && !proyectoCoincideConArea(plantilla.area, areasDelAlcance(req.usuario, 'proyectos.ver'))) {
       return res.status(403).json({ error: 'No tienes permiso para usar plantillas de otra área' });
     }
 
@@ -741,8 +743,8 @@ const editar = async (req, res) => {
       throw new ErrorValidacion(`Área inválida: ${areasInvalidas.join(', ')}. Valores permitidos: ${validas.join(', ')}`);
     }
     const cambiaArea = areas.join(',') !== areasActuales.join(',');
-    if (cambiaArea && !esAdminGlobal(req.usuario) && !areas.every((item) => item === req.usuario.area)) {
-      throw new ErrorValidacion('Solo puedes mover el proyecto dentro de tu propia área', 403);
+    if (cambiaArea && !esAdminGlobal(req.usuario) && !areas.every((item) => areasDe(req.usuario).includes(item))) {
+      throw new ErrorValidacion('Solo puedes mover el proyecto dentro de tus áreas', 403);
     }
 
     const fechaInicioNueva = parsearFechaProyecto(body.fechaInicio, 'inicio') || undefined;

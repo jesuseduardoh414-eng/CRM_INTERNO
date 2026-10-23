@@ -418,12 +418,14 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   const { areas, nombreArea } = useConfiguracion();
   const clavesAreas = areas.map((a) => a.clave);
   // Fuera del administrador general, cada quien crea y mueve proyectos solo
-  // dentro de su área (el servidor lo vuelve a revisar).
+  // dentro de sus áreas (el servidor lo vuelve a revisar).
   const esAdminArea = !esAdminGeneral(usuarioActual);
-  // Proyecto nuevo: de entrada el area de quien lo crea (o la primera configurada).
+  const misAreas = areasDeTexto(usuarioActual?.area);
+  // Proyecto nuevo: de entrada la (primera) area de quien lo crea, o la
+  // primera configurada.
   const areasIniciales = proyecto?.area
     ? getAreasProyecto(proyecto.area)
-    : [usuarioActual?.area || clavesAreas[0]].filter(Boolean);
+    : [misAreas[0] || clavesAreas[0]].filter(Boolean);
   const [form, setForm] = useState({
     nombre: proyecto?.nombre || '',
     descripcion: proyecto?.descripcion || '',
@@ -478,14 +480,18 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   const usuariosSeleccionables = usuarios.filter(u => (
     u.id !== usuarioActual?.id || (esEdicion && miembrosExistentes.has(u.id))
   ));
+  const enAlgunaArea = (u, lista) => areasDeTexto(u.area).some((a) => lista.includes(a));
   const usuariosEnAreas = esAdminArea
     ? usuariosSeleccionables
-    : usuariosSeleccionables.filter(u => form.areas.includes(u.area) || esAdminUsuario(u));
+    : usuariosSeleccionables.filter(u => enAlgunaArea(u, form.areas) || esAdminUsuario(u));
   const admins = usuariosSeleccionables.filter(esAdminUsuario);
+  // Quien tiene varias areas sale una sola vez, en el grupo de la primera.
+  const gruposArea = esAdminArea ? clavesAreas : form.areas;
+  const grupoDe = (u) => gruposArea.find((a) => areasDeTexto(u.area).includes(a));
   const usuariosPorArea = [
-    ...(esAdminArea ? clavesAreas : form.areas).map(area => ({
+    ...gruposArea.map(area => ({
       area,
-      usuarios: usuariosEnAreas.filter(u => u.area === area && !esAdminUsuario(u)),
+      usuarios: usuariosEnAreas.filter(u => grupoDe(u) === area && !esAdminUsuario(u)),
     })),
     ...(admins.length > 0 ? [{ area: 'ADMIN', usuarios: admins }] : []),
   ];
@@ -552,11 +558,13 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   }, [idsConsulta, form.fechaInicio, proyectoId]);
 
   const toggleArea = (area) => {
-    if (esAdminArea) return;
+    // Fuera del administrador general solo se eligen entre sus areas (con una
+    // sola, el proyecto va en ella y no se cambia).
+    if (esAdminArea && (misAreas.length < 2 || !misAreas.includes(area))) return;
     setForm(prev => {
       const exists = prev.areas.includes(area);
       const areas = exists ? prev.areas.filter(a => a !== area) : [...prev.areas, area];
-      const miembrosPermitidos = usuariosSeleccionables.filter(u => areas.includes(u.area) || esAdminUsuario(u)).map(u => u.id);
+      const miembrosPermitidos = usuariosSeleccionables.filter(u => enAlgunaArea(u, areas) || esAdminUsuario(u)).map(u => u.id);
       return {
         ...prev,
         areas,
@@ -804,8 +812,8 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
                     opciones={[...clavesAreas, ...form.areas.filter((a) => !clavesAreas.includes(a))].map((k) => ({
                       valor: k,
                       etiqueta: nombreArea(k),
-                      // Fuera del administrador general, solo la propia area
-                      deshabilitada: esAdminArea && k !== usuarioActual?.area,
+                      // Fuera del administrador general, solo las propias areas
+                      deshabilitada: esAdminArea && !misAreas.includes(k),
                     }))}
                   />
                 </div>

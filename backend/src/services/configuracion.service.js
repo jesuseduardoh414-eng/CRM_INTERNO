@@ -53,8 +53,9 @@ class ErrorConfiguracion extends Error {
 }
 
 /**
- * Un area solo se puede quitar si nadie la usa: usuarios, proyectos (que
- * guardan varias areas separadas por coma), plantillas e invitaciones vigentes.
+ * Un area solo se puede quitar si nadie la usa: usuarios, proyectos,
+ * plantillas e invitaciones vigentes (todos guardan una o varias areas
+ * separadas por coma).
  */
 const comprobarAreasQuitadas = async (antes, despues) => {
   const quedan = new Set(despues.map((a) => a.clave));
@@ -69,10 +70,10 @@ const comprobarAreasQuitadas = async (antes, despues) => {
       ],
     });
     const [usuarios, proyectos, plantillas, invitaciones] = await Promise.all([
-      prisma.usuario.count({ where: { area: area.clave } }),
+      prisma.usuario.count({ where: enLista('area') }),
       prisma.proyecto.count({ where: enLista('area') }),
       prisma.plantillaProyecto.count({ where: enLista('area') }),
-      prisma.invitacion.count({ where: { area: area.clave, estado: 'pendiente', expiraEn: { gt: new Date() } } }),
+      prisma.invitacion.count({ where: { ...enLista('area'), estado: 'pendiente', expiraEn: { gt: new Date() } } }),
     ]);
     const partes = [
       usuarios && `${usuarios} usuario${usuarios === 1 ? '' : 's'}`,

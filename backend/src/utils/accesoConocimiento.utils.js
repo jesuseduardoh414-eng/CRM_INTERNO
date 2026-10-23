@@ -17,17 +17,17 @@
 // true deja el articulo solo para ellos.
 //
 // Cambiar estas listas es el permiso conocimiento.acceso.
-const { esAdminGeneral, rolDe } = require('./permisosArea.utils');
+const { esAdminGeneral, rolDe, areasDe } = require('./permisosArea.utils');
 
 const ROLES = ['admin', 'miembro'];
 const MAX_FILAS = 300;
 
-/** Filas de una lista de accesos que alcanzan a la persona. */
+/** Filas de una lista de accesos que alcanzan a la persona (en cualquiera de sus areas). */
 const filasDe = (usuario) => ({
   OR: [
     { usuarioId: usuario.id },
-    { area: usuario.area, rol: null },
-    { area: usuario.area, rol: rolDe(usuario) },
+    { area: { in: areasDe(usuario) }, rol: null },
+    { area: { in: areasDe(usuario) }, rol: rolDe(usuario) },
     { area: null, rol: rolDe(usuario) },
   ],
 });

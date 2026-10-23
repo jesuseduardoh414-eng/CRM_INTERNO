@@ -5,7 +5,7 @@
 // Un acceso es { restringido, reglas: [{ area, rol, usuarioId }] }. Cada regla
 // es una persona (usuarioId), toda un área (area), solo administradores o solo
 // miembros de un área (area + rol) o de todas las áreas (rol sin area).
-import { esAdminGeneral } from './permisos';
+import { areasDe, esAdminGeneral } from './permisos';
 
 export const ACCESO_ABIERTO = { restringido: false, reglas: [] };
 
@@ -23,10 +23,10 @@ export const accesoDe = (item) => ({
   })),
 });
 
-/** ¿La regla alcanza a la persona? */
+/** ¿La regla alcanza a la persona (en cualquiera de sus áreas)? */
 export const alcanza = (regla, usuario) => {
   if (regla.usuarioId) return regla.usuarioId === usuario.id;
-  return (!regla.area || regla.area === usuario.area) && (!regla.rol || regla.rol === rolDe(usuario));
+  return (!regla.area || areasDe(usuario).includes(regla.area)) && (!regla.rol || regla.rol === rolDe(usuario));
 };
 
 /**

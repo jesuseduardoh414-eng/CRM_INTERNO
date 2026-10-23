@@ -133,6 +133,18 @@ const areasValidas = () => require('../services/configuracion.service').configEn
 const ROLES_VALIDOS = ['ADMIN', 'MIEMBRO'];
 
 const esAreaValida = (area) => areasValidas().includes(String(area || '').toUpperCase());
+
+/**
+ * Areas de una persona o invitacion: texto con comas ("MARKETING,DESARROLLO")
+ * o lista. Devuelve el texto para guardar (en el orden del panel), o null si
+ * viene vacia o alguna no existe.
+ */
+const validarAreas = (entrada) => {
+  const { areasDeTexto } = require('./permisosArea.utils');
+  const lista = areasDeTexto(entrada);
+  if (!lista.length || !lista.every(esAreaValida)) return null;
+  return areasValidas().filter((clave) => lista.includes(clave)).join(',');
+};
 const esRolValido = (rol) => ROLES_VALIDOS.includes(String(rol || '').toUpperCase());
 
 // Validacion minima de formato de correo (no sustituye a la verificacion por enlace).
@@ -148,6 +160,7 @@ module.exports = {
   areasValidas,
   ROLES_VALIDOS,
   esAreaValida,
+  validarAreas,
   esRolValido,
   esEmailValido,
 };

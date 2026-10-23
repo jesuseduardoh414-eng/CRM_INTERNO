@@ -23,13 +23,14 @@ const prisma  = require('../lib/prisma');
 const {
   validarPasswordNueva,
   esAreaValida,
+  validarAreas,
   esRolValido,
   esEmailValido,
   areasValidas,
 } = require('../utils/security.utils');
 const { cifrar, descifrar, sha256, igualesSeguro } = require('../utils/cifrado.utils');
 const { generarSecreto, verificarTotp, uriOtpauth } = require('../utils/totp.utils');
-const { permisosEfectivos } = require('../utils/permisosArea.utils');
+const { permisosEfectivos, alcancesPorArea, areasDeTexto } = require('../utils/permisosArea.utils');
 const { moduloActivo: moduloActivoConfig } = require('../services/configuracion.service');
 const {
   ErrorSesion,
@@ -47,7 +48,9 @@ const correo = require('../services/email.service');
 const { configEnCache } = require('../services/configuracion.service');
 const { reglasAcceso, debeActivar2FA } = require('../utils/politicas.utils');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
-const { esAdminGlobal, veTodosLosUsuarios, gestionaUsuariosDe } = require('../utils/permissions.utils');
+const {
+  esAdminGlobal, gestionaUsuariosDe, gestionaTodasLasAreas, filtroUsuariosGestionados,
+} = require('../utils/permissions.utils');
 const { puede } = require('../utils/permisosArea.utils');
 
 // ---------------------------------------------------------------------------
@@ -106,6 +109,8 @@ const usuarioPublico = (usuario) => ({
   // Todas las casillas ya resueltas (area + rol + ajustes de la persona): el
   // frontend decide con esto qué menús y botones muestra.
   permisos: permisosEfectivos(usuario, configEnCache()),
+  // Con varias areas: casillas de alcance "area" que solo llegan a algunas.
+  alcanceAreas: alcancesPorArea(usuario, configEnCache()),
 });
 
 // Hash ficticio contra el que se compara cuando el correo no existe, para que
@@ -1038,7 +1043,8 @@ const generarInvitacion = async ({ nombre, email, area, rol, creadoPor, empresaI
   const datos = {
     nombre: String(nombre).trim(),
     email: emailNormalizado,
-    area: String(area).toUpperCase(),
+    // Una o varias areas separadas por coma ('' en las del portal de clientes).
+    area: areasDeTexto(area).join(','),
     rol: String(rol).toLowerCase(),
     token,
     expiraEn,
@@ -1082,13 +1088,14 @@ const invitar = async (req, res) => {
   if (!esEmailValido(emailNormalizado)) {
     return res.status(400).json({ error: 'El correo no tiene un formato válido' });
   }
-  if (!esAreaValida(area)) {
+  // Una o varias areas (lista o texto con comas).
+  const areaNormalizada = validarAreas(area);
+  if (!areaNormalizada) {
     return res.status(400).json({ error: 'Área no válida' });
   }
   if (!esRolValido(rol)) {
     return res.status(400).json({ error: 'Rol no válido' });
   }
-  const areaNormalizada = String(area).toUpperCase();
 
   try {
     const usuarioExistente = await prisma.usuario.findUnique({ where: { email: emailNormalizado } });
@@ -1096,8 +1103,8 @@ const invitar = async (req, res) => {
       return res.status(409).json({ error: 'El email ya está registrado' });
     }
 
-    if (!gestionaUsuariosDe(req.usuario, areaNormalizada)) {
-      return res.status(403).json({ error: 'Solo puedes invitar usuarios de tu propia área' });
+    if (!gestionaTodasLasAreas(req.usuario, areaNormalizada)) {
+      return res.status(403).json({ error: 'Solo puedes invitar a personas de tus áreas' });
     }
     if (String(rol).toUpperCase() === 'ADMIN' && !esAdminGlobal(req.usuario)) {
       return res.status(403).json({ error: 'Solo el administrador global puede asignar el rol de administrador' });
@@ -1213,8 +1220,9 @@ const aceptarInvitacion = async (req, res) => {
       }
     }
 
-    // `Invitacion.area` es texto libre; `Usuario.area` es el enum Area.
-    if (!esCliente && !esAreaValida(invitacion.area)) {
+    // `Invitacion.area` es texto libre (una o varias areas separadas por coma).
+    const areasInvitacion = esCliente ? '' : validarAreas(invitacion.area);
+    if (!esCliente && !areasInvitacion) {
       return res.status(400).json({ error: 'La invitación tiene un área no válida. Pide al administrador que la vuelva a enviar.' });
     }
 
@@ -1249,7 +1257,7 @@ const aceptarInvitacion = async (req, res) => {
           email: emailNormalizado,
           password: passwordHash,
           // Las cuentas del portal no pertenecen a ningún área del equipo.
-          area: esCliente ? '' : String(invitacion.area).toUpperCase(),
+          area: areasInvitacion,
           rol: rolNuevo,
           empresaId: esCliente ? invitacion.empresaId : null,
           estado: 'activo',
@@ -1287,7 +1295,7 @@ const reenviarInvitacion = async (req, res) => {
         email: normalizarEmail(email),
         estado: { not: 'aceptada' },
         rol: { notIn: ROLES_FUERA_DEL_EQUIPO },
-        ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area })
+        ...filtroUsuariosGestionados(req.usuario),
       }
     });
 
@@ -1319,7 +1327,7 @@ const reenviarInvitacion = async (req, res) => {
 const listarInvitaciones = async (req, res) => {
   try {
     const invitaciones = await prisma.invitacion.findMany({
-      where: { rol: { notIn: ROLES_FUERA_DEL_EQUIPO }, ...(veTodosLosUsuarios(req.usuario) ? {} : { area: req.usuario.area }) },
+      where: { rol: { notIn: ROLES_FUERA_DEL_EQUIPO }, ...filtroUsuariosGestionados(req.usuario) },
       orderBy: { creadoEn: 'desc' },
       // Sin el token: con el se podria aceptar la invitacion de otra persona.
       select: {

@@ -2,13 +2,16 @@ const prisma = require('../lib/prisma');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const bcrypt = require('bcryptjs');
 const { sortTareas } = require('../utils/sort.utils');
-const { esAdminGlobal, veTodosLosUsuarios, gestionaUsuariosDe } = require('../utils/permissions.utils');
 const {
-  alcanceDe, ajustesDe, heredados, permisosEfectivos, limpiarMapa, catalogoPublico,
+  esAdminGlobal, veTodosLosUsuarios, gestionaUsuariosDe, gestionaTodasLasAreas, areasGestionables,
+  filtroUsuariosGestionados, buildFiltroAreaProyecto,
+} = require('../utils/permissions.utils');
+const {
+  alcanceDe, ajustesDe, heredados, permisosEfectivos, limpiarMapa, catalogoPublico, areasDeTexto, AREA_GENERAL,
 } = require('../utils/permisosArea.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { rangoDiaMexico, rangoSemanaMexico } = require('../utils/fechas.utils');
-const { validarPasswordNueva, esAreaValida, esRolValido, esEmailValido } = require('../utils/security.utils');
+const { validarPasswordNueva, validarAreas, esRolValido, esEmailValido } = require('../utils/security.utils');
 const { subirArchivo, borrarBlobs, esBlobVercel, esLocal } = require('../utils/blob.utils');
 const { invalidarCacheUsuario } = require('../middlewares/auth.middleware');
 const { Prisma } = require('@prisma/client');
@@ -222,12 +225,12 @@ const guardarFotoPerfil = async (file) => {
 };
 
 // "usuarios.ver": ninguno = solo el directorio basico (nombre, area, rol);
-// area = gestiona a los de su area; todos = a cualquiera.
+// area = gestiona a quien comparte alguna de sus areas; todos = a cualquiera.
 const veGestion = (usuario) => esAdminGlobal(usuario) || alcanceDe(usuario, 'usuarios.ver') !== 'ninguno';
 const veTodos = veTodosLosUsuarios;
 const alcanzaArea = gestionaUsuariosDe;
 
-const obtenerFiltroUsuariosGestion = (usuario) => (veTodos(usuario) ? {} : { area: usuario.area });
+const obtenerFiltroUsuariosGestion = (usuario) => filtroUsuariosGestionados(usuario);
 
 // Devuelve todos los usuarios con su actividad pre-calculada de forma eficiente
 const listar = async (req, res) => {
@@ -243,7 +246,7 @@ const listar = async (req, res) => {
     const busqueda = construirBusqueda(req.query.q, ['nombre', 'email']);
     const filtrosExtra = combinarWhere(
       busqueda,
-      req.query.area ? { area: String(req.query.area).toUpperCase() } : null,
+      req.query.area ? buildFiltroAreaProyecto(String(req.query.area)) : null,
       req.query.rol ? { rol: String(req.query.rol).toUpperCase() } : null,
       req.query.estado ? { estado: String(req.query.estado).toLowerCase() } : null,
     );
@@ -519,9 +522,10 @@ const crear = async (req, res) => {
     return res.status(400).json({ error: 'El correo no tiene un formato válido' });
   }
 
-  const areaFinal = String(area || 'DESARROLLO').toUpperCase();
+  // Una o varias areas (lista o texto con comas).
+  const areaFinal = validarAreas(area || 'DESARROLLO');
   const rolFinal = String(rol || 'MIEMBRO').toUpperCase();
-  if (!esAreaValida(areaFinal)) {
+  if (!areaFinal) {
     return res.status(400).json({ error: 'Área no válida' });
   }
   if (!esRolValido(rolFinal)) {
@@ -529,8 +533,8 @@ const crear = async (req, res) => {
   }
 
   try {
-    if (!alcanzaArea(req.usuario, areaFinal)) {
-      return res.status(403).json({ error: 'Solo puedes crear usuarios de tu propia área' });
+    if (!gestionaTodasLasAreas(req.usuario, areaFinal)) {
+      return res.status(403).json({ error: 'Solo puedes invitar a personas de tus áreas' });
     }
     if (rolFinal === 'ADMIN' && !esAdminGlobal(req.usuario)) {
       return res.status(403).json({ error: 'Solo el administrador global puede asignar el rol de administrador' });
@@ -585,13 +589,14 @@ const editar = async (req, res) => {
     }
 
     const rolNormalizado = rol !== undefined && rol !== null && rol !== '' ? String(rol).toUpperCase() : undefined;
-    const areaNormalizada = area !== undefined && area !== null && area !== '' ? String(area).toUpperCase() : undefined;
+    const vieneArea = area !== undefined && area !== null && area !== '' && !(Array.isArray(area) && !area.length);
+    const areaNormalizada = vieneArea ? validarAreas(area) : undefined;
     const cambiaPassword = typeof password === 'string' && password.trim() !== '';
 
     if (rolNormalizado !== undefined && !esRolValido(rolNormalizado)) {
       return res.status(400).json({ error: 'Rol no válido' });
     }
-    if (areaNormalizada !== undefined && !esAreaValida(areaNormalizada)) {
+    if (areaNormalizada === null) {
       return res.status(400).json({ error: 'Área no válida' });
     }
 
@@ -611,8 +616,26 @@ const editar = async (req, res) => {
       if (cambiaPassword) {
         return res.status(403).json({ error: 'Solo el administrador global puede cambiar contraseñas' });
       }
-      if (areaNormalizada !== undefined && !alcanzaArea(req.usuario, areaNormalizada)) {
-        return res.status(403).json({ error: 'No puedes mover usuarios a otra área' });
+    }
+
+    // Quien no gestiona todas las areas solo da o quita las suyas; las demas
+    // areas de la persona se quedan como estaban.
+    let areasFinales;
+    if (areaNormalizada !== undefined) {
+      const pedidas = areasDeTexto(areaNormalizada);
+      const mias = areasGestionables(req.usuario); // null = todas
+      const actuales = areasDeTexto(objetivo.area);
+      if (mias && pedidas.some((a) => !mias.includes(a) && !actuales.includes(a))) {
+        return res.status(403).json({ error: 'Solo puedes dar áreas que tú administras' });
+      }
+      areasFinales = validarAreas(mias
+        ? [...actuales.filter((a) => !mias.includes(a)), ...pedidas.filter((a) => mias.includes(a))]
+        : pedidas);
+      if (!areasFinales) {
+        return res.status(400).json({ error: 'La persona tiene que quedar en al menos un área' });
+      }
+      if (id === req.usuario.id && esAdminGlobal(req.usuario) && !areasDeTexto(areasFinales).includes(AREA_GENERAL)) {
+        return res.status(400).json({ error: 'No puedes quitarte el área de Administración: dejarías de ser el administrador general' });
       }
     }
 
@@ -643,7 +666,7 @@ const editar = async (req, res) => {
       data.email = emailNormalizado;
     }
 
-    if (areaNormalizada !== undefined) data.area = areaNormalizada;
+    if (areasFinales !== undefined) data.area = areasFinales;
     if (rolNormalizado !== undefined) data.rol = rolNormalizado;
 
     if (cambiaPassword) {

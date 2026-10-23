@@ -14,6 +14,7 @@ import SelectorSimple from '../SelectorSimple';
 import SelectorMultiple from '../SelectorMultiple';
 import UserAvatar from '../UserAvatar';
 import { claveRegla, motivoArchivo, motivoArticulo } from '../../utils/accesoConocimiento';
+import { areasDeTexto } from '../../utils/areas';
 
 const MOTIVOS = {
   general: 'accMotivoGeneral', autor: 'accMotivoAutor', subio: 'accMotivoSubio', regla: 'accMotivoRegla', articulo: 'accMotivoArticulo', equipo: 'accMotivoEquipo',
@@ -107,10 +108,15 @@ const SelectorAcceso = ({ valor, onCambio, contexto = 'articulo', autorId, acces
     { valor: 'admin', etiqueta: tc('accSoloAdmins') },
     { valor: 'miembro', etiqueta: tc('accSoloMiembros') },
   ];
-  // Agrupadas por área y en el orden de las áreas configuradas.
+  // Agrupadas por área y en el orden de las áreas configuradas (quien tiene
+  // varias va en el grupo de esas áreas, después del de la primera).
   const ordenArea = new Map(areas.map((a, i) => [a.clave, i]));
+  const ordenDe = (u) => ordenArea.get(areasDeTexto(u.area)[0]) ?? 99;
   const opcionesPersonas = [...personas]
-    .sort((a, b) => (ordenArea.get(a.area) ?? 99) - (ordenArea.get(b.area) ?? 99) || a.nombre.localeCompare(b.nombre, 'es'))
+    .sort((a, b) => ordenDe(a) - ordenDe(b)
+      || areasDeTexto(a.area).length - areasDeTexto(b.area).length
+      || nombreArea(a.area).localeCompare(nombreArea(b.area), 'es')
+      || a.nombre.localeCompare(b.nombre, 'es'))
     .map((u) => ({ valor: u.id, etiqueta: u.nombre, grupo: nombreArea(u.area) }));
 
   const resumen = !valor.restringido && !esArchivo

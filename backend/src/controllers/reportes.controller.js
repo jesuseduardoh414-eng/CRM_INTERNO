@@ -4,9 +4,10 @@
 const XLSX = require('xlsx');
 const prisma = require('../lib/prisma');
 const { esAdminGlobal, buildFiltroAreaProyecto } = require('../utils/permissions.utils');
+const { areasDe, areasDeTexto } = require('../utils/permisosArea.utils');
 
-// Alcance de los reportes: el administrador general ve todo; el resto, su area.
-const scopeReporte = (usuario) => (esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(usuario.area));
+// Alcance de los reportes: el administrador general ve todo; el resto, sus areas.
+const scopeReporte = (usuario) => (esAdminGlobal(usuario) ? {} : buildFiltroAreaProyecto(areasDe(usuario)));
 const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { rangoDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
 const { configEnCache } = require('../services/configuracion.service');
@@ -16,8 +17,10 @@ const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_DIAS = 366;
 const ESTADOS_CONTRATO_VIGENTES = ['VIGENTE', 'EN_REVISION'];
 
-const nombreArea = (clave) => configEnCache().reglas.areas.find((a) => a.clave === clave)?.nombre
-  || (clave ? clave.charAt(0) + clave.slice(1).toLowerCase() : '');
+// Con varias areas ("MARKETING,DESARROLLO"), sus nombres separados por coma.
+const nombreArea = (claves) => areasDeTexto(claves)
+  .map((clave) => configEnCache().reglas.areas.find((a) => a.clave === clave)?.nombre || clave.charAt(0) + clave.slice(1).toLowerCase())
+  .join(', ');
 
 /** Rango ?desde=&hasta= (YYYY-MM-DD). Por defecto, los últimos 30 días. */
 const leerRango = (query) => {
@@ -57,7 +60,11 @@ const personas = async (req, res) => {
   try {
     const scope = scopeReporte(req.usuario);
     const miembros = await prisma.usuario.findMany({
-      where: { rol: { in: ['MIEMBRO', 'ADMIN'] }, OR: [{ estado: 'activo' }, { estado: null }], ...(esAdminGlobal(req.usuario) ? {} : { area: req.usuario.area }) },
+      where: {
+        rol: { in: ['MIEMBRO', 'ADMIN'] },
+        OR: [{ estado: 'activo' }, { estado: null }],
+        ...(esAdminGlobal(req.usuario) ? {} : { AND: [buildFiltroAreaProyecto(areasDe(req.usuario))] }),
+      },
       orderBy: { nombre: 'asc' },
       select: { id: true, nombre: true, area: true, rol: true, fotoPerfilUrl: true },
     });

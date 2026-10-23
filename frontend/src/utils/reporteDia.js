@@ -11,6 +11,7 @@
  */
 
 import { fechaLocalDesdeISO } from './fechasLocales';
+import { areasDeTexto } from './areas';
 
 const escapar = (valor) => String(valor ?? '')
   .replace(/&/g, '&amp;')
@@ -138,7 +139,7 @@ export const construirHtmlReporte = ({ filas = [], textos = {}, locale = 'es-MX'
           <div class="persona-cab">
             <div>
               <span class="nombre">${escapar(miembro.nombre)}</span>
-              ${miembro.area ? `<span class="area">${escapar(textos.areas?.[miembro.area] || miembro.area)}</span>` : ''}
+              ${miembro.area ? `<span class="area">${escapar(areasDeTexto(miembro.area).map((a) => textos.areas?.[a] || a).join(', '))}</span>` : ''}
             </div>
             <div class="conteo">${escapar(conteo)}</div>
           </div>

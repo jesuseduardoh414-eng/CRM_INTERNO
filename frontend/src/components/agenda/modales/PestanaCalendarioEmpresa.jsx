@@ -5,7 +5,7 @@ import { useAuth } from '../../../context/AuthContext';
 import { usePreferences } from '../../../context/PreferencesContext';
 import { useConfiguracion } from '../../../context/ConfiguracionContext';
 import { useTextoAgenda } from '../../../hooks/useTextoAgenda';
-import { alcanceDe, puede } from '../../../utils/permisos';
+import { alcanceDe, areasDelAlcance, puede } from '../../../utils/permisos';
 import { claveDiaLocal, fechaDesdeClave } from '../../../utils/fechasLocales';
 import SelectorRangoFechas from '../../SelectorRangoFechas';
 import Tooltip from '../../Tooltip';
@@ -51,6 +51,8 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
   // área; con "todos", de la empresa o de cualquier área.
   const esAdmin = puede(usuario, 'agenda.diasEmpresa');
   const esAdminDeArea = esAdmin && Boolean(usuario?.area) && alcanceDe(usuario, 'agenda.diasEmpresa') !== 'todos';
+  // Áreas cuyos días marca y quita un admin de área (con varias, elige una).
+  const misAreasDias = esAdminDeArea ? areasDelAlcance(usuario, 'agenda.diasEmpresa') : [];
 
   const [registros, setRegistros] = useState([]);
   const [proximos, setProximos] = useState([]);
@@ -59,6 +61,7 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
   const [guardando, setGuardando] = useState(false);
   const [eliminandoId, setEliminandoId] = useState(null);
   const [nuevo, setNuevo] = useState(NUEVO_VACIO);
+  const areaPropia = misAreasDias.includes(nuevo.area) ? nuevo.area : misAreasDias[0];
   const [errorNombre, setErrorNombre] = useState(false);
   const [version, setVersion] = useState(0);
   const recargar = useCallback(() => setVersion((v) => v + 1), []);
@@ -184,8 +187,8 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
         // "Cada año" no aplica a lo semanal (el servidor lo ignora)
         repetirAnual: nuevo.repetirSemanal ? false : nuevo.repetirAnual,
         ...(nuevo.repetirSemanal ? { diasSemana: nuevo.diasSemana, sinFin: nuevo.sinFin } : {}),
-        // El servidor fuerza el area propia a un admin de area
-        area: esAdminDeArea ? usuario.area : (nuevo.area || null),
+        // Un admin de área solo marca días de sus áreas (el servidor lo revisa)
+        area: esAdminDeArea ? areaPropia : (nuevo.area || null),
       });
       showToast(tx('mod_empAgregado'));
       setNuevo((prev) => ({ ...NUEVO_VACIO(), tipo: prev.tipo, area: prev.area }));
@@ -308,8 +311,15 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
           </div>
           <div className="form-group !mb-0">
             <label className="form-label" htmlFor="agm-emp-area">{tx('mod_aplicaA')}</label>
-            {esAdminDeArea ? (
-              <div id="agm-emp-area" className="agm-campo agm-campo-lectura">{nombreArea(usuario.area)}</div>
+            {esAdminDeArea && misAreasDias.length > 1 ? (
+              <SelectorSimple
+                id="agm-emp-area"
+                valor={areaPropia}
+                onCambio={(v) => setNuevo({ ...nuevo, area: v })}
+                opciones={misAreasDias.map((clave) => ({ valor: clave, etiqueta: nombreArea(clave) }))}
+              />
+            ) : esAdminDeArea ? (
+              <div id="agm-emp-area" className="agm-campo agm-campo-lectura">{nombreArea(areaPropia)}</div>
             ) : (
               <SelectorSimple
                 id="agm-emp-area"
@@ -437,8 +447,8 @@ const PestanaCalendarioEmpresa = ({ showToast, onCambio }) => {
               {registros.map((r) => {
                 const tipo = tipoDe(r.tipo);
                 const Icono = tipo.icono;
-                // Un admin de area solo puede quitar los de su area
-                const puedeQuitar = !esAdminDeArea || r.area === usuario.area;
+                // Un admin de area solo puede quitar los de sus areas
+                const puedeQuitar = !esAdminDeArea || misAreasDias.includes(r.area);
                 return (
                   <li key={r.id} className="agm-fila">
                     <span className="agm-icono-tipo" style={{ '--agm-color': tipo.color }} aria-hidden="true"><Icono size={14} /></span>

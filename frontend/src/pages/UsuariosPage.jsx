@@ -7,7 +7,7 @@ import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { useConfiguracion } from '../context/ConfiguracionContext';
-import { AREA_GENERAL } from '../utils/areas';
+import { AREA_GENERAL, areasDeTexto } from '../utils/areas';
 import { PageSkeleton } from '../components/Skeleton';
 import UserAvatar from '../components/UserAvatar';
 import Modal from '../components/Modal';
@@ -15,13 +15,16 @@ import Tooltip from '../components/Tooltip';
 import ActionMenu from '../components/ActionMenu';
 import CampoFiltro from '../components/CampoFiltro';
 import SelectorSimple from '../components/SelectorSimple';
+import SelectorMultiple from '../components/SelectorMultiple';
 import { useConfirmacion } from '../components/ConfirmDialog';
 import { Button } from '../components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { useDebounce } from '../utils/useDebounce';
 import ModalPermisosPersona from '../components/usuarios/ModalPermisosPersona';
-import { alcanceDe, esAdminGeneral, puede } from '../utils/permisos';
+import {
+  alcanceDe, areasDe, areasDelAlcance, esAdminGeneral, puede,
+} from '../utils/permisos';
 import { useTextoPermisos } from '../hooks/useTextoPermisos';
 import {
   KeyRound,
@@ -688,25 +691,53 @@ const TablaInvitaciones = ({ invitaciones, onResend, onDelete }) => {
   );
 };
 
-/** Sin "usuarios.ver" = todos, solo se gestiona la propia área. */
+/** Sin "usuarios.ver" = todos, solo se gestionan sus áreas. */
 const soloSuArea = (usuario) => !esAdminGeneral(usuario) && alcanceDe(usuario, 'usuarios.ver') !== 'todos';
+/** Áreas que puede dar o quitar quien no gestiona todas (mismo criterio que el servidor). */
+const areasQueGestiona = (usuario) => (alcanceDe(usuario, 'usuarios.ver') === 'area' ? areasDelAlcance(usuario, 'usuarios.ver') : areasDe(usuario));
 /** Solo el administrador general da el rol de administrador. */
 const rolesQueAsigna = (usuario) => (esAdminGeneral(usuario) ? ROLES : ['MIEMBRO']);
 
+/**
+ * Selector de una o varias áreas. `bloqueadas` son las que la persona ya
+ * tiene y quien edita no administra: se ven elegidas pero no se pueden quitar.
+ */
+const SelectorAreas = ({ id, disponibles, elegidas, bloqueadas = [], onCambio }) => {
+  const { t } = usePreferences();
+  const { nombreArea } = useConfiguracion();
+  const opciones = [...disponibles, ...bloqueadas.filter((a) => !disponibles.includes(a))]
+    .map((a) => ({ valor: a, etiqueta: etiquetaArea(t, nombreArea, a), deshabilitada: bloqueadas.includes(a) }));
+  const alternar = (clave) => onCambio(elegidas.includes(clave) ? elegidas.filter((a) => a !== clave) : [...elegidas, clave]);
+  return (
+    <div id={id}>
+      <SelectorMultiple
+        opciones={opciones}
+        seleccionados={elegidas}
+        onToggle={alternar}
+        placeholder={t('usersAreasPlaceholder')}
+        disabled={opciones.length === 1 && elegidas.length === 1}
+      />
+      {bloqueadas.length > 0 && <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">{t('usersAreasOtherHint')}</p>}
+    </div>
+  );
+};
+
 const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
   const { t } = usePreferences();
-  const { areas, nombreArea } = useConfiguracion();
+  const { areas } = useConfiguracion();
   const esAdminArea = soloSuArea(usuarioActual);
-  const areasDisponibles = esAdminArea ? [usuarioActual.area] : areas.map((a) => a.clave);
-  const [form, setForm] = useState({ nombre: '', email: '', area: areasDisponibles[0] || AREA_GENERAL, rol: 'MIEMBRO' });
+  const areasDisponibles = esAdminArea ? areasQueGestiona(usuarioActual) : areas.map((a) => a.clave);
+  const [form, setForm] = useState({ nombre: '', email: '', areas: [areasDisponibles[0] || AREA_GENERAL], rol: 'MIEMBRO' });
   const [cargando, setCargando] = useState(false);
   const { showToast } = useToast();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.areas.length) { showToast(t('usersAreasRequired'), 'error'); return; }
     setCargando(true);
     try {
-      const res = await usuariosService.invitar(form);
+      const { areas: elegidas, ...datos } = form;
+      const res = await usuariosService.invitar({ ...datos, area: elegidas.join(',') });
       // El backend puede crear la invitacion pero no lograr enviar el correo:
       // lo dice en `advertencia` y hay que mostrarlo, no darlo por enviado.
       if (res?.advertencia) showToast(res.advertencia, 'info', { duration: 8000 });
@@ -765,13 +796,12 @@ const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label htmlFor="invitar-area" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldArea')}</label>
-              <SelectorSimple
+              <label htmlFor="invitar-area" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldAreas')}</label>
+              <SelectorAreas
                 id="invitar-area"
-                disabled={areasDisponibles.length === 1}
-                valor={form.area}
-                onCambio={v => setForm({...form, area: v})}
-                opciones={areasDisponibles.map(a => ({ valor: a, etiqueta: etiquetaArea(t, nombreArea, a) }))}
+                disponibles={areasDisponibles}
+                elegidas={form.areas}
+                onCambio={v => setForm({...form, areas: v})}
               />
             </div>
             <div className="space-y-1">
@@ -809,18 +839,22 @@ const ModalInvitar = ({ usuarioActual, onClose, onSuccess }) => {
 
 const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
   const { t } = usePreferences();
-  const { areas, nombreArea } = useConfiguracion();
+  const { areas } = useConfiguracion();
   const esAdminArea = soloSuArea(usuarioActual);
   const areasConfiguradas = areas.map((a) => a.clave);
-  // Si el area del usuario ya no existe (la quito el configurador) se sigue
-  // ofreciendo, para no cambiarsela sin querer al guardar.
+  const areasActuales = areasDeTexto(usuario?.area);
+  // Quien administra solo algunas áreas da o quita esas; las demás de la
+  // persona se ven pero no se tocan (el servidor las conserva). Si un área
+  // de la persona ya no existe (la quitó el configurador) se sigue
+  // ofreciendo, para no quitársela sin querer al guardar.
   const areasDisponibles = esAdminArea
-    ? [usuarioActual.area]
-    : (usuario?.area && !areasConfiguradas.includes(usuario.area) ? [...areasConfiguradas, usuario.area] : areasConfiguradas);
+    ? areasQueGestiona(usuarioActual)
+    : [...areasConfiguradas, ...areasActuales.filter((a) => !areasConfiguradas.includes(a))];
+  const bloqueadas = areasActuales.filter((a) => !areasDisponibles.includes(a));
   const [form, setForm] = useState({
     nombre: usuario?.nombre || '',
     email: usuario?.email || '',
-    area: usuario?.area || areasDisponibles[0] || AREA_GENERAL,
+    areas: areasActuales.length ? areasActuales : [areasDisponibles[0] || AREA_GENERAL],
     rol: usuario?.rol || 'MIEMBRO',
   });
   const [cargando, setCargando] = useState(false);
@@ -828,9 +862,11 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.areas.length) { showToast(t('usersAreasRequired'), 'error'); return; }
     setCargando(true);
     try {
-      await usuariosService.editar(usuario.id, form);
+      const { areas: elegidas, ...datos } = form;
+      await usuariosService.editar(usuario.id, { ...datos, area: elegidas.join(',') });
       showToast(t('usersUpdated'));
       onSuccess();
     } catch (error) {
@@ -876,13 +912,13 @@ const ModalEditar = ({ usuarioActual, usuario, onClose, onSuccess }) => {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
-              <label htmlFor="editar-area" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldArea')}</label>
-              <SelectorSimple
+              <label htmlFor="editar-area" className="text-xs font-medium text-[var(--color-text-muted)]">{t('fieldAreas')}</label>
+              <SelectorAreas
                 id="editar-area"
-                disabled={areasDisponibles.length === 1}
-                valor={form.area}
-                onCambio={v => setForm({...form, area: v})}
-                opciones={areasDisponibles.map(a => ({ valor: a, etiqueta: etiquetaArea(t, nombreArea, a) }))}
+                disponibles={areasDisponibles}
+                elegidas={form.areas}
+                bloqueadas={bloqueadas}
+                onCambio={v => setForm({...form, areas: v})}
               />
             </div>
             <div className="space-y-1">

@@ -4,7 +4,10 @@
 // la empresa.
 const prisma = require('../lib/prisma');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
-const { puede, alcanceDe } = require('../utils/permisosArea.utils');
+const {
+  puede, alcanceDe, areasDe, areasDelAlcance,
+} = require('../utils/permisosArea.utils');
+const { buildFiltroAreaProyecto } = require('../utils/permissions.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { feriadosMexico } = require('./agenda.controller');
 const { horarioDelDia } = require('../utils/horarios.utils');
@@ -54,12 +57,14 @@ const leerRango = (query, maxDias, porDefectoDias = 7) => {
 
 /**
  * Áreas cuyos días ve el usuario: todas con "agenda.diasEmpresa" = todos (el
- * administrador general siempre); los demás, empresa + su área.
+ * administrador general siempre); los demás, empresa + sus áreas.
  */
 const diasDeTodas = (usuario) => alcanceDe(usuario, 'agenda.diasEmpresa') === 'todos';
 const filtroAreaVisible = (usuario) => (diasDeTodas(usuario)
   ? {}
-  : { OR: [{ area: null }, { area: usuario.area }] });
+  : { OR: [{ area: null }, { area: { in: areasDe(usuario) } }] });
+/** Áreas cuyos días puede marcar o quitar (alcance "area"). */
+const areasDeDias = (usuario) => areasDelAlcance(usuario, 'agenda.diasEmpresa');
 
 /**
  * Días de la empresa dentro del rango, uno por fecha. Los que se repiten cada
@@ -170,10 +175,14 @@ const crearDiaEmpresa = async (req, res) => {
   const nombreLimpio = String(nombre || '').trim().slice(0, 120);
   if (nombreLimpio.length < 2) return res.status(400).json({ error: 'Ponle un nombre (por ejemplo, Día de la Independencia)' });
 
-  // Con alcance "area" solo se marcan días de la propia área; con "todos",
-  // para la empresa o el área que se elija.
+  // Con alcance "area" solo se marcan días de sus áreas (la elegida, o la
+  // única que tiene); con "todos", para la empresa o el área que se elija.
   let areaFinal = area ? String(area).toUpperCase() : null;
-  if (!diasDeTodas(req.usuario)) areaFinal = req.usuario.area;
+  if (!diasDeTodas(req.usuario)) {
+    const suyas = areasDeDias(req.usuario);
+    if (!suyas.includes(areaFinal)) areaFinal = suyas.length === 1 ? suyas[0] : null;
+    if (!areaFinal) return res.status(400).json({ error: 'Elige una de tus áreas' });
+  }
   if (areaFinal && !configEnCache().reglas.areas.some((a) => a.clave === areaFinal)) {
     return res.status(400).json({ error: 'Área no válida' });
   }
@@ -204,8 +213,8 @@ const eliminarDiaEmpresa = async (req, res) => {
   try {
     const dia = await prisma.diaEmpresa.findUnique({ where: { id: String(req.params.id) } });
     if (!dia) return res.status(404).json({ error: 'No existe ese día' });
-    if (!diasDeTodas(req.usuario) && dia.area !== req.usuario.area) {
-      return res.status(403).json({ error: 'Solo puedes quitar los días de tu área' });
+    if (!diasDeTodas(req.usuario) && !areasDeDias(req.usuario).includes(dia.area)) {
+      return res.status(403).json({ error: 'Solo puedes quitar los días de tus áreas' });
     }
     await prisma.diaEmpresa.delete({ where: { id: dia.id } });
     return res.json({ mensaje: 'Día quitado del calendario' });
@@ -271,7 +280,8 @@ const agendaEquipo = async (req, res) => {
       where: {
         rol: { in: ['MIEMBRO', 'ADMIN'] },
         ...ACTIVO,
-        ...(alcanceDe(req.usuario, 'agenda.equipo') === 'todos' ? {} : { area: req.usuario.area }),
+        // AND: ACTIVO ya trae su propio OR.
+        ...(alcanceDe(req.usuario, 'agenda.equipo') === 'todos' ? {} : { AND: [buildFiltroAreaProyecto(areasDelAlcance(req.usuario, 'agenda.equipo'))] }),
       },
       orderBy: { nombre: 'asc' },
       select: { id: true, nombre: true, area: true, rol: true, fotoPerfilUrl: true },
@@ -370,7 +380,7 @@ const sugerirHorarios = async (req, res) => {
     for (let i = 0; i < dias && slots.length < maximo; i += 1) {
       const clave = sumarDias(desde, i);
       const cierreEmpresa = diasEmpresa.some((d) => d.fecha === clave && TIPOS_DIA_SIN_TRABAJO.includes(d.tipo)
-        && (!d.area || usuarios.some((u) => u.area === d.area)));
+        && (!d.area || usuarios.some((u) => areasDe(u).includes(d.area))));
       if (cierreEmpresa) continue;
       // Ventana común: la entrada más tarde y la salida más temprana.
       let inicioMin = 0;
