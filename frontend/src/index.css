@@ -577,14 +577,12 @@ button {
    importa desde el componente y en el bundle acaba DESPUES de este archivo, asi
    que a igualdad de especificidad ganaba ella y estos ajustes no se aplicaban.
 
-   `rdp-ocupado` marca los dias en que alguien ya tiene otro proyecto: se avisa
-   pero no se bloquea, solaparse es decision del admin. Los bloqueos duros usan
-   el `disabled` propio de la libreria. */
+   `rdp-ocupado` marca los dias en que alguien ya tiene otro proyecto, tareas o
+   reuniones: se avisa pero no se bloquea, solaparse es decision del admin. */
 .rdp-root.calendario-crm {
   --rdp-accent-color: var(--color-primary);
   --rdp-accent-background-color: var(--color-primary-10);
   --rdp-today-color: var(--color-primary);
-  --rdp-disabled-opacity: 0.35;
   --rdp-day-height: 2.1rem;
   --rdp-day-width: 2.1rem;
   --rdp-nav-height: 2.1rem;
@@ -625,17 +623,13 @@ button {
   color: var(--color-text-muted);
 }
 
-/* Dia con otro proyecto en marcha: se avisa, pero se puede elegir */
-.calendario-crm .rdp-ocupado:not(.rdp-disabled) .rdp-day_button {
+/* Dia en que alguien ya tiene trabajo: se avisa, pero se puede elegir. Dentro
+   del rango elegido manda el color de la seleccion; si no, con un responsable
+   ocupado todo el mes el rango no se distinguia del resto. */
+.calendario-crm .rdp-ocupado:not(.rdp-selected) .rdp-day_button {
   color: var(--badge-warning-fg);
   background: var(--badge-warning-bg);
   border-radius: 8px;
-}
-
-/* Dia en que alguien no esta disponible: no se puede elegir */
-.calendario-crm .rdp-day_button:disabled {
-  color: var(--color-error);
-  text-decoration: line-through;
 }
 
 /* ── Logo de marca según tema ────────────────────────────────────────────────

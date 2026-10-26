@@ -23,19 +23,18 @@ const aClave = (fecha) => {
  *
  * Antes eran dos selectores separados mas una lista aparte con la agenda de
  * cada responsable. Aqui la ocupacion se ve sobre el propio calendario: los
- * dias que alguien tiene bloqueados salen tachados y no se pueden elegir, y los
- * que solo tienen otro proyecto en marcha salen marcados en ambar pero si se
- * pueden elegir, porque solaparse con otro proyecto es decision del admin.
+ * dias en que alguien ya tiene otro proyecto, tareas o reuniones salen en
+ * ambar, pero se pueden elegir, porque cargarle mas trabajo es decision del
+ * admin. Antes algunos salian tachados y no dejaban guardar.
  */
 const SelectorRangoFechas = ({
   desde,
   hasta,
   onChange,
-  bloqueadas,
-  // Sin bloqueos que evaluar, todo dia es elegible
-  esBloqueoDuro = () => false,
+  // Map 'YYYY-MM-DD' -> lo que ocupa a alguien ese dia
+  ocupadas,
   // La leyenda solo tiene sentido cuando se esta repartiendo trabajo; al usarlo
-  // como filtro de busqueda no hay dias bloqueados que explicar.
+  // como filtro de busqueda no hay dias ocupados que explicar.
   conLeyenda = true,
   // Sin recuadro propio, para cuando ya vive dentro de otro panel con borde y
   // encajarlo tal cual daria una caja dentro de otra caja.
@@ -54,17 +53,10 @@ const SelectorRangoFechas = ({
 
   const rango = { from: aFecha(desde), to: aFecha(hasta) };
 
-  const { duros, avisos } = useMemo(() => {
-    const listaDuros = [];
-    const listaAvisos = [];
-    (bloqueadas || new Map()).forEach((conflictos, clave) => {
-      const fecha = aFecha(clave);
-      if (!fecha) return;
-      if (conflictos.some(esBloqueoDuro)) listaDuros.push(fecha);
-      else listaAvisos.push(fecha);
-    });
-    return { duros: listaDuros, avisos: listaAvisos };
-  }, [bloqueadas, esBloqueoDuro]);
+  const avisos = useMemo(
+    () => [...(ocupadas || new Map()).keys()].map(aFecha).filter(Boolean),
+    [ocupadas],
+  );
 
   const alSeleccionar = (nuevo) => {
     onChange({
@@ -87,10 +79,6 @@ const SelectorRangoFechas = ({
       <span className="flex items-center gap-1.5 text-xs font-normal text-[var(--color-text-muted)]">
         <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-accent-warning)]" />
         {t('projectDayBusyProject')}
-      </span>
-      <span className="flex items-center gap-1.5 text-xs font-normal text-[var(--color-text-muted)]">
-        <span className="h-2.5 w-2.5 rounded-full bg-[var(--color-accent-error)]" />
-        {t('projectDayBlocked')}
       </span>
     </div>
   );
@@ -138,7 +126,6 @@ const SelectorRangoFechas = ({
               locale={idioma}
               defaultMonth={rango.from}
               numberOfMonths={1}
-              disabled={duros}
               modifiers={{ ocupado: avisos }}
               modifiersClassNames={{ ocupado: 'rdp-ocupado' }}
             />
@@ -175,7 +162,6 @@ const SelectorRangoFechas = ({
           // Abre en el mes del inicio elegido; sin fechas, en el mes actual
           defaultMonth={rango.from}
           numberOfMonths={1}
-          disabled={duros}
           modifiers={{ ocupado: avisos }}
           modifiersClassNames={{ ocupado: 'rdp-ocupado' }}
         />

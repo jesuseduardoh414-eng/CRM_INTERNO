@@ -102,8 +102,6 @@ const expandBlockedDates = (conflictos) => {
   return blocked;
 };
 
-const esBloqueoReal = (conflicto) => conflicto.tipo !== 'proyecto';
-
 /** Clientes del directorio para el modal y el filtro (solo admin con el modulo activo). */
 const useClientesCatalogo = (activo) => {
   const { data } = useSWR(activo ? ['empresas-catalogo', 'CLIENTE'] : null, () => empresasService.catalogo('CLIENTE'));
@@ -498,7 +496,11 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
   const usuariosParaBloqueo = usuariosEnAreas.filter(u =>
     form.miembrosIds.includes(u.id) && (!proyecto || !miembrosExistentes.has(u.id))
   );
-  const fechasBloqueadas = expandBlockedDates(
+  // Proyectos, tareas y reuniones de los responsables solo avisan en el
+  // calendario: ninguno impide elegir el dia ni guardar. Antes las tareas y
+  // reuniones tachaban el dia, y quien lleva varios pendientes solo de
+  // seguimiento ya no se podia sumar a ningun proyecto nuevo.
+  const fechasOcupadas = expandBlockedDates(
     usuariosParaBloqueo
       .filter(u => !esAdminUsuario(u))
       .flatMap(u => (ocupados[u.id] || []).map(conflicto => ({ ...conflicto, usuario: u })))
@@ -625,18 +627,6 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
       showToast(t('projectDateRangeError'), 'error');
       if (conPasos) setPaso(2);
       return;
-    }
-    const inicio = fechaDesdeClave(form.fechaInicio);
-    const fin = form.fechaFin ? fechaDesdeClave(form.fechaFin) : inicio;
-    const cursor = new Date(inicio);
-    while (cursor <= fin) {
-      const conflictosDia = fechasBloqueadas.get(claveDiaLocal(cursor)) || [];
-      if (conflictosDia.some(esBloqueoReal)) {
-        showToast(t('projectMemberRangeConflict'), 'error');
-        if (conPasos) setPaso(2);
-        return;
-      }
-      cursor.setDate(cursor.getDate() + 1);
     }
     setCargando(true);
     try {
@@ -857,8 +847,7 @@ const ModalProyecto = ({ proyecto, onClose, onGuardar }) => {
                     desde={form.fechaInicio}
                     hasta={form.fechaFin}
                     onChange={({ desde, hasta }) => setForm({ ...form, fechaInicio: desde, fechaFin: hasta })}
-                    bloqueadas={fechasBloqueadas}
-                    esBloqueoDuro={esBloqueoReal}
+                    ocupadas={fechasOcupadas}
                   />
                 </div>
               </>
