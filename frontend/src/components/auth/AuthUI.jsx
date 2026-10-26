@@ -185,10 +185,20 @@ export const CodigoOtp = ({ valor, onChange, onCompleto, invalido = false, desha
   const { t } = usePreferences();
   const refs = useRef([]);
   const digitos = Array.from({ length: 6 }, (_, i) => valor[i] || '');
+  // El valor recien escrito, antes de que React vuelva a pintar. Al pasar el
+  // foco a la casilla siguiente su onFocus todavia ve el `valor` anterior: con
+  // el viejo, el primer digito mandaba el foco de vuelta a la primera casilla y
+  // el siguiente lo reemplazaba ("234" quedaba "34").
+  const actual = useRef(valor);
+  useEffect(() => { actual.current = valor; }, [valor]);
+  const cambiar = (nuevo) => {
+    actual.current = nuevo;
+    onChange(nuevo);
+  };
 
   const fijar = (nuevo) => {
     const limpio = nuevo.replace(/\D/g, '').slice(0, 6);
-    onChange(limpio);
+    cambiar(limpio);
     if (limpio.length === 6) onCompleto?.(limpio);
     return limpio;
   };
@@ -208,7 +218,7 @@ export const CodigoOtp = ({ valor, onChange, onCompleto, invalido = false, desha
       if (event.target.value === '' && digitos[indice]) {
         const arreglo = [...digitos];
         arreglo[indice] = '';
-        onChange(arreglo.join('').slice(0, 6));
+        cambiar(arreglo.join('').slice(0, 6));
       }
       return;
     }
@@ -234,7 +244,7 @@ export const CodigoOtp = ({ valor, onChange, onCompleto, invalido = false, desha
         arreglo[indice - 1] = '';
         refs.current[indice - 1]?.focus();
       }
-      onChange(arreglo.join('').slice(0, 6));
+      cambiar(arreglo.join('').slice(0, 6));
     } else if (event.key === 'ArrowLeft' && indice > 0) {
       refs.current[indice - 1]?.focus();
     } else if (event.key === 'ArrowRight' && indice < 5) {
@@ -272,7 +282,8 @@ export const CodigoOtp = ({ valor, onChange, onCompleto, invalido = false, desha
             onFocus={(e) => {
               // El valor no admite huecos: tocar una casilla mas alla de la
               // primera vacia lleva a esa, para que el digito caiga donde se ve.
-              if (i > valor.length) { refs.current[valor.length]?.focus(); return; }
+              const largo = actual.current.length;
+              if (i > largo) { refs.current[largo]?.focus(); return; }
               e.target.select();
             }}
           />
