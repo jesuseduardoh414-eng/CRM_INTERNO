@@ -331,8 +331,11 @@ Modulo agregado el 2026-10-12 a partir de la "Carta a Santa Claus":
   que hay sin asignar; un gasto sin presupuesto sale directo de la bolsa.
 - **Gastos**: seis categorias (Presupuesto General, Presupuesto Oficina,
   Nomina, Gastos fijos, Gastos variables, Otros) con fecha limite (sale en la
-  Agenda mientras este pendiente), comprobantes y "duplicar al mes
-  siguiente". Cada gasto descuenta del presupuesto de su categoria en el mes
+  Agenda mientras este pendiente), comprobantes y "replicar en los meses
+  siguientes" (1 a 12 meses o hasta diciembre: una copia pendiente por mes,
+  el mismo dia, y salta los meses que ya tienen ese gasto). La lista se ve por
+  mes (empieza en el actual, con flechas) o el año entero. Cada gasto
+  descuenta del presupuesto de su categoria en el mes
   de su fecha; la pantalla y el formulario muestran cuanto queda. El
   **Informe** compara presupuesto contra gastado (un mes o el año, con
   Excel) y tiene la tabla de lo gastado meses × categorias (y × partidas

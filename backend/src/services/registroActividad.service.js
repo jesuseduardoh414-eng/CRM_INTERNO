@@ -270,13 +270,24 @@ const extension = (base) => ({
         if (operation === 'update' || operation === 'upsert') {
           const antes = await d.findUnique({ where: args.where }).catch(() => null);
           const res = await query(args);
+          // Pagos, gastos, contratos y cotizaciones se crean con folio "TMP-…" y
+          // en seguida (misma transaccion) se les pone el definitivo: no es una
+          // edicion, es el nombre que debe llevar el alta pendiente de escribir.
+          const corregirAlta = (fila) => {
+            const alta = ctx.eventos.find((e) => e.accion === 'crear' && e.tipo === def.tipo && e.entidadId === String(fila?.id));
+            if (alta && fila) alta.entidadNombre = recortar(def.nombre(fila) || '', 255) || null;
+            return Boolean(alta);
+          };
           if (!antes) {
+            // Fila creada en esta misma transaccion: desde fuera aun no se ve.
             if (operation === 'upsert') anotar(base, ctx, [evento('crear', model, def, { ...(args.create || {}), ...(res || {}) })]);
+            else if (res?.folio) corregirAlta(res);
             return res;
           }
           if (def.soloAltasYBajas) return res;
           const despues = await releer(antes);
           const cambios = cambiosEntre(model, def, antes, despues);
+          if (cambios.length === 1 && cambios[0].campo === 'folio' && String(antes.folio || '').startsWith('TMP-') && corregirAlta(despues)) return res;
           if (cambios.length) anotar(base, ctx, [evento('editar', model, def, despues || antes, cambios)]);
           return res;
         }

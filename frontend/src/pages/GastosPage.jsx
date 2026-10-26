@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom';
-import { AlarmClock, ChevronRight, Paperclip, Plus, ReceiptText, Search, X } from 'lucide-react';
+import { AlarmClock, ChevronLeft, ChevronRight, Paperclip, Plus, ReceiptText, Search, X } from 'lucide-react';
 import { finanzasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -19,7 +19,7 @@ import DetalleGasto from '../components/finanzas/DetalleGasto';
 import { Cifras, ErrorCarga, SelectorAnio, TarjetaPresupuesto, Vacio } from '../components/finanzas/piezas';
 import { useFormatoFinanzas } from '../hooks/useFormatoFinanzas';
 import {
-  BADGE_ESTADO_GASTO, ESTADOS_FILTRO_GASTO, aniosSelector, categoriaDesdeSlug, estadoVisibleGasto, nombreMesAnio,
+  BADGE_ESTADO_GASTO, ESTADOS_FILTRO_GASTO, aniosSelector, categoriaDesdeSlug, estadoVisibleGasto, moverMes, nombreMes, nombreMesAnio,
   OPCIONES_SWR_FINANZAS, puedeFinanzas, recargarFinanzas,
 } from '../utils/finanzas';
 import NavCategoriasGastos from '../components/finanzas/NavCategoriasGastos';
@@ -43,6 +43,9 @@ const VistaCategoria = ({ categoria }) => {
   const [busqueda, setBusqueda] = useState('');
   const [estado, setEstado] = useState('TODOS');
   const [anio, setAnio] = useState(() => new Date().getFullYear());
+  // Mes del año elegido (1-12) o 0 = todo el año. Empieza en el mes actual:
+  // con los gastos fijos replicados, el año entero se llenaba de repetidos.
+  const [mes, setMes] = useState(() => new Date().getMonth() + 1);
   const [formulario, setFormulario] = useState(null);
   const [detalleId, setDetalleId] = useState(() => Number(params.get('gasto')) || null);
   const q = useDebounce(busqueda, 300);
@@ -50,9 +53,10 @@ const VistaCategoria = ({ categoria }) => {
   const puedeCrear = puedeFinanzas(usuario, `gastos.${categoria}`, 'crear');
 
   const filtroAnio = estado === 'PENDIENTE' || estado === 'VENCIDO' ? '' : anio;
+  const filtroMes = filtroAnio && mes ? mes : '';
   const { data, error, isLoading, mutate } = useSWR(
-    puedeVer ? ['finanzas-gastos', categoria, q, estado, filtroAnio] : null,
-    () => finanzasService.gastos.listar({ categoria, q, estado: estado === 'TODOS' ? '' : estado, anio: filtroAnio }),
+    puedeVer ? ['finanzas-gastos', categoria, q, estado, filtroAnio, filtroMes] : null,
+    () => finanzasService.gastos.listar({ categoria, q, estado: estado === 'TODOS' ? '' : estado, anio: filtroAnio, mes: filtroMes }),
     OPCIONES_SWR_FINANZAS,
   );
   const { data: resumen } = useSWR(puedeVer ? ['finanzas-gastos-resumen', categoria, anio] : null, () => finanzasService.gastos.resumen({ categoria, anio }), OPCIONES_SWR_FINANZAS);
@@ -74,6 +78,11 @@ const VistaCategoria = ({ categoria }) => {
   const abrirEdicion = (gasto) => { setDetalleId(null); setFormulario({ gasto, clave: Date.now() }); };
   const cerrarDetalle = () => { setDetalleId(null); if (params.has('gasto')) { params.delete('gasto'); setParams(params, { replace: true }); } };
   const alternarEstado = (v) => setEstado((actual) => (actual === v ? 'TODOS' : v));
+  // Flechas de mes: cruzan de año dentro de los años del selector.
+  const anios = aniosSelector();
+  const destino = (delta) => moverMes({ anio, mes }, delta);
+  const puedeIr = (delta) => mes > 0 && anios.includes(destino(delta).anio);
+  const irMes = (delta) => { if (!puedeIr(delta)) return; const d = destino(delta); setAnio(d.anio); setMes(d.mes); };
 
   // Pendientes con fecha límite, los más urgentes primero (vencidos incluidos).
   const porVencer = (proximos?.gastos || [])
@@ -81,8 +90,10 @@ const VistaCategoria = ({ categoria }) => {
     .sort((a, b) => a.fechaLimite.localeCompare(b.fechaLimite))
     .slice(0, 6);
 
+  const delMes = mes > 0 ? resumen?.porMes?.[mes - 1] : null;
   const cifras = [
-    anio === new Date().getFullYear() && { clave: 'mes', etiqueta: tf('finKpiGastoMes'), valor: resumen ? monto(resumen.mes.total) : null, sub: resumen ? tf('finKpiGastos', { n: resumen.mes.cantidad }) : null },
+    mes > 0 && { clave: 'mesElegido', etiqueta: tf('finKpiGastoDe', { mes: nombreMesAnio(anio, mes, locale) }), valor: resumen ? monto(delMes?.total ?? 0) : null, sub: resumen ? tf('finKpiGastos', { n: delMes?.cantidad ?? 0 }) : null },
+    !mes && anio === new Date().getFullYear() && { clave: 'mes', etiqueta: tf('finKpiGastoMes'), valor: resumen ? monto(resumen.mes.total) : null, sub: resumen ? tf('finKpiGastos', { n: resumen.mes.cantidad }) : null },
     { clave: 'anual', etiqueta: tf('finKpiGastoAnio', { anio }), valor: resumen ? monto(resumen.anual.total) : null, sub: resumen ? tf('finKpiGastos', { n: resumen.anual.cantidad }) : null },
     { clave: 'pendientes', etiqueta: tf('finKpiPendientes'), valor: resumen ? monto(resumen.pendientes.total) : null, sub: resumen ? tf('finKpiGastos', { n: resumen.pendientes.cantidad }) : null, alerta: resumen?.pendientes.cantidad > 0 && 'warning', onClick: () => alternarEstado('PENDIENTE'), activo: estado === 'PENDIENTE' },
     { clave: 'vencidos', etiqueta: tf('finKpiVencidos'), valor: resumen ? monto(resumen.vencidos.total) : null, sub: resumen ? tf('finKpiGastos', { n: resumen.vencidos.cantidad }) : null, alerta: resumen?.vencidos.cantidad > 0 && 'error', onClick: () => alternarEstado('VENCIDO'), activo: estado === 'VENCIDO' },
@@ -163,7 +174,22 @@ const VistaCategoria = ({ categoria }) => {
           </div>
         </CampoFiltro>
         <CampoFiltro label={tf('finAnio')}>
-          <SelectorAnio anio={anio} anios={aniosSelector()} onCambio={setAnio} etiqueta={tf('finAnio')} />
+          <SelectorAnio anio={anio} anios={anios} onCambio={setAnio} etiqueta={tf('finAnio')} />
+        </CampoFiltro>
+        <CampoFiltro label={tf('finMes')}>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => irMes(-1)} disabled={!puedeIr(-1)} aria-label={tf('finMesAnterior')} title={tf('finMesAnterior')}><ChevronLeft size={16} /></Button>
+            <Select value={String(mes)} onValueChange={(v) => setMes(Number(v))}>
+              <SelectTrigger aria-label={tf('finMes')} className="h-10 w-[150px] text-[13.5px] font-normal capitalize"><SelectValue /></SelectTrigger>
+              <SelectContent className="z-[1500]">
+                <SelectItem value="0" className="text-sm font-normal">{tf('finTodoElAnio')}</SelectItem>
+                {Array.from({ length: 12 }, (_v, i) => i + 1).map((m) => (
+                  <SelectItem key={m} value={String(m)} className="text-sm font-normal capitalize">{nombreMes(m, locale)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="icon" className="h-10 w-10 shrink-0" onClick={() => irMes(1)} disabled={!puedeIr(1)} aria-label={tf('finMesSiguiente')} title={tf('finMesSiguiente')}><ChevronRight size={16} /></Button>
+          </div>
         </CampoFiltro>
         <CampoFiltro label={tf('finEstado')}>
           <Select value={estado} onValueChange={setEstado}>

@@ -179,6 +179,10 @@ const listar = async (req, res) => {
     const desde = F.leerFecha(req.query.desde);
     const hasta = F.leerFecha(req.query.hasta);
     const anio = F.leerAnio(req.query.anio, null);
+    // Con ?mes (1-12) junto al año, solo ese mes: los gastos fijos replicados
+    // no se amontonan en la vista del año.
+    const mes = anio ? F.leerMes(req.query.mes) : null;
+    const periodo = mes ? F.rangoMes(anio, mes - 1) : (anio ? F.rangoAnio(anio) : null);
     const porLimite = req.query.orden === 'limite';
     if (desde === false || hasta === false) return res.status(400).json({ error: 'Rango de fechas no válido' });
 
@@ -190,7 +194,7 @@ const listar = async (req, res) => {
       empresaId ? { empresaId } : null,
       desde ? { fecha: { gte: desde } } : null,
       hasta ? { fecha: { lte: hasta } } : null,
-      anio ? { fecha: { gte: F.rangoAnio(anio).inicio, lt: F.rangoAnio(anio).fin } } : null,
+      periodo ? { fecha: { gte: periodo.inicio, lt: periodo.fin } } : null,
       // ?orden=limite: solo los que tienen fecha limite, los mas urgentes primero (panel "Por pagar").
       porLimite ? { fechaLimite: { not: null } } : null,
     );
@@ -406,9 +410,15 @@ const cambiarEstado = (accion) => async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// POST /api/finanzas/gastos/:id/duplicar  -> copia al mes siguiente, pendiente,
-// sin comprobantes. Es el atajo para los gastos fijos (renta, servicios).
+// POST /api/finanzas/gastos/:id/duplicar  { meses }  -> una copia pendiente,
+// sin comprobantes, en cada uno de los `meses` siguientes (1 a 12; antes solo
+// el siguiente). Es el atajo para los gastos fijos (renta, nómina, servicios).
+// Cada copia sale del original (día 31 -> 28/30/31 según el mes, sin
+// arrastrar el recorte) y un mes que ya tiene ese mismo gasto (categoría,
+// concepto, monto y fecha, no anulado) se salta para no duplicarlo.
 // ---------------------------------------------------------------------------
+const MAX_MESES_REPLICAR = 12;
+
 const duplicar = async (req, res) => {
   const id = F.leerId(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID inválido' });
@@ -418,16 +428,13 @@ const duplicar = async (req, res) => {
     // Duplicar copia el gasto entero: hace falta poder verlo, no solo crear.
     if (!F.puedeGasto(req.usuario, actual.categoria, 'crear') || !F.puedeGasto(req.usuario, actual.categoria)) return F.sinPermiso(res);
 
-    const meses = Math.max(1, Math.min(12, Number.parseInt(req.body?.meses, 10) || 1));
-    const fecha = F.sumarMeses(actual.fecha, meses);
-    const data = {
+    const meses = Math.max(1, Math.min(MAX_MESES_REPLICAR, Number.parseInt(req.body?.meses, 10) || 1));
+    const base = {
       categoria: actual.categoria,
       concepto: actual.concepto,
       descripcion: actual.descripcion,
       monto: actual.monto,
       moneda: actual.moneda,
-      fecha,
-      fechaLimite: actual.fechaLimite ? F.sumarMeses(actual.fechaLimite, meses) : null,
       estado: 'PENDIENTE',
       metodo: actual.metodo,
       empresaId: actual.empresaId,
@@ -435,12 +442,40 @@ const duplicar = async (req, res) => {
       cuentaId: actual.cuentaId,
       notas: actual.notas,
     };
-    const gasto = await prisma.$transaction(async (tx) => {
-      const nuevo = await tx.gasto.create({ data: { ...data, folio: `TMP-${crypto.randomUUID()}`, creadoPorId: req.usuario.id } });
-      return tx.gasto.update({ where: { id: nuevo.id }, data: { folio: F.folio('GAS', nuevo.id, fecha) }, include: incluirDetalle });
+    const { creados, omitidos } = await prisma.$transaction(async (tx) => {
+      const lista = [];
+      let saltados = 0;
+      for (let i = 1; i <= meses; i += 1) {
+        const fecha = F.sumarMeses(actual.fecha, i);
+        const yaEsta = await tx.gasto.findFirst({
+          where: { categoria: actual.categoria, concepto: actual.concepto, monto: actual.monto, moneda: actual.moneda, fecha, estado: { not: 'ANULADO' } },
+          select: { id: true },
+        });
+        if (yaEsta) { saltados += 1; continue; }
+        const nuevo = await tx.gasto.create({
+          data: {
+            ...base,
+            fecha,
+            fechaLimite: actual.fechaLimite ? F.sumarMeses(actual.fechaLimite, i) : null,
+            folio: `TMP-${crypto.randomUUID()}`,
+            creadoPorId: req.usuario.id,
+          },
+        });
+        lista.push(await tx.gasto.update({ where: { id: nuevo.id }, data: { folio: F.folio('GAS', nuevo.id, fecha) }, include: incluirDetalle }));
+      }
+      return { creados: lista, omitidos: saltados };
+    }, { timeout: 30000 });
+    creados.forEach((g) => F.registrarFinanzas(req.usuario, 'gasto', g.id, 'DUPLICAR', `Creó el gasto ${g.folio} duplicando ${actual.folio}`));
+    const mensaje = creados.length === 0
+      ? `Esos meses ya tenían el gasto ${actual.concepto}: no se creó ninguno`
+      : `${creados.length === 1 ? `Gasto ${creados[0].folio} creado` : `${creados.length} gastos creados`} a partir de ${actual.folio}${omitidos ? ` (${omitidos} ${omitidos === 1 ? 'mes ya lo tenía' : 'meses ya lo tenían'})` : ''}`;
+    return res.status(creados.length ? 201 : 200).json({
+      mensaje,
+      creados: creados.length,
+      omitidos,
+      gastos: creados.map((g) => serializar(g)),
+      gasto: creados[0] ? serializar(creados[0]) : null,
     });
-    F.registrarFinanzas(req.usuario, 'gasto', gasto.id, 'DUPLICAR', `Creó el gasto ${gasto.folio} duplicando ${actual.folio}`);
-    return res.status(201).json({ mensaje: `Gasto ${gasto.folio} creado a partir de ${actual.folio}`, gasto: serializar(gasto) });
   } catch (error) {
     console.error('[finanzas.gastos.duplicar]', error);
     return res.status(500).json({ error: 'Error al duplicar el gasto' });

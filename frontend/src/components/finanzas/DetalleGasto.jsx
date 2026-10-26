@@ -1,5 +1,5 @@
 // Ficha de un gasto: datos, comprobantes, bitácora y acciones (marcar
-// pagado, volver a pendiente, duplicar al mes siguiente, anular, eliminar).
+// pagado, volver a pendiente, replicar en los meses siguientes, anular, eliminar).
 import { useEffect, useState } from 'react';
 import { Ban, CalendarClock, CheckCircle2, Copy, Edit2, History, RotateCcw, Trash2 } from 'lucide-react';
 import Modal from '../Modal';
@@ -8,6 +8,7 @@ import ActionMenu from '../ActionMenu';
 import { ListSkeleton } from '../Skeleton';
 import Comprobantes from './Comprobantes';
 import Bitacora from './Bitacora';
+import ReplicarGasto from './ReplicarGasto';
 import { Dato, PuntoPartida } from './piezas';
 import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
 import { finanzasService } from '../../services/api';
@@ -29,6 +30,7 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
   const [error, setError] = useState(null);
   const [verBitacora, setVerBitacora] = useState(false);
   const [ocupado, setOcupado] = useState(false);
+  const [replicando, setReplicando] = useState(false);
 
   const recargar = async () => {
     const data = await finanzasService.gastos.obtener(gastoId);
@@ -64,20 +66,12 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
     const ok = await confirmar({ titulo: tf('finGastoAnularConfirm', { folio: gasto.folio }), descripcion: tf('finGastoAnularTexto'), textoConfirmar: tf('finAnular'), peligro: true });
     if (ok) ejecutar(() => finanzasService.gastos.anular(gasto.id), tf('finGastoAnulado'));
   };
-  const duplicar = async () => {
-    const ok = await confirmar({ titulo: tf('finGastoDuplicarConfirm', { folio: gasto.folio }), descripcion: tf('finGastoDuplicarTexto'), textoConfirmar: tf('finDuplicar') });
-    if (!ok) return;
-    setOcupado(true);
-    try {
-      const data = await finanzasService.gastos.duplicar(gasto.id, 1);
-      showToast(tf('finGastoDuplicado', { folio: data.gasto.folio }), 'success');
-      onCambio();
-      onDuplicado?.(data.gasto);
-    } catch (err) {
-      showToast(err.message, 'error');
-    } finally {
-      setOcupado(false);
-    }
+  // Replicar en los meses siguientes: la ventana elige cuántos (ReplicarGasto).
+  // Con una sola copia se abre la nueva, como antes; con varias, sigue esta.
+  const alReplicar = (data) => {
+    setReplicando(false);
+    onCambio();
+    if (data.creados === 1) onDuplicado?.(data.gasto);
   };
   const eliminar = async () => {
     const ok = await confirmar({ titulo: tf('finGastoEliminarConfirm', { folio: gasto.folio }), descripcion: tf('finEliminarTexto'), textoConfirmar: t('delete'), peligro: true });
@@ -92,8 +86,8 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
     }
   };
 
-  // Permisos de su categoría: editar (y pagar, reabrir, anular), duplicar al
-  // mes siguiente pide "crear" y borrar, "eliminar".
+  // Permisos de su categoría: editar (y pagar, reabrir, anular), replicar en
+  // los meses siguientes pide "crear" y borrar, "eliminar".
   const recurso = gasto ? `gastos.${gasto.categoria}` : null;
   const puedeEditar = Boolean(recurso) && puedeFinanzas(usuario, recurso, 'editar');
   const puedeDuplicar = Boolean(recurso) && puedeFinanzas(usuario, recurso, 'crear');
@@ -104,7 +98,7 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
     // Mientras una acción está en curso no se puede lanzar otra (doble clic).
     puedeEditar && !anulado && { label: t('edit'), icon: <Edit2 size={14} />, onSelect: () => onEditar(gasto), disabled: ocupado },
     puedeEditar && gasto.estado === 'PAGADO' && { label: tf('finVolverPendiente'), icon: <RotateCcw size={14} />, onSelect: reabrir, disabled: ocupado },
-    puedeDuplicar && !anulado && { label: tf('finDuplicarMes'), icon: <Copy size={14} />, onSelect: duplicar, disabled: ocupado },
+    puedeDuplicar && !anulado && { label: tf('finReplicar'), icon: <Copy size={14} />, onSelect: () => setReplicando(true), disabled: ocupado },
     puedeEditar && !anulado && { label: tf('finAnular'), icon: <Ban size={14} />, onSelect: anular, disabled: ocupado },
     puedeEliminar && (puedeEditar || puedeDuplicar) && { separator: true },
     puedeEliminar && { label: t('delete'), icon: <Trash2 size={14} />, danger: true, onSelect: eliminar },
@@ -125,6 +119,7 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
       )}
     >
       {dialogo}
+      {replicando && gasto && <ReplicarGasto gasto={gasto} onClose={() => setReplicando(false)} onHecho={alReplicar} />}
       {error && <div className="alert-error">{error}</div>}
       {!gasto && !error && <ListSkeleton rows={4} header={false} />}
       {gasto && (
