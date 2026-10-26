@@ -4,6 +4,7 @@
 const prisma = require('../lib/prisma');
 const comprobantes = require('../services/comprobantes.service');
 const F = require('../utils/finanzas.utils');
+const papelera = require('../services/papelera.service');
 
 const selectRegistro = { id: true, nombreOriginal: true, mime: true, tamano: true, creadoEn: true, subidoPor: { select: F.selectUsuarioCorto } };
 
@@ -120,10 +121,13 @@ const eliminar = async (req, res) => {
     if (!registro) return res.status(404).json({ error: 'Comprobante no encontrado' });
     // Quitar un comprobante es corregir el pago o gasto
     if (!puedeSobre(req.usuario, registro, 'editar')) return F.sinPermiso(res);
-    await prisma.comprobanteFinanciero.delete({ where: { id } });
-    // La fila ya no existe: si el disco no deja borrar (archivo en uso en
-    // Windows), se anota y se responde bien igual.
-    await comprobantes.borrar(registro.archivo).catch((e) => console.error('[finanzas.comprobantes.eliminar] disco', e?.message));
+    // A la papelera del CRM (services/papelera.service.js): el archivo no se borra.
+    const { gasto: _gasto, pago: _pago, ...fila } = registro;
+    await papelera.conPapelera({
+      tipo: 'comprobante', modulo: 'finanzas', entidadId: id, nombre: registro.nombreOriginal,
+      contexto: registro.pago ? `Pago ${registro.pago.folio}` : (registro.gasto ? `Gasto ${registro.gasto.folio}` : null),
+      datos: fila, archivos: [papelera.archivoDeAlmacen('comprobantes', registro)],
+    }, () => prisma.comprobanteFinanciero.delete({ where: { id } }));
     F.registrarFinanzas(req.usuario, registro.pagoId ? 'pago' : 'gasto', registro.pagoId || registro.gastoId, 'QUITAR_COMPROBANTE', `Quitó el comprobante "${registro.nombreOriginal}" de ${registro.pago?.folio || registro.gasto?.folio}`);
     return res.json({ mensaje: 'Comprobante eliminado' });
   } catch (error) {

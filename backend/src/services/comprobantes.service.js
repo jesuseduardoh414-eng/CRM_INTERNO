@@ -96,6 +96,9 @@ const leer = (nombreInterno) => almacen.leer(nombreInterno);
 
 const borrar = (nombreInterno) => almacen.borrar(nombreInterno);
 
+/** A la papelera del CRM en vez de borrarlo (services/papelera.service.js). */
+const aPapelera = (nombreInterno, destino) => almacen.aPapelera(nombreInterno, destino);
+
 /** Limpia el nombre original para mostrarlo y para Content-Disposition. */
 const limpiarNombre = (nombre, mime) => {
   const extension = TIPOS[mime] || 'bin';
@@ -107,4 +110,4 @@ const limpiarNombre = (nombre, mime) => {
   return /\.[a-z0-9]{2,5}$/i.test(base) ? base : `${base}.${extension}`;
 };
 
-module.exports = { MIMES, TIPOS, detectarMime, huella, guardar, leer, borrar, limpiarNombre, directorio };
+module.exports = { MIMES, TIPOS, detectarMime, huella, guardar, leer, borrar, aPapelera, limpiarNombre, directorio };

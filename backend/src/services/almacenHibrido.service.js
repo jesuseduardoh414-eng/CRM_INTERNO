@@ -10,7 +10,8 @@
  *  - Al leer se busca en Drive y, si no esta, en el disco: asi siguen
  *    funcionando los archivos de antes de conectar Drive.
  *  - Al borrar se manda a la papelera de Drive (30 dias para recuperarlo) y
- *    se borra del disco.
+ *    se borra del disco. Lo que borra la gente no pasa por aqui: va a la
+ *    papelera del CRM (`aPapelera`, services/papelera.service.js) y no se pierde.
  * Los nombres internos los valida cada almacen con su `rutaDe` antes de tocar
  * Drive o el disco.
  */
@@ -20,6 +21,18 @@ const drive = require('./drive.service');
 
 // Almacenes registrados, para pasar a Drive lo que haya quedado en el disco.
 const registrados = [];
+
+/** Mueve un archivo del disco (crea la carpeta destino; entre discos, copia y borra). */
+const moverArchivo = async (origen, destino) => {
+  await fs.mkdir(path.dirname(destino), { recursive: true, mode: 0o700 });
+  try {
+    await fs.rename(origen, destino);
+  } catch (error) {
+    if (error?.code !== 'EXDEV') throw error;
+    await fs.copyFile(origen, destino);
+    await fs.unlink(origen);
+  }
+};
 
 /**
  * clave: subcarpeta de Drive (drive.service SUBCARPETAS); rutaDe(nombre):
@@ -72,6 +85,31 @@ const crearAlmacenHibrido = (definicion) => {
         if (error?.code === 'ENOENT' && errorDrive) throw errorDrive;
         throw error;
       }
+    },
+
+    /**
+     * Lleva el archivo a la papelera del CRM en vez de borrarlo: en Drive a la
+     * carpeta "Papelera"; en el disco, a `destino`. Devuelve { drive: id | null,
+     * disco: true | false }. Un fallo de Drive no lanza: el archivo se queda
+     * donde estaba y se sigue encontrando por su nombre.
+     */
+    aPapelera: async (nombre, destino) => {
+      const ruta = rutaDe(nombre);
+      let id = null;
+      if (await drive.activo()) {
+        id = await drive.aPapeleraCrm(clave, nombre).catch((error) => {
+          console.error(`[archivos] No se pudo mover ${clave}/${nombre} a la papelera del CRM en Drive:`, error.message);
+          return null;
+        });
+      }
+      let disco = false;
+      try {
+        await moverArchivo(ruta, destino);
+        disco = true;
+      } catch (error) {
+        if (error?.code !== 'ENOENT') console.error(`[archivos] No se pudo mover ${clave}/${nombre} a la papelera del disco:`, error.message);
+      }
+      return { drive: id, disco };
     },
 
     borrar: async (nombre) => {
@@ -142,4 +180,4 @@ const contarEnDisco = async () => {
   return total;
 };
 
-module.exports = { crearAlmacenHibrido, pasarDiscoADrive, contarEnDisco };
+module.exports = { crearAlmacenHibrido, pasarDiscoADrive, contarEnDisco, moverArchivo };

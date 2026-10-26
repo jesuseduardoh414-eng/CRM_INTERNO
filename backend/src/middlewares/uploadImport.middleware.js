@@ -6,6 +6,7 @@
 
 const multer = require('multer');
 const path   = require('path');
+const { continuar } = require('../lib/contexto');
 
 const storage = multer.memoryStorage();
 
@@ -39,4 +40,7 @@ const uploadImport = multer({
   fileFilter,
 });
 
-module.exports = uploadImport;
+// Tras leer el archivo se vuelve al contexto de la peticion (lib/contexto.js).
+module.exports = {
+  single: (campo) => (req, res, next) => uploadImport.single(campo)(req, res, (...a) => continuar(req, next, ...a)),
+};

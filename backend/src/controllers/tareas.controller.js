@@ -7,6 +7,7 @@
 
 const prisma = require('../lib/prisma');
 const driveProyectos = require('../services/driveProyectos.service');
+const papelera = require('../services/papelera.service');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const { registrarActividad } = require('../utils/logger');
 const { sortTareas } = require('../utils/sort.utils');
@@ -822,6 +823,41 @@ const borrarTareasEnCascada = async (tx, ids) => {
   return adjuntos.map((adjunto) => adjunto.url);
 };
 
+/**
+ * Copias para la papelera (services/papelera.service.js) de las tareas que se
+ * van a borrar: cada una con sus comentarios, adjuntos e historial, y los
+ * archivos de sus adjuntos para moverlos a la carpeta Papelera.
+ */
+const copiasDeTareas = async (tareas) => {
+  const ids = tareas.map((t) => t.id);
+  const [comentarios, adjuntos, historial, responsables] = await Promise.all([
+    prisma.comentario.findMany({ where: { tareaId: { in: ids } }, include: { autor: { select: { nombre: true } } }, orderBy: { creadoEn: 'asc' } }),
+    prisma.adjunto.findMany({ where: { tareaId: { in: ids } } }),
+    prisma.logActividad.findMany({ where: { tareaId: { in: ids } }, include: { usuario: { select: { nombre: true } } }, orderBy: { creadoEn: 'asc' } }),
+    prisma.usuario.findMany({ where: { id: { in: tareas.map((t) => t.asignadoId).filter(Boolean) } }, select: { id: true, nombre: true } }),
+  ]);
+  const nombreDe = new Map(responsables.map((u) => [u.id, u.nombre]));
+  return tareas.map(({ proyecto, asignados, ...tarea }) => {
+    const suyos = adjuntos.filter((a) => a.tareaId === tarea.id);
+    return {
+      tipo: 'tarea',
+      modulo: 'tareas',
+      entidadId: tarea.id,
+      nombre: tarea.titulo,
+      contexto: proyecto?.nombre ? `Proyecto: ${proyecto.nombre}` : null,
+      datos: {
+        ...tarea,
+        responsableNombre: nombreDe.get(tarea.asignadoId) || null,
+        asignados: (asignados || []).map((a) => a.id),
+        comentarios: comentarios.filter((c) => c.tareaId === tarea.id).map(({ autor, ...c }) => ({ ...c, autorNombre: autor?.nombre || null })),
+        adjuntos: suyos,
+        historial: historial.filter((h) => h.tareaId === tarea.id).map(({ usuario, ...h }) => ({ ...h, usuarioNombre: usuario?.nombre || null })),
+      },
+      archivos: suyos.map(papelera.archivoDeAdjunto),
+    };
+  });
+};
+
 // €€ DELETE /api/tareas/:id €€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€
 const eliminar = async (req, res) => {
   const id = parseInt(req.params.id);
@@ -842,9 +878,9 @@ const eliminar = async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para eliminar esta tarea' });
     }
 
-    const urlsAdjuntos = await prisma.$transaction((tx) => borrarTareasEnCascada(tx, [id]));
-    await borrarBlobs(urlsAdjuntos);
-    await driveProyectos.tirarCarpeta(existente.driveCarpetaId);
+    // A la papelera del CRM: copia completa y los archivos a la carpeta Papelera.
+    await papelera.conPapelera(await copiasDeTareas([existente]), () => prisma.$transaction((tx) => borrarTareasEnCascada(tx, [id])));
+    await papelera.carpetaDrive(existente.driveCarpetaId);
 
     // Registrar en el Log de Actividad
     await registrarActividad(
@@ -899,9 +935,9 @@ const eliminarVarias = async (req, res) => {
     }
 
     const idsPermitidos = permitidas.map((tarea) => tarea.id);
-    const urlsAdjuntos = await prisma.$transaction((tx) => borrarTareasEnCascada(tx, idsPermitidos));
-    await borrarBlobs(urlsAdjuntos);
-    for (const tarea of permitidas) await driveProyectos.tirarCarpeta(tarea.driveCarpetaId);
+    // A la papelera del CRM: una copia por tarea, con sus archivos.
+    await papelera.conPapelera(await copiasDeTareas(permitidas), () => prisma.$transaction((tx) => borrarTareasEnCascada(tx, idsPermitidos)));
+    for (const tarea of permitidas) await papelera.carpetaDrive(tarea.driveCarpetaId);
 
     // Un apunte por proyecto y no uno por tarea: el registro sirve para saber
     // que paso, no para dejar treinta lineas casi identicas seguidas.

@@ -7,6 +7,7 @@ const { esEmailValido } = require('../utils/security.utils');
 const { puede } = require('../utils/permisosArea.utils');
 const { filtroProyectosVisibles } = require('../utils/permissions.utils');
 const { moduloActivo } = require('../services/configuracion.service');
+const papelera = require('../services/papelera.service');
 
 const TIPOS = ['CLIENTE', 'PROVEEDOR', 'AMBOS'];
 const ESTADOS = ['ACTIVO', 'INACTIVO'];
@@ -264,7 +265,12 @@ const eliminar = async (req, res) => {
     }
     // Sus contactos con acceso al portal quedan suspendidos (no se borran).
     await require('./portalEquipo.controller').suspenderAccesosEmpresa(id);
-    await prisma.empresa.delete({ where: { id } });
+    // A la papelera del CRM (services/papelera.service.js), con sus contactos.
+    const completa = await prisma.empresa.findUnique({ where: { id }, include: { contactos: true } });
+    await papelera.conPapelera({
+      tipo: 'cliente', modulo: 'clientes', entidadId: id, nombre: completa.nombreComercial || completa.nombre,
+      contexto: completa.tipo ? `Tipo: ${completa.tipo}` : null, datos: completa,
+    }, () => prisma.empresa.delete({ where: { id } }));
     return res.json({ mensaje: 'Empresa eliminada' });
   } catch (error) {
     return responderError(res, error, 'eliminar');
@@ -323,14 +329,19 @@ const eliminarContacto = async (req, res) => {
   try {
     const contacto = await prisma.contactoEmpresa.findUnique({ where: { id } });
     if (!contacto) return res.status(404).json({ error: 'No existe ese contacto' });
-    await prisma.$transaction(async (tx) => {
+    const empresa = await prisma.empresa.findUnique({ where: { id: contacto.empresaId }, select: { nombre: true, nombreComercial: true } });
+    // A la papelera del CRM (services/papelera.service.js).
+    await papelera.conPapelera({
+      tipo: 'contacto', modulo: 'clientes', entidadId: id, nombre: contacto.nombre,
+      contexto: empresa ? `Cliente: ${empresa.nombreComercial || empresa.nombre}` : null, datos: contacto,
+    }, () => prisma.$transaction(async (tx) => {
       await tx.contactoEmpresa.delete({ where: { id } });
       // Si era el principal, pasa a otro.
       if (contacto.principal) {
         const otro = await tx.contactoEmpresa.findFirst({ where: { empresaId: contacto.empresaId }, orderBy: { creadoEn: 'asc' } });
         if (otro) await tx.contactoEmpresa.update({ where: { id: otro.id }, data: { principal: true } });
       }
-    });
+    }));
     return res.json({ mensaje: 'Contacto eliminado' });
   } catch (error) {
     return responderError(res, error, 'eliminarContacto');

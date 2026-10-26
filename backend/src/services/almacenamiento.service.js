@@ -144,6 +144,31 @@ const borrar = async (urls) => {
   })));
 };
 
+/**
+ * Lleva un adjunto a la papelera del CRM en vez de borrarlo
+ * (services/papelera.service.js). `destino(nombre)`: ruta en el disco de la
+ * papelera. Devuelve donde quedo: { drive, disco } o { externo } (Vercel Blob,
+ * que se deja donde esta).
+ */
+const aPapelera = async (url, destino) => {
+  const archivo = desdeUrl(url);
+  if (!archivo) return { externo: true };
+  if (archivo.carpeta === 'drive') {
+    const movido = (await drive().activo())
+      ? await drive().aPapeleraCrmPorId(archivo.nombre).catch((error) => {
+        console.error('[archivos] No se pudo mover un adjunto a la papelera del CRM en Drive:', error.message);
+        return false;
+      })
+      : false;
+    return { drive: archivo.nombre, disco: false, movido };
+  }
+  if (archivo.carpeta === 'adjuntos') return adjuntosHibrido.aPapelera(archivo.nombre, destino(archivo.nombre));
+  return {};
+};
+
+/** Contenido de un adjunto por su nombre interno (Drive o disco), para la papelera. */
+const leerAdjuntoPorNombre = (nombre) => adjuntosHibrido.leer(nombre);
+
 /** Cabeceras y contenido para servir un archivo; null si no existe. */
 const leer = async (carpeta, nombre) => {
   if (carpeta === 'drive') {
@@ -199,4 +224,4 @@ const estado = async () => {
   return resultado;
 };
 
-module.exports = { CARPETAS, EXTENSIONES, TIPOS_POR_EXTENSION, directorio, rutaDe, guardar, borrar, leer, esLocal, desdeUrl, urlDrive, estado };
+module.exports = { CARPETAS, EXTENSIONES, TIPOS_POR_EXTENSION, directorio, rutaDe, guardar, borrar, leer, esLocal, desdeUrl, urlDrive, estado, aPapelera, leerAdjuntoPorNombre };

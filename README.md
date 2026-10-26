@@ -448,6 +448,36 @@ aceptacion en `auth.controller.js` (`aceptarInvitacion`), plantilla de correo
 `invitacionConfiguracion`; panel en
 `frontend/src/components/configuracion/SeccionesSistema.jsx` (`Cuentas`).
 
+## Papelera y registro de actividad
+
+Desde el 2026-10-26, en el panel de configuracion (grupo **Historial**, solo
+cuentas de configuracion; es lo unico del panel con datos de la empresa):
+
+- **Papelera**: lo que se borra en el CRM (proyectos, tareas, adjuntos,
+  comentarios, clientes y contactos, contratos y sus PDF, cuentas, pagos,
+  gastos, comprobantes, cotizaciones, articulos y archivos de la base de
+  conocimiento, eventos y dias de la agenda) desaparece para el equipo pero
+  queda una copia completa (tabla `papelera`: la fila y lo que se borra con
+  ella, quien y cuando). Sus archivos no se borran: van a la carpeta
+  "Papelera" de "Archivos del CRM" en Google Drive (no a la papelera de
+  Google, que se vacia sola) y a `PAPELERA_DIR` en el disco. Lo que se quita
+  desde Google Drive o se cancela en Google Calendar tambien llega, con su
+  origen; si estaba en la papelera de Google se rescata. Se ve, se descargan
+  sus archivos y se guarda para siempre salvo que se elimine a mano.
+  Si no se puede guardar la copia, no se borra nada.
+- **Registro de actividad**: cada creacion, edicion y borrado (tabla
+  `registro_actividad`), con quien, cuando, modulo y, en las ediciones, cada
+  campo con su valor anterior y el nuevo. Filtros por persona, modulo, accion,
+  fechas y busqueda.
+
+Codigo: `services/papelera.service.js` (`conPapelera` en cada borrado),
+`services/registroActividad.service.js` (extension del cliente de Prisma en
+`lib/prisma.js`; quien hace cada cambio sale de `lib/contexto.js`, que abre
+`verificarToken`; las subidas vuelven a entrar tras multer),
+`controllers/configuracionAuditoria.controller.js`; panel en
+`frontend/src/components/configuracion/SeccionesHistorial.jsx`. Migracion
+`20261026120000_papelera_y_registro` (MySQL) y su par de Postgres.
+
 ## Seguridad
 
 Auditoria del 2026-10-23 (detalle en `CONTEXTO_TRABAJO.md`, seccion 7). Donde

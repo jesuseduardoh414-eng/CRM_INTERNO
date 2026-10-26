@@ -15,6 +15,7 @@
 //  - SESION_REVOCADA / TOKEN_INVALIDO / CUENTA_INACTIVA: volver al login.
 const jwt = require('jsonwebtoken');
 const prisma = require('../lib/prisma');
+const contexto = require('../lib/contexto');
 const { verificarAccess } = require('../services/sesiones.service');
 const { debeActivar2FA } = require('../utils/politicas.utils');
 
@@ -167,7 +168,11 @@ const verificarToken = async (req, res, next) => {
     req.usuario = usuario;
     req.sesionId = sesion.id;
     req.sesionExpiraEn = sesion.expiraEn;
-    return next();
+    // Quien hace la peticion, para el registro de actividad y la papelera.
+    return contexto.ejecutar({ usuario, ip: req.ip, res }, () => {
+      req.contexto = contexto.actual();
+      next();
+    });
   } catch (error) {
     console.error('[verificarToken]', error);
     return res.status(500).json({ error: 'Error interno del servidor' });

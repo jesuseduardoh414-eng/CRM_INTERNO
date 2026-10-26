@@ -1171,6 +1171,30 @@ export const configuracionService = {
     const res = await apiFetch(`${API_URL}/configuracion/${tipo}/${id}/acciones`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ accion }) });
     return handleResponse(res);
   },
+  // Registro de actividad y papelera. `filtros`: { q, usuarioId, modulo, accion, desde, hasta, antesDe }.
+  actividad: async (filtros = {}) => {
+    const params = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+    const res = await apiFetch(`${API_URL}/configuracion/actividad?${params}`, { headers: getHeaders() });
+    return handleResponse(res);
+  },
+  personasActividad: async () => {
+    const res = await apiFetch(`${API_URL}/configuracion/actividad/personas`, { headers: getHeaders() });
+    return handleResponse(res);
+  },
+  papelera: async (filtros = {}) => {
+    const params = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v !== null && v !== undefined && v !== ''));
+    const res = await apiFetch(`${API_URL}/configuracion/papelera?${params}`, { headers: getHeaders() });
+    return handleResponse(res);
+  },
+  elementoPapelera: async (id) => {
+    const res = await apiFetch(`${API_URL}/configuracion/papelera/${id}`, { headers: getHeaders() });
+    return handleResponse(res);
+  },
+  descargarDePapelera: (id, indice, nombre) => descargarArchivo(`${API_URL}/configuracion/papelera/${id}/archivos/${indice}`, nombre),
+  eliminarDePapelera: async (id) => {
+    const res = await apiFetch(`${API_URL}/configuracion/papelera/${id}`, { method: 'DELETE', headers: getHeaders() });
+    return handleResponse(res);
+  },
   correoPrueba: async (email, plantilla) => {
     const res = await apiFetch(`${API_URL}/configuracion/correo/prueba`, { method: 'POST', headers: getHeaders(), body: JSON.stringify({ email, plantilla }) });
     return handleResponse(res);

@@ -82,6 +82,9 @@ const leer = (nombreInterno) => almacen.leer(nombreInterno);
 
 const borrar = (nombreInterno) => almacen.borrar(nombreInterno);
 
+/** A la papelera del CRM en vez de borrarlo (services/papelera.service.js). */
+const aPapelera = (nombreInterno, destino) => almacen.aPapelera(nombreInterno, destino);
+
 /** Limpia el nombre original para mostrarlo y para Content-Disposition. */
 const limpiarNombre = (nombre) => {
   const base = path.basename(nombreUtf8(nombre) || 'contrato.pdf')
@@ -92,4 +95,4 @@ const limpiarNombre = (nombre) => {
   return /\.pdf$/i.test(base) ? base : `${base}.pdf`;
 };
 
-module.exports = { TAMANO_MAXIMO_MB, esPdfValido, huella, guardar, leer, borrar, limpiarNombre, directorio };
+module.exports = { TAMANO_MAXIMO_MB, esPdfValido, huella, guardar, leer, borrar, aPapelera, limpiarNombre, directorio };

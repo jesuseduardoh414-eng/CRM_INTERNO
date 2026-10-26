@@ -10,7 +10,7 @@
 //  - El menú lateral muestra cuánto de la marca está personalizado y sugiere
 //    el siguiente paso; las secciones con cambios sin guardar llevan un punto.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Brush, CalendarSync, Check, ChevronRight, Eye, FolderKanban, HardDrive, KeyRound, LayoutPanelLeft, Loader2, Mail, Palette, Paperclip, RotateCcw, Settings2, ShieldCheck, UserCog } from 'lucide-react';
+import { ArrowRight, Brush, CalendarSync, Check, ChevronRight, Eye, FolderKanban, HardDrive, History, KeyRound, LayoutPanelLeft, Loader2, Mail, Palette, Paperclip, RotateCcw, Settings2, ShieldCheck, Trash2, UserCog } from 'lucide-react';
 import { configuracionService, getPublicAssetUrl } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
@@ -24,6 +24,7 @@ import SelectorSimple from '../components/SelectorSimple';
 import LienzoPrevia from '../components/configuracion/LienzoPrevia';
 import { Campo, CampoColor, CampoImagen, Fila, Interruptor, PaletaGenerada } from '../components/configuracion/PiezasConfiguracion';
 import { PanelEstado, SeccionAccesos, SeccionArchivos, SeccionCorreo, SeccionGoogle, SeccionOperacion } from '../components/configuracion/SeccionesSistema';
+import { SeccionActividad, SeccionPapelera } from '../components/configuracion/SeccionesHistorial';
 import { EditorAreas, ListaModulos, ReglasTareas, SeccionPermisos, ServidorCorreo } from '../components/configuracion/SeccionesReglas';
 import { DisenoCorreo, TextosCorreo, VistaCorreo } from '../components/configuracion/CorreoDiseno';
 import SeccionDrive from '../components/configuracion/SeccionDrive';
@@ -47,12 +48,18 @@ const SECCIONES = [
   { id: 'google', grupo: 'sistema', icono: CalendarSync, titulo: 'cfgSecGoogle', ayuda: 'cfgSecGoogleHint', grupos: ['google'], atajo: '0' },
   // Se guarda al momento (conectar, respaldar): no pasa por el borrador.
   { id: 'drive', grupo: 'sistema', icono: HardDrive, titulo: 'cfgSecDrive', ayuda: 'cfgSecDriveHint', grupos: [] },
+  // Registro de actividad y papelera: solo consulta, a todo el ancho.
+  { id: 'actividad', grupo: 'historial', icono: History, titulo: 'cfgSecActivity', ayuda: 'cfgSecActivityHint', grupos: [] },
+  { id: 'papelera', grupo: 'historial', icono: Trash2, titulo: 'cfgSecTrash', ayuda: 'cfgSecTrashHint', grupos: [] },
   { id: 'cuenta', grupo: null, icono: UserCog, titulo: 'cfgSecAccount', ayuda: 'cfgSecAccountHint', grupos: [] },
 ];
+// Secciones sin vista previa ni panel de estado a la derecha.
+const ANCHO_COMPLETO = new Set(['actividad', 'papelera']);
 const GRUPOS = [
   { id: 'personalizacion', titulo: 'cfgGroupCustomize' },
   { id: 'empresa', titulo: 'cfgGroupCompany' },
   { id: 'sistema', titulo: 'cfgGroupSystem' },
+  { id: 'historial', titulo: 'cfgGroupHistory' },
 ];
 
 // Al enfocar estos campos la vista previa salta a la pantalla donde se ven.
@@ -578,6 +585,8 @@ const ConfiguracionPage = () => {
     }
 
     if (seccion === 'accesos') return <SeccionAccesos seguridad={borrador.seguridad} cambiar={cambiar} />;
+    if (seccion === 'actividad') return <SeccionActividad />;
+    if (seccion === 'papelera') return <SeccionPapelera />;
     if (seccion === 'archivos') return <SeccionArchivos archivos={borrador.subidas} cambiar={cambiar} estado={estado} onIrDrive={() => setSeccion('drive')} />;
     if (seccion === 'permisos') {
       return (
@@ -787,9 +796,9 @@ const ConfiguracionPage = () => {
                   const Icono = s.icono;
                   const sucia = seccionSucia(s);
                   return (
-                    <button key={s.id} type="button" className="cfg-nav-item" onClick={() => setSeccion(s.id)} aria-current={seccion === s.id ? 'page' : undefined} title={`Alt+${s.atajo}`}>
+                    <button key={s.id} type="button" className="cfg-nav-item" onClick={() => setSeccion(s.id)} aria-current={seccion === s.id ? 'page' : undefined} title={s.atajo ? `Alt+${s.atajo}` : undefined}>
                       <Icono size={16} strokeWidth={2} aria-hidden="true" className="shrink-0" /><span className="cfg-nav-texto">{t(s.titulo)}</span>
-                      {sucia ? <span className="cfg-nav-punto" aria-label={t('cfgUnsaved')} /> : <kbd>Alt {s.atajo}</kbd>}
+                      {sucia ? <span className="cfg-nav-punto" aria-label={t('cfgUnsaved')} /> : s.atajo && <kbd>Alt {s.atajo}</kbd>}
                     </button>
                   );
                 })}
@@ -913,7 +922,9 @@ const ConfiguracionPage = () => {
             )}
 
             {borrador && (
-              seccion === 'cuenta' ? contenido() : (
+              seccion === 'cuenta' ? contenido() : ANCHO_COMPLETO.has(seccion) ? (
+                <div key={seccion} className="cfg-entrar min-w-0 space-y-5">{contenido()}</div>
+              ) : (
                 <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
                   <div
                     key={seccion}

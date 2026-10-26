@@ -6,6 +6,7 @@ const prisma = require('../lib/prisma');
 const { moduloActivo } = require('../services/configuracion.service');
 const { esAdminGlobal } = require('../utils/permissions.utils');
 const F = require('../utils/finanzas.utils');
+const papelera = require('../services/papelera.service');
 
 // ---------------------------------------------------------------------------
 // GET /api/finanzas/catalogos  -> listas para los formularios, segun permisos
@@ -145,7 +146,10 @@ const eliminarCuenta = async (req, res) => {
       F.registrarFinanzas(req.usuario, 'cuenta', id, 'DESACTIVAR', `Desactivó la cuenta "${actual.nombre}" (tiene movimientos)`);
       return res.json({ mensaje: 'La cuenta tiene movimientos: se desactivó en vez de borrarse', desactivada: true });
     }
-    await prisma.cuentaFinanciera.delete({ where: { id } });
+    const { _count: _conteo, ...cuenta } = actual;
+    // A la papelera del CRM (services/papelera.service.js).
+    await papelera.conPapelera({ tipo: 'cuenta', modulo: 'finanzas', entidadId: id, nombre: actual.nombre, contexto: actual.banco || null, datos: cuenta },
+      () => prisma.cuentaFinanciera.delete({ where: { id } }));
     F.registrarFinanzas(req.usuario, 'cuenta', id, 'ELIMINAR', `Eliminó la cuenta "${actual.nombre}"`);
     return res.json({ mensaje: 'Cuenta eliminada', desactivada: false });
   } catch (error) {

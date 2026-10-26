@@ -6,6 +6,7 @@
 const multer = require('multer');
 const { configEnCache } = require('../services/configuracion.service');
 const { EXTENSION_SUBIDA } = require('../services/documentos.service');
+const { continuar } = require('../lib/contexto');
 
 const fileFilter = (_req, file, cb) => {
   if (EXTENSION_SUBIDA.test(file.originalname || '')) return cb(null, true);
@@ -23,7 +24,7 @@ const subidaDocumento = (limiteMB) => (campo) => (req, res, next) => multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: Math.floor(limiteMB(configEnCache()) * 1024 * 1024), files: 1, fields: 20 },
   fileFilter,
-}).single(campo)(req, res, next);
+}).single(campo)(req, res, (...a) => continuar(req, next, ...a));
 
 module.exports = {
   subirCotizacion: subidaDocumento((c) => c.subidas.comprobantesMaxMB || 10),

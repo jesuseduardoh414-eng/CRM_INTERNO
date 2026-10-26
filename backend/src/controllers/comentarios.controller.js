@@ -2,6 +2,7 @@ const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
 const { configEnCache } = require('../services/configuracion.service');
 const { puedeAdministrarProyecto, cargarProyectoVisible, cargarTareaVisible: cargarTarea } = require('../utils/permissions.utils');
+const papelera = require('../services/papelera.service');
 
 // Regla unica de lectura de una tarea (permissions.utils). Devuelve { tarea, permitido }.
 const cargarTareaVisible = (usuario, tareaId) => cargarTarea(prisma, usuario, tareaId);
@@ -163,7 +164,18 @@ const eliminar = async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para eliminar este comentario' });
     }
 
-    await prisma.comentario.delete({ where: { id } });
+    // A la papelera del CRM (services/papelera.service.js), con el autor.
+    const [autor, tareaDe, proyectoDe] = await Promise.all([
+      prisma.usuario.findUnique({ where: { id: comentario.autorId }, select: { nombre: true } }),
+      comentario.tareaId ? prisma.tarea.findUnique({ where: { id: comentario.tareaId }, select: { titulo: true } }) : null,
+      comentario.proyectoId ? prisma.proyecto.findUnique({ where: { id: comentario.proyectoId }, select: { nombre: true } }) : null,
+    ]);
+    await papelera.conPapelera({
+      tipo: 'comentario', modulo: 'tareas', entidadId: id,
+      nombre: comentario.contenido.replace(/\s+/g, ' ').slice(0, 120),
+      contexto: tareaDe ? `Tarea: ${tareaDe.titulo}` : (proyectoDe ? `Proyecto: ${proyectoDe.nombre}` : null),
+      datos: { ...comentario, autorNombre: autor?.nombre || null },
+    }, () => prisma.comentario.delete({ where: { id } }));
 
     // Registrar en el Log de Actividad
     let proyectoId = comentario.proyectoId;

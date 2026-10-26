@@ -116,6 +116,8 @@ model Usuario {
   articulosEditados        ArticuloConocimiento[]  @relation("EditorArticulo")
   archivosConocimiento     ArchivoConocimiento[]   @relation("SubeArchivoConocimiento")
   accesosConocimiento      AccesoConocimiento[]    @relation("AccesoConocimientoPersona")
+  elementosBorrados        ElementoBorrado[]       @relation("BorradoPor")
+  registrosActividad       RegistroActividad[]     @relation("AutorRegistro")
 
   @@index([empresaId])
   @@map("usuarios")
@@ -1011,4 +1013,62 @@ model AccesoConocimiento {
   @@index([archivoId])
   @@index([usuarioId])
   @@map("accesos_conocimiento")
+}
+
+// Papelera: lo que se borra en el CRM no se pierde (services/papelera.service.js).
+// Antes de borrar se guarda aqui una copia de la fila y de lo que se borra con
+// ella (comentarios y adjuntos de una tarea, archivos de un contrato...), y sus
+// archivos se mueven a la carpeta "Papelera" del disco o de Google Drive en vez
+// de borrarse. Solo la ve el panel de configuracion; se guarda para siempre
+// salvo que alli se elimine a mano. Sin claves foraneas a lo borrado.
+model ElementoBorrado {
+  id               Int      @id @default(autoincrement())
+  // tarea, adjunto, cliente, contrato, pago, articulo... (papelera.service TIPOS)
+  tipo             String   @db.VarChar(40)
+  modulo           String   @db.VarChar(40)
+  entidadId        String?  @map("entidad_id") @db.VarChar(64)
+  nombre           String   @db.VarChar(255)
+  // Donde estaba: "Proyecto: Rediseño web", "Contrato CT-0012"...
+  contexto         String?  @db.VarChar(255)
+  datos            Json
+  // [{ nombre, mime, tamano, disco: ruta | null, drive: id | null }]
+  archivos         Json?
+  // usuario | drive (se borro en Google Drive) | calendar (se cancelo en Google Calendar)
+  origen           String   @default("usuario") @db.VarChar(20)
+  borradoPorId     Int?     @map("borrado_por_id")
+  borradoPorNombre String?  @map("borrado_por_nombre") @db.VarChar(255)
+  borradoEn        DateTime @default(now()) @map("borrado_en")
+  borradoPor       Usuario? @relation("BorradoPor", fields: [borradoPorId], references: [id], onDelete: SetNull)
+
+  @@index([borradoEn])
+  @@index([modulo, borradoEn])
+  @@map("papelera")
+}
+
+// Registro de actividad: quien creo, cambio o borro que y cuando, en todos los
+// modulos (services/registroActividad.service.js lo escribe desde el cliente de
+// Prisma). `cambios` lleva cada campo editado con su valor anterior y el nuevo.
+// Solo lo ve el panel de configuracion.
+model RegistroActividad {
+  id            Int      @id @default(autoincrement())
+  creadoEn      DateTime @default(now()) @map("creado_en")
+  usuarioId     Int?     @map("usuario_id")
+  usuarioNombre String?  @map("usuario_nombre") @db.VarChar(255)
+  // usuario | drive | calendar (cambios que llegan de Google)
+  origen        String   @default("usuario") @db.VarChar(20)
+  // crear | editar | eliminar
+  accion        String   @db.VarChar(20)
+  modulo        String   @db.VarChar(40)
+  tipo          String   @db.VarChar(40)
+  entidadId     String?  @map("entidad_id") @db.VarChar(64)
+  entidadNombre String?  @map("entidad_nombre") @db.VarChar(255)
+  // [{ campo, antes, despues }]
+  cambios       Json?
+  ip            String?  @db.VarChar(64)
+  usuario       Usuario? @relation("AutorRegistro", fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([creadoEn])
+  @@index([usuarioId, creadoEn])
+  @@index([modulo, creadoEn])
+  @@map("registro_actividad")
 }

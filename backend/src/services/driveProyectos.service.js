@@ -26,6 +26,8 @@ const fs = require('fs/promises');
 const prisma = require('../lib/prisma');
 const drive = require('./drive.service');
 const almacenamiento = require('./almacenamiento.service');
+const papelera = require('./papelera.service');
+const contexto = require('../lib/contexto');
 
 const PREFIJO_ADJUNTOS = '/api/archivos/adjuntos/';
 const INTERVALO_MS = 5 * 60 * 1000;
@@ -203,6 +205,34 @@ const importarCarpeta = async (carpetaId, destino, autorId) => {
   return cambios;
 };
 
+/**
+ * Adjuntos que se quitaron desde Google Drive: van a la papelera del CRM
+ * (services/papelera.service.js) con origen "drive". Si el archivo esta en la
+ * papelera de Google se rescata a la carpeta Papelera del CRM (`rescatar`); si
+ * se movio a otro lugar de Drive se deja donde lo pusieron.
+ */
+const aPapeleraDesdeDrive = async (adjuntos, rescatar) => {
+  if (!adjuntos.length) return 0;
+  const [tareas, proyectos] = await Promise.all([
+    prisma.tarea.findMany({ where: { id: { in: adjuntos.map((a) => a.tareaId).filter(Boolean) } }, select: { id: true, titulo: true } }),
+    prisma.proyecto.findMany({ where: { id: { in: adjuntos.map((a) => a.proyectoId).filter(Boolean) } }, select: { id: true, nombre: true } }),
+  ]);
+  const tarea = new Map(tareas.map((t) => [t.id, t.titulo]));
+  const proyecto = new Map(proyectos.map((p) => [p.id, p.nombre]));
+  const elementos = adjuntos.map((a) => ({
+    tipo: 'adjunto',
+    modulo: 'archivos',
+    entidadId: a.id,
+    nombre: a.nombre,
+    contexto: tarea.has(a.tareaId) ? `Tarea: ${tarea.get(a.tareaId)}` : (proyecto.has(a.proyectoId) ? `Proyecto: ${proyecto.get(a.proyectoId)}` : null),
+    datos: a,
+    origen: 'drive',
+    archivos: [rescatar ? papelera.archivoDeAdjunto(a) : { nombre: a.nombre, mime: a.tipo, tamano: a.tamano, drive: a.driveArchivoId }],
+  }));
+  await papelera.conPapelera(elementos, () => prisma.adjunto.deleteMany({ where: { id: { in: adjuntos.map((a) => a.id) } } }));
+  return adjuntos.length;
+};
+
 const aplicarCambio = async (cambio, mapa, autorId) => {
   const archivo = cambio.file;
   const quitado = cambio.removed || !archivo || archivo.trashed;
@@ -212,8 +242,8 @@ const aplicarCambio = async (cambio, mapa, autorId) => {
     const destino = mapa.get(cambio.fileId);
     if (!destino) return 0;
     if (quitado) {
-      const { count } = await prisma.adjunto.deleteMany({ where: whereDeCarpeta(destino) });
-      return count;
+      // Carpeta a la papelera de Google o borrada: sus archivos van a la papelera del CRM.
+      return aPapeleraDesdeDrive(await prisma.adjunto.findMany({ where: whereDeCarpeta(destino) }), !cambio.removed);
     }
     return importarCarpeta(cambio.fileId, destino, autorId);
   }
@@ -221,12 +251,12 @@ const aplicarCambio = async (cambio, mapa, autorId) => {
   const adjunto = await prisma.adjunto.findFirst({ where: { driveArchivoId: cambio.fileId } });
   const destino = quitado ? null : (archivo.parents || []).map((p) => mapa.get(p)).find(Boolean);
 
-  // Borrado, a la papelera o fuera de las carpetas del CRM: sale del CRM (el
-  // archivo ya no esta ahi, no se toca en Drive).
+  // Borrado, a la papelera o fuera de las carpetas del CRM: sale del CRM y
+  // queda en la papelera del CRM. Si estaba en la papelera de Google se
+  // rescata; si se movio a otro lugar de Drive, se deja ahi.
   if (!destino) {
     if (!adjunto) return 0;
-    await prisma.adjunto.delete({ where: { id: adjunto.id } });
-    return 1;
+    return aPapeleraDesdeDrive([adjunto], Boolean(!cambio.removed && archivo?.trashed));
   }
   if (!adjunto) return crearDesdeDrive(archivo, destino, autorId);
 
@@ -252,7 +282,8 @@ let enCurso = null;
  */
 const sincronizarCambiosDrive = () => {
   if (enCurso) return enCurso;
-  enCurso = enSerie(async () => {
+  // Lo que cambia aqui lo hizo Google Drive, no quien abrio la pantalla.
+  enCurso = enSerie(() => contexto.ejecutar({ origen: 'drive' }, async () => {
     if (!(await drive.activo()) || !(await drive.permisoCompleto())) return null;
     const conexion = await drive.leerConexion();
     let pageToken = conexion.cambiosToken;
@@ -279,7 +310,7 @@ const sincronizarCambiosDrive = () => {
     }
     await drive.anotar({ cambiosToken: siguiente || conexion.cambiosToken, cambiosEn: new Date() });
     return { cambios };
-  }).finally(() => { enCurso = null; });
+  })).finally(() => { enCurso = null; });
   return enCurso;
 };
 

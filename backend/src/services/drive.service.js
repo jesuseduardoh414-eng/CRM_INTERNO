@@ -42,6 +42,9 @@ const SUBCARPETAS = {
   cotizaciones: 'Cotizaciones',
   conocimiento: 'Base de conocimiento',
   respaldos: 'Respaldos',
+  // Lo que se borra en el CRM (services/papelera.service.js). No es la papelera
+  // de Google, que se vacia sola a los 30 dias.
+  papelera: 'Papelera',
 };
 // Hasta este tamaño se sube en una sola peticion; arriba, con subida reanudable.
 const LIMITE_MULTIPART = 4 * 1024 * 1024;
@@ -486,6 +489,34 @@ const aPapeleraPorId = (id) => pedir(`${APIS}/drive/v3/files/${encodeURIComponen
   permitidos: [404],
 });
 
+/**
+ * Mueve un archivo o carpeta a "Archivos del CRM/Papelera" (y lo saca de la
+ * papelera de Google si estaba ahi). Devuelve false si ya no existe.
+ */
+const aPapeleraCrmPorId = async (id) => {
+  const meta = await metadatos(id, 'id,parents,trashed');
+  if (!meta) return false;
+  const destino = await carpeta('papelera');
+  const params = new URLSearchParams({ fields: 'id', addParents: destino });
+  const quitar = (meta.parents || []).filter((p) => p !== destino).join(',');
+  if (quitar) params.set('removeParents', quitar);
+  const res = await pedir(urlArchivo(id, `?${params}`), {
+    metodo: 'PATCH',
+    cabeceras: { 'Content-Type': 'application/json; charset=UTF-8' },
+    cuerpo: JSON.stringify(meta.trashed ? { trashed: false } : {}),
+    permitidos: [404],
+  });
+  return res.status !== 404;
+};
+
+/** Igual, por nombre interno dentro de una subcarpeta. Devuelve el id o null. */
+const aPapeleraCrm = async (clave, nombre) => {
+  const id = await buscarId(clave, nombre);
+  if (!id) return null;
+  ids.delete(`${clave}/${nombre}`);
+  return (await aPapeleraCrmPorId(id)) ? id : null;
+};
+
 // ── Conectar y desconectar ──────────────────────────────────────────────────
 
 /**
@@ -625,6 +656,8 @@ module.exports = {
   md5,
   listarRespaldos,
   aPapeleraPorId,
+  aPapeleraCrm,
+  aPapeleraCrmPorId,
   conectar,
   desconectar,
   estado,

@@ -2,6 +2,7 @@ const multer = require('multer');
 const path = require('path');
 const { configEnCache } = require('../services/configuracion.service');
 const { puede } = require('../utils/permisosArea.utils');
+const { continuar } = require('../lib/contexto');
 
 // Adjuntos de tareas, proyectos y eventos.
 //
@@ -78,9 +79,9 @@ const crear = () => multer({
 
 // Misma interfaz que multer (single/array/fields), con la configuracion vigente.
 const upload = {
-  single: (campo) => (req, res, next) => crear().single(campo)(req, res, next),
-  array: (campo, maximo) => (req, res, next) => crear().array(campo, maximo)(req, res, next),
-  fields: (campos) => (req, res, next) => crear().fields(campos)(req, res, next),
+  single: (campo) => (req, res, next) => crear().single(campo)(req, res, (...a) => continuar(req, next, ...a)),
+  array: (campo, maximo) => (req, res, next) => crear().array(campo, maximo)(req, res, (...a) => continuar(req, next, ...a)),
+  fields: (campos) => (req, res, next) => crear().fields(campos)(req, res, (...a) => continuar(req, next, ...a)),
 };
 
 module.exports = upload;

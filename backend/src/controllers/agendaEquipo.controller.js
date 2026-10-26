@@ -11,6 +11,7 @@ const { buildFiltroAreaProyecto } = require('../utils/permissions.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { feriadosMexico } = require('./agenda.controller');
 const { horarioDelDia } = require('../utils/horarios.utils');
+const papelera = require('../services/papelera.service');
 const FIN_INDEFINIDO = '2099-12-31';
 
 const DIA_MS = 24 * 60 * 60 * 1000;
@@ -216,7 +217,9 @@ const eliminarDiaEmpresa = async (req, res) => {
     if (!diasDeTodas(req.usuario) && !areasDeDias(req.usuario).includes(dia.area)) {
       return res.status(403).json({ error: 'Solo puedes quitar los días de tus áreas' });
     }
-    await prisma.diaEmpresa.delete({ where: { id: dia.id } });
+    // A la papelera del CRM (services/papelera.service.js).
+    await papelera.conPapelera({ tipo: 'diaEmpresa', modulo: 'agenda', entidadId: dia.id, nombre: dia.nombre, contexto: dia.area ? `Área: ${dia.area}` : null, datos: dia },
+      () => prisma.diaEmpresa.delete({ where: { id: dia.id } }));
     return res.json({ mensaje: 'Día quitado del calendario' });
   } catch (error) {
     console.error('[agenda.eliminarDiaEmpresa]', error);

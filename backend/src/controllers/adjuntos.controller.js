@@ -1,9 +1,10 @@
 const prisma = require('../lib/prisma');
 const { registrarActividad } = require('../utils/logger');
 const { puedeAdministrarProyecto, cargarProyectoVisible, cargarTareaVisible: cargarTarea } = require('../utils/permissions.utils');
-const { subirArchivo, borrarBlobs } = require('../utils/blob.utils');
+const { subirArchivo } = require('../utils/blob.utils');
 const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
 const driveProyectos = require('../services/driveProyectos.service');
+const papelera = require('../services/papelera.service');
 
 const getEntityType = (req) => {
   if (req.baseUrl.includes('agenda')) return 'agenda';
@@ -248,11 +249,20 @@ const eliminar = async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso para eliminar este archivo' });
     }
 
-    await prisma.adjunto.delete({ where: { id } });
-
-    // Los adjuntos viven en Vercel Blob; `borrarBlobs` ignora URLs que no
-    // sean de Blob (adjuntos antiguos) y nunca lanza.
-    await borrarBlobs([adjunto.url]);
+    // A la papelera del CRM (services/papelera.service.js): la fila se borra
+    // pero queda una copia y el archivo se mueve a la carpeta Papelera.
+    let donde = null;
+    if (adjunto.tarea) donde = `Tarea: ${adjunto.tarea.titulo}`;
+    else if (adjunto.evento) donde = `Evento: ${adjunto.evento.titulo}`;
+    else if (adjunto.proyectoId) {
+      const p = await prisma.proyecto.findUnique({ where: { id: adjunto.proyectoId }, select: { nombre: true } });
+      donde = `Proyecto: ${p?.nombre || adjunto.proyectoId}`;
+    }
+    const { tarea: _tarea, evento: _evento, ...fila } = adjunto;
+    await papelera.conPapelera({
+      tipo: 'adjunto', modulo: 'archivos', entidadId: id, nombre: adjunto.nombre, contexto: donde,
+      datos: fila, archivos: [papelera.archivoDeAdjunto(adjunto)],
+    }, () => prisma.adjunto.delete({ where: { id } }));
 
     let proyectoId = adjunto.proyectoId;
     let desc = `archivo "${adjunto.nombre}"`;

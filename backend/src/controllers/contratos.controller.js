@@ -9,6 +9,7 @@ const { claveDiaMexico } = require('../utils/fechas.utils');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const { esEmailValido } = require('../utils/security.utils');
 const archivos = require('../services/contratosArchivos.service');
+const papelera = require('../services/papelera.service');
 
 const TIPOS = ['CLIENTE', 'PROVEEDOR'];
 const ESTADOS = ['BORRADOR', 'EN_REVISION', 'VIGENTE', 'TERMINADO', 'CANCELADO'];
@@ -414,19 +415,25 @@ const editar = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// DELETE /api/contratos/:id  (borra tambien sus PDF del disco)
+// DELETE /api/contratos/:id  (va a la papelera del CRM con sus PDF)
 // ---------------------------------------------------------------------------
 const eliminar = async (req, res) => {
   const id = leerId(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID inválido' });
   try {
-    const contrato = await prisma.contrato.findUnique({ where: { id }, select: { id: true, folio: true, archivos: { select: { archivo: true } } } });
+    const contrato = await prisma.contrato.findUnique({
+      where: { id },
+      include: { archivos: true, empresa: { select: { nombre: true } }, responsable: { select: { nombre: true } } },
+    });
     if (!contrato) return res.status(404).json({ error: 'Contrato no encontrado' });
 
-    await prisma.contrato.delete({ where: { id } });
-    await Promise.all(contrato.archivos.map((a) => archivos.borrar(a.archivo).catch((error) => {
-      console.error('[contratos.eliminar] No se pudo borrar el archivo', a.archivo, error?.message);
-    })));
+    // A la papelera del CRM (services/papelera.service.js): los PDF no se borran.
+    await papelera.conPapelera({
+      tipo: 'contrato', modulo: 'contratos', entidadId: id, nombre: [contrato.folio, contrato.titulo].filter(Boolean).join(' · '),
+      contexto: contrato.empresa?.nombre ? `Cliente: ${contrato.empresa.nombre}` : (contrato.contraparteNombre || null),
+      datos: contrato,
+      archivos: contrato.archivos.map((a) => papelera.archivoDeAlmacen('contratos', a)),
+    }, () => prisma.contrato.delete({ where: { id } }));
     return res.json({ mensaje: `Contrato ${contrato.folio} eliminado` });
   } catch (error) {
     console.error('[contratos.eliminar]', error);
@@ -528,8 +535,13 @@ const eliminarArchivo = async (req, res) => {
   try {
     const registro = await prisma.contratoArchivo.findUnique({ where: { id: archivoId } });
     if (!registro) return res.status(404).json({ error: 'Archivo no encontrado' });
-    await prisma.contratoArchivo.delete({ where: { id: archivoId } });
-    await archivos.borrar(registro.archivo);
+    const contrato = await prisma.contrato.findUnique({ where: { id: registro.contratoId }, select: { folio: true, titulo: true } });
+    // A la papelera del CRM (services/papelera.service.js): el PDF no se borra.
+    await papelera.conPapelera({
+      tipo: 'archivoContrato', modulo: 'contratos', entidadId: archivoId, nombre: registro.nombreOriginal,
+      contexto: contrato ? `Contrato: ${[contrato.folio, contrato.titulo].filter(Boolean).join(' · ')}` : null,
+      datos: registro, archivos: [papelera.archivoDeAlmacen('contratos', registro)],
+    }, () => prisma.contratoArchivo.delete({ where: { id: archivoId } }));
     return res.json({ mensaje: 'PDF eliminado' });
   } catch (error) {
     console.error('[contratos.eliminarArchivo]', error);

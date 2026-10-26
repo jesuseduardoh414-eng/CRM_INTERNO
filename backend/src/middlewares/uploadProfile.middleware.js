@@ -1,6 +1,7 @@
 const multer = require('multer');
 const { TIPOS_IMAGEN_PERFIL } = require('../utils/blob.utils');
 const { configEnCache } = require('../services/configuracion.service');
+const { continuar } = require('../lib/contexto');
 
 // Foto de perfil: solo PNG, JPEG o WebP (nada de SVG ni GIF, que pueden
 // llevar scripts o ser enormes). El tamaño maximo sale del panel de
@@ -22,5 +23,5 @@ const crear = () => multer({
 });
 
 module.exports = {
-  single: (campo) => (req, res, next) => crear().single(campo)(req, res, next),
+  single: (campo) => (req, res, next) => crear().single(campo)(req, res, (...a) => continuar(req, next, ...a)),
 };

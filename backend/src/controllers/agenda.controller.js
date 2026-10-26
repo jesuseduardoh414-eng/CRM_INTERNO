@@ -13,9 +13,9 @@ const { ESTADOS_PROYECTO_OCULTOS } = require('../utils/estados.utils');
 const { instanteLocal, partesDiaMexico, claveDiaMexico } = require('../utils/fechas.utils');
 const { cargarProyectoVisible, compartenArea } = require('../utils/permissions.utils');
 const { puede, alcanceDe, areasDelAlcance } = require('../utils/permisosArea.utils');
-const { borrarBlobs } = require('../utils/blob.utils');
 const { configEnCache } = require('../services/configuracion.service');
 const { categoriasVisibles } = require('../utils/finanzas.utils');
+const papelera = require('../services/papelera.service');
 
 const DIAS_LABORALES_DEFAULT = [1, 2, 3, 4, 5];
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
@@ -930,16 +930,20 @@ const eliminar = async (req, res) => {
   try {
     const evento = await prisma.evento.findUnique({
       where: { id },
-      include: { adjuntos: { select: { url: true } } },
+      include: { adjuntos: true, invitados: { select: { usuarioId: true, estado: true } }, proyecto: { select: { nombre: true } } },
     });
     if (!evento) return res.status(404).json({ error: 'Evento no encontrado' });
 
     if (evento.creadoPorId === usuarioId || evento.usuarioId === usuarioId) {
-      // Es el creador -> eliminar todo (invitados y adjuntos caen en cascada)
+      // Es el creador -> eliminar todo (invitados y adjuntos caen en cascada).
+      // Va a la papelera del CRM (services/papelera.service.js) con sus archivos.
       await deleteEventoGoogleBestEffort(evento);
-      await prisma.evento.delete({ where: { id } });
-      // Los archivos viven en Vercel Blob: sin esto quedaban huerfanos
-      await borrarBlobs(evento.adjuntos.map((adjunto) => adjunto.url));
+      const { proyecto, ...fila } = evento;
+      await papelera.conPapelera({
+        tipo: 'evento', modulo: 'agenda', entidadId: id, nombre: evento.titulo,
+        contexto: proyecto?.nombre ? `Proyecto: ${proyecto.nombre}` : null,
+        datos: fila, archivos: evento.adjuntos.map(papelera.archivoDeAdjunto),
+      }, () => prisma.evento.delete({ where: { id } }));
       return res.json({ ok: true, mensaje: 'Evento eliminado para todos' });
     }
 
@@ -1372,7 +1376,9 @@ const eliminarDiaEspecial = async (req, res) => {
       return res.status(403).json({ error: 'No tienes permiso' });
     }
 
-    await prisma.diaEspecial.delete({ where: { id } });
+    // A la papelera del CRM (services/papelera.service.js).
+    await papelera.conPapelera({ tipo: 'diaEspecial', modulo: 'agenda', entidadId: id, nombre: dia.descripcion || dia.tipo, datos: dia },
+      () => prisma.diaEspecial.delete({ where: { id } }));
     return res.json({ ok: true });
   } catch (error) {
     if (esErrorNoEncontrado(error)) return res.status(404).json({ error: 'Día especial no encontrado' });

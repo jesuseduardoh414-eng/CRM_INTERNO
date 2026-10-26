@@ -13,6 +13,7 @@
 // o leyo: si lo que llega de Google trae ese mismo etag, es el eco del CRM. Si
 // los dos lados cambiaron, gana el ultimo cambio.
 const prisma = require('../lib/prisma');
+const contexto = require('../lib/contexto');
 const { cifrar, descifrar } = require('../utils/cifrado.utils');
 const { zonaHoraria, desfaseMs, partesDiaMexico, instanteLocal, claveDiaMexico } = require('../utils/fechas.utils');
 
@@ -826,10 +827,14 @@ const aplicarCambioDeGoogle = async (usuarioId, item, calendario) => {
 
   if (item.status === 'cancelled') {
     if (!evento) return 0;
-    const adjuntos = await prisma.adjunto.findMany({ where: { eventoId: evento.id }, select: { url: true } });
-    await prisma.evento.delete({ where: { id: evento.id } });
-    // Al usarlo: blob.utils llega a drive.service, que carga este archivo.
-    await require('../utils/blob.utils').borrarBlobs(adjuntos.map((a) => a.url)).catch(() => {});
+    // A la papelera del CRM con sus archivos. Al usarlo: papelera llega a
+    // drive.service, que carga este archivo.
+    const papelera = require('./papelera.service'); // eslint-disable-line global-require
+    const completo = await prisma.evento.findUnique({ where: { id: evento.id }, include: { adjuntos: true, invitados: { select: { usuarioId: true, estado: true } } } });
+    await papelera.conPapelera({
+      tipo: 'evento', modulo: 'agenda', entidadId: evento.id, nombre: evento.titulo, contexto: 'Cancelado en Google Calendar',
+      datos: completo, archivos: (completo?.adjuntos || []).map(papelera.archivoDeAdjunto), origen: 'calendar',
+    }, () => prisma.evento.delete({ where: { id: evento.id } }));
     return 1;
   }
   if (evento?.googleEtag && evento.googleEtag === item.etag) return 0;
@@ -906,10 +911,12 @@ const sincronizarDesdeGoogle = (usuarioId) => {
       if (!token?.accessToken) return null;
       const calendario = await asegurarCalendarioCrm(usuarioId);
       if (!calendario) return null;
-      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId }, select: { googleCalendarSyncToken: true } });
-      let resultado = await leerCambios(usuarioId, calendario, usuario?.googleCalendarSyncToken || null);
+      const usuario = await prisma.usuario.findUnique({ where: { id: usuarioId }, select: { id: true, nombre: true, googleCalendarSyncToken: true } });
+      // Lo que llega de Google lo hizo la persona en su Google Calendar.
+      const leer = (token) => contexto.ejecutar({ origen: 'calendar', usuario: { id: usuarioId, nombre: usuario?.nombre || null } }, () => leerCambios(usuarioId, calendario, token));
+      let resultado = await leer(usuario?.googleCalendarSyncToken || null);
       // Google invalida la marca a veces (410): se vuelve a leer todo.
-      if (resultado?.caducado) resultado = await leerCambios(usuarioId, calendario, null);
+      if (resultado?.caducado) resultado = await leer(null);
       if (!resultado || resultado.caducado) return null;
       await prisma.usuario.update({
         where: { id: usuarioId },

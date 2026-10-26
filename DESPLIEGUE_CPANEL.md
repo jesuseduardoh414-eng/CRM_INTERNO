@@ -261,6 +261,11 @@ adjunto debe quedar en `crm_archivos/adjuntos/adjuntos/<uuid>.pdf` (como en
 `backend/storage/adjuntos/adjuntos/` de tu PC). Un nivel más arriba da 404:
 el 2026-10-20 hubo que mover así los 6 adjuntos copiados de Supabase.
 
+Lo que se borra en el CRM va a la papelera (panel de configuración →
+**Papelera**): sus archivos del disco se mueven a `crm_archivos/papelera/`, que
+el CRM crea solo junto a `crm_archivos/adjuntos` (o donde diga `PAPELERA_DIR`).
+No la borres a mano e inclúyela en los respaldos del cPanel.
+
 ## 7. Frontend
 
 1. **Administrador de archivos** → **Configuración** → marca **Mostrar archivos

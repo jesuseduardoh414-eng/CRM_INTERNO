@@ -37,7 +37,16 @@ const comprobarClienteGenerado = () => {
 
 if (!globalThis.__prismaCrm) comprobarClienteGenerado();
 
-const prisma = globalThis.__prismaCrm || new PrismaClient();
+// El cliente que usa todo el CRM anota cada cambio en el registro de
+// actividad (services/registroActividad.service.js); el registro escribe con
+// el cliente base para no anotarse a si mismo.
+const crearCliente = () => {
+  const base = new PrismaClient();
+  // eslint-disable-next-line global-require
+  return base.$extends(require('../services/registroActividad.service').extension(base));
+};
+
+const prisma = globalThis.__prismaCrm || crearCliente();
 
 if (process.env.NODE_ENV !== 'production') {
   globalThis.__prismaCrm = prisma;

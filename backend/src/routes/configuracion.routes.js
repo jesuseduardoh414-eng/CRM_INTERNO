@@ -5,12 +5,14 @@
 //                     /administradores y /configuradores (listar, invitar, acciones),
 //                     POST /correo/prueba, POST /correo/verificar, GET /estado,
 //                     GET /correo/plantillas, POST /correo/vista-previa,
-//                     /drive (Google Drive y respaldos)
+//                     /drive (Google Drive y respaldos),
+//                     /actividad y /papelera (registro de actividad y lo borrado)
 const express = require('express');
 const multer = require('multer');
 const ctrl = require('../controllers/configuracion.controller');
 const sistema = require('../controllers/configuracionSistema.controller');
 const drive = require('../controllers/configuracionDrive.controller');
+const auditoria = require('../controllers/configuracionAuditoria.controller');
 const { verificarToken } = require('../middlewares/auth.middleware');
 const { soloConfigurador } = require('../middlewares/roles.middleware');
 const { limiteAccionSensible } = require('../middlewares/rateLimit.middleware');
@@ -52,6 +54,14 @@ router.post('/correo/verificar', limiteAccionSensible, sistema.verificarCorreo);
 router.get('/correo/plantillas', sistema.plantillasCorreo);
 router.post('/correo/vista-previa', sistema.vistaPreviaCorreo);
 router.get('/estado', sistema.estadoSistema);
+
+// Registro de actividad y papelera (lo que se borra en el CRM)
+router.get('/actividad', auditoria.actividad);
+router.get('/actividad/personas', auditoria.personas);
+router.get('/papelera', auditoria.listarPapelera);
+router.get('/papelera/:id', auditoria.verElemento);
+router.get('/papelera/:id/archivos/:indice', auditoria.descargarArchivo);
+router.delete('/papelera/:id', limiteAccionSensible, auditoria.eliminarParaSiempre);
 
 // Google Drive: archivos del CRM y respaldo diario de la base
 router.get('/drive', drive.estado);

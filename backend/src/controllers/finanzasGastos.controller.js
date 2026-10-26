@@ -10,9 +10,9 @@ const crypto = require('crypto');
 const prisma = require('../lib/prisma');
 const { partesDiaMexico } = require('../utils/fechas.utils');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
-const comprobantes = require('../services/comprobantes.service');
 const presupuestos = require('../services/presupuestos.service');
 const F = require('../utils/finanzas.utils');
+const papelera = require('../services/papelera.service');
 
 const incluirListado = {
   empresa: { select: F.selectEmpresaCorta },
@@ -448,17 +448,21 @@ const duplicar = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// DELETE /api/finanzas/gastos/:id  (borra tambien sus comprobantes del disco)
+// DELETE /api/finanzas/gastos/:id  (va a la papelera del CRM con sus comprobantes)
 // ---------------------------------------------------------------------------
 const eliminar = async (req, res) => {
   const id = F.leerId(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID inválido' });
   try {
-    const actual = await prisma.gasto.findUnique({ where: { id }, include: { comprobantes: { select: { archivo: true } } } });
+    const actual = await prisma.gasto.findUnique({ where: { id }, include: { comprobantes: true } });
     if (!actual) return res.status(404).json({ error: 'Gasto no encontrado' });
     if (!F.puedeGasto(req.usuario, actual.categoria, 'eliminar')) return F.sinPermiso(res);
-    await prisma.gasto.delete({ where: { id } });
-    await Promise.all(actual.comprobantes.map((c) => comprobantes.borrar(c.archivo).catch((e) => console.error('[finanzas.gastos.eliminar] comprobante', e?.message))));
+    // A la papelera del CRM (services/papelera.service.js): los comprobantes no se borran.
+    await papelera.conPapelera({
+      tipo: 'gasto', modulo: 'finanzas', entidadId: id, nombre: [actual.folio, actual.concepto].filter(Boolean).join(' · '),
+      contexto: actual.proveedorNombre ? `Proveedor: ${actual.proveedorNombre}` : null, datos: actual,
+      archivos: actual.comprobantes.map((c) => papelera.archivoDeAlmacen('comprobantes', c)),
+    }, () => prisma.gasto.delete({ where: { id } }));
     F.registrarFinanzas(req.usuario, 'gasto', id, 'ELIMINAR', `Eliminó el gasto ${actual.folio} (${actual.categoria}) "${actual.concepto}" por ${F.aNumero(actual.monto)} ${actual.moneda}`);
     return res.json({ mensaje: `Gasto ${actual.folio} eliminado` });
   } catch (error) {

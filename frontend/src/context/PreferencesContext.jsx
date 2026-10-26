@@ -3,6 +3,7 @@ import { textosAuth } from './textosAuth';
 import { textosContratos } from './textosContratos';
 import { textosConfiguracion } from './textosConfiguracion';
 import { textosSistema } from './textosSistema';
+import { textosHistorial } from './textosHistorial';
 import { textosCorreo } from './textosCorreo';
 import { textosPanel } from './textosPanel';
 import { textosMiembro } from './textosMiembro';
@@ -974,6 +975,7 @@ const translations = {
     ...textosContratos.es,
     ...textosConfiguracion.es,
     ...textosSistema.es,
+    ...textosHistorial.es,
     ...textosCorreo.es,
     ...textosPanel.es,
     ...textosMiembro.es,
@@ -1938,6 +1940,7 @@ const translations = {
     ...textosContratos.en,
     ...textosConfiguracion.en,
     ...textosSistema.en,
+    ...textosHistorial.en,
     ...textosCorreo.en,
     ...textosPanel.en,
     ...textosMiembro.en,

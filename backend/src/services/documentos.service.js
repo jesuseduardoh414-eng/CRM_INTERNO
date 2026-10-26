@@ -128,6 +128,8 @@ const crearAlmacen = ({ variable, vecinaDe, carpeta }) => {
     },
     leer: (nombreInterno) => almacen.leer(nombreInterno),
     borrar: (nombreInterno) => almacen.borrar(nombreInterno),
+    /** A la papelera del CRM en vez de borrarlo (services/papelera.service.js). */
+    aPapelera: (nombreInterno, destino) => almacen.aPapelera(nombreInterno, destino),
   };
 };
 

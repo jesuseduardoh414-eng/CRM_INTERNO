@@ -11,6 +11,7 @@ const prisma = require('../lib/prisma');
 const documentos = require('../services/documentos.service');
 const { parsearPaginacion, paginar, construirBusqueda, combinarWhere } = require('../utils/paginacion.utils');
 const F = require('../utils/finanzas.utils');
+const papelera = require('../services/papelera.service');
 
 const almacen = documentos.cotizaciones;
 
@@ -315,16 +316,20 @@ const cambiarEstado = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// DELETE /api/finanzas/cotizaciones/:id  (permiso "eliminar"; borra sus archivos)
+// DELETE /api/finanzas/cotizaciones/:id  (permiso "eliminar"; va a la papelera del CRM con sus archivos)
 // ---------------------------------------------------------------------------
 const eliminar = async (req, res) => {
   const id = F.leerId(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID inválido' });
   try {
-    const actual = await prisma.cotizacion.findUnique({ where: { id }, include: { versiones: { select: { archivo: true } } } });
+    const actual = await prisma.cotizacion.findUnique({ where: { id }, include: { versiones: { orderBy: { numero: 'asc' } }, empresa: { select: { nombre: true } } } });
     if (!actual) return res.status(404).json({ error: 'Cotización no encontrada' });
-    await prisma.cotizacion.delete({ where: { id } });
-    await Promise.all(actual.versiones.map((v) => almacen.borrar(v.archivo).catch((e) => console.error('[finanzas.cotizaciones.eliminar] disco', e?.message))));
+    // A la papelera del CRM (services/papelera.service.js): las versiones no se borran.
+    await papelera.conPapelera({
+      tipo: 'cotizacion', modulo: 'cotizaciones', entidadId: id, nombre: [actual.folio, actual.titulo].filter(Boolean).join(' · '),
+      contexto: actual.empresa?.nombre || actual.contraparteNombre || null, datos: actual,
+      archivos: actual.versiones.map((v) => ({ ...papelera.archivoDeAlmacen('cotizaciones', v), nombre: `v${v.numero} · ${v.nombreOriginal}` })),
+    }, () => prisma.cotizacion.delete({ where: { id } }));
     F.registrarFinanzas(req.usuario, 'cotizacion', id, 'ELIMINAR', `Eliminó la cotización ${actual.folio} "${actual.titulo}" con sus ${actual.versiones.length} versiones`);
     return res.json({ mensaje: `Cotización ${actual.folio} eliminada` });
   } catch (error) {

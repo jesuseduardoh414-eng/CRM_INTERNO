@@ -29,6 +29,7 @@ const { nombreUtf8 } = require('../utils/nombreArchivo.utils');
 // separadas por coma, asi que cada una se valida contra esta lista.
 const { areasValidas } = require('../utils/security.utils');
 const { configEnCache } = require('../services/configuracion.service');
+const papelera = require('../services/papelera.service');
 
 // Aplicar una plantilla grande no cabe en los 5 s por defecto de una
 // transaccion interactiva ("Transaction already closed" con ~50 tareas).
@@ -855,29 +856,42 @@ const eliminar = async (req, res) => {
     // proyecto (las antiguas "Proyecto: X" y cualquier evento con proyectoId)
     // se borran explicitamente: la FK solo las dejaba con proyectoId null y
     // seguian apareciendo como ocupacion huerfana.
-    const urlsAdjuntos = await prisma.$transaction(async (tx) => {
-      const adjuntos = await tx.adjunto.findMany({
-        where: {
-          OR: [
-            { proyectoId: id },
-            { tarea: { proyectoId: id } },
-            { evento: { proyectoId: id } },
-          ],
-        },
-        select: { url: true },
-      });
-
+    // A la papelera del CRM (services/papelera.service.js): copia del proyecto
+    // con sus tareas, comentarios, adjuntos, eventos e historial; sus archivos
+    // y su carpeta de Google Drive se mueven a la carpeta Papelera.
+    const conAutor = { include: { autor: { select: { nombre: true } } } };
+    const [proyecto, tareas, adjuntos, comentarios, eventos, historial] = await Promise.all([
+      prisma.proyecto.findUnique({
+        where: { id },
+        include: { cliente: { select: { nombre: true } }, creador: { select: { nombre: true } }, miembros: { select: { id: true, nombre: true } } },
+      }),
+      prisma.tarea.findMany({ where: { proyectoId: id }, orderBy: { id: 'asc' } }),
+      prisma.adjunto.findMany({ where: { OR: [{ proyectoId: id }, { tarea: { proyectoId: id } }, { evento: { proyectoId: id } }] } }),
+      prisma.comentario.findMany({ where: { OR: [{ proyectoId: id }, { tarea: { proyectoId: id } }] }, ...conAutor, orderBy: { creadoEn: 'asc' } }),
+      prisma.evento.findMany({ where: { proyectoId: id }, include: { invitados: { select: { usuarioId: true, estado: true } } } }),
+      prisma.logActividad.findMany({ where: { proyectoId: id }, include: { usuario: { select: { nombre: true } } }, orderBy: { creadoEn: 'asc' } }),
+    ]);
+    await papelera.conPapelera({
+      tipo: 'proyecto',
+      modulo: 'proyectos',
+      entidadId: id,
+      nombre: existente.nombre,
+      contexto: proyecto?.cliente?.nombre ? `Cliente: ${proyecto.cliente.nombre}` : null,
+      datos: {
+        ...proyecto,
+        tareas,
+        comentarios: comentarios.map(({ autor, ...c }) => ({ ...c, autorNombre: autor?.nombre || null })),
+        adjuntos,
+        eventos,
+        historial: historial.map(({ usuario, ...h }) => ({ ...h, usuarioNombre: usuario?.nombre || null })),
+      },
+      archivos: adjuntos.map(papelera.archivoDeAdjunto),
+    }, () => prisma.$transaction(async (tx) => {
       await tx.evento.deleteMany({ where: { proyectoId: id } });
       await tx.tarea.deleteMany({ where: { proyectoId: id } });
       await tx.proyecto.delete({ where: { id } });
-
-      return adjuntos.map((adjunto) => adjunto.url);
-    });
-
-    // Ya confirmado el borrado en la base, se quitan los archivos de Blob
-    await borrarBlobs(urlsAdjuntos);
-    // Y su carpeta de Google Drive (con las de sus tareas) va a la papelera.
-    await driveProyectos.tirarCarpeta(existente.driveCarpetaId);
+    }));
+    await papelera.carpetaDrive(existente.driveCarpetaId);
 
     // La bitacora (`logs_actividad`) tiene FK al proyecto con borrado en
     // cascada: no hay donde dejar el apunte en la base (antes se intentaba

@@ -3,6 +3,7 @@
 // maximo sale del panel de configuracion (archivos.contratosMaxMB).
 const multer = require('multer');
 const { configEnCache } = require('../services/configuracion.service');
+const { continuar } = require('../lib/contexto');
 
 const fileFilter = (_req, file, cb) => {
   const esPdf = file.mimetype === 'application/pdf' && /\.pdf$/i.test(file.originalname || '');
@@ -20,5 +21,5 @@ const crear = () => multer({
 });
 
 module.exports = {
-  single: (campo) => (req, res, next) => crear().single(campo)(req, res, next),
+  single: (campo) => (req, res, next) => crear().single(campo)(req, res, (...a) => continuar(req, next, ...a)),
 };

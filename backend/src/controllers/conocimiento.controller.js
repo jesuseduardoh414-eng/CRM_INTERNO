@@ -8,6 +8,7 @@
 // routes/conocimiento.routes.js.
 const prisma = require('../lib/prisma');
 const documentos = require('../services/documentos.service');
+const papelera = require('../services/papelera.service');
 const { configEnCache } = require('../services/configuracion.service');
 const { puede, sinPermiso } = require('../utils/permisosArea.utils');
 const { accesoArticulos, accesoArchivos, normalizarAcceso } = require('../utils/accesoConocimiento.utils');
@@ -256,7 +257,7 @@ const cambiarAcceso = async (req, res) => {
 };
 
 // ---------------------------------------------------------------------------
-// DELETE /api/conocimiento/:id   (administradores; borra tambien sus archivos)
+// DELETE /api/conocimiento/:id   (administradores; va a la papelera del CRM con sus archivos)
 // ---------------------------------------------------------------------------
 const eliminar = async (req, res) => {
   const id = leerId(req.params.id);
@@ -270,8 +271,12 @@ const eliminar = async (req, res) => {
     if (soloSuyos && await prisma.archivoConocimiento.count({ where: { articuloId: id, ...soloSuyos } }) < actual.archivos.length) {
       return res.status(409).json({ error: 'Este artículo tiene archivos restringidos que no puedes ver. Pide al administrador general que lo elimine.' });
     }
-    await prisma.articuloConocimiento.delete({ where: { id } });
-    await Promise.all(actual.archivos.map((a) => almacen.borrar(a.archivo).catch((e) => console.error('[conocimiento.eliminar] disco', e?.message))));
+    // A la papelera del CRM (services/papelera.service.js), con archivos y reglas de acceso.
+    const completo = await prisma.articuloConocimiento.findUnique({ where: { id }, include: { archivos: true, accesos: true, autor: { select: { nombre: true } } } });
+    await papelera.conPapelera({
+      tipo: 'articulo', modulo: 'conocimiento', entidadId: id, nombre: completo.titulo, contexto: completo.categoria ? `Categoría: ${completo.categoria}` : null,
+      datos: completo, archivos: completo.archivos.map((a) => papelera.archivoDeAlmacen('conocimiento', a)),
+    }, () => prisma.articuloConocimiento.delete({ where: { id } }));
     return res.json({ mensaje: 'Artículo eliminado' });
   } catch (error) {
     console.error('[conocimiento.eliminar]', error);
@@ -428,10 +433,14 @@ const eliminarArchivo = async (req, res) => {
   const { id } = req.params;
   if (!REGEX_UUID.test(String(id || ''))) return res.status(400).json({ error: 'ID de archivo inválido' });
   try {
-    const archivo = await prisma.archivoConocimiento.findFirst({ where: combinarWhere({ id }, archivoVisiblePara(req.usuario)), select: { archivo: true, articuloId: true } });
+    const archivo = await prisma.archivoConocimiento.findFirst({ where: combinarWhere({ id }, archivoVisiblePara(req.usuario)), include: { accesos: true, articulo: { select: { titulo: true } } } });
     if (!archivo) return res.status(404).json({ error: 'Archivo no encontrado' });
-    await prisma.archivoConocimiento.delete({ where: { id } });
-    await almacen.borrar(archivo.archivo).catch((e) => console.error('[conocimiento.eliminarArchivo] disco', e?.message));
+    // A la papelera del CRM (services/papelera.service.js): el archivo no se borra.
+    const { articulo, ...fila } = archivo;
+    await papelera.conPapelera({
+      tipo: 'archivoConocimiento', modulo: 'conocimiento', entidadId: id, nombre: archivo.nombreOriginal,
+      contexto: articulo ? `Artículo: ${articulo.titulo}` : null, datos: fila, archivos: [papelera.archivoDeAlmacen('conocimiento', archivo)],
+    }, () => prisma.archivoConocimiento.delete({ where: { id } }));
     return res.json({ mensaje: 'Archivo eliminado' });
   } catch (error) {
     console.error('[conocimiento.eliminarArchivo]', error);
