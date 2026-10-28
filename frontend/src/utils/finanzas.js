@@ -85,6 +85,22 @@ export const esDocumentoValido = (archivo) => /\.(pdf|jpe?g|png|webp|docx?|xlsx?
 /** PDF e imágenes se pueden ver en el CRM; Office solo se descarga. */
 export const seVeEnElCrm = (mime) => mime === 'application/pdf' || esImagen(mime);
 
+// ── Directorio ────────────────────────────────────────────────────────────
+
+/** "Nombre comercial (razón social)" o la razón social. */
+export const etiquetaEmpresa = (e) => (e?.nombreComercial ? `${e.nombreComercial} (${e.nombre})` : e?.nombre || '');
+
+/**
+ * Opciones del selector "Para qué cliente" (gastos y cotizaciones): los
+ * clientes activos del catálogo más el que ya tenga el registro, aunque ya no
+ * esté en la lista (inactivo).
+ */
+export const opcionesCliente = (clientes = [], actual = null) => {
+  const lista = [...(clientes || [])];
+  if (actual && !lista.some((c) => c.id === actual.id)) lista.push(actual);
+  return lista.map((c) => ({ valor: String(c.id), etiqueta: etiquetaEmpresa(c) }));
+};
+
 // ── Fechas ────────────────────────────────────────────────────────────────
 
 /** 'AAAA-MM-DD' de hoy en la zona del navegador (para los formularios). */

@@ -17,6 +17,10 @@
 // true deja el articulo solo para ellos.
 //
 // Cambiar estas listas es el permiso conocimiento.acceso.
+//
+// Las cotizaciones usan las mismas filas (tabla accesos_cotizacion, ver
+// accesoCotizaciones en finanzas.utils.js): filasDe y normalizarAcceso
+// sirven para las dos.
 const { esAdminGeneral, rolDe, areasDe } = require('./permisosArea.utils');
 
 const ROLES = ['admin', 'miembro'];
@@ -97,6 +101,7 @@ const normalizarAcceso = async (entrada, { areas, existentes }) => {
 
 module.exports = {
   ROLES,
+  filasDe,
   accesoArticulos,
   accesoArchivos,
   normalizarAcceso,

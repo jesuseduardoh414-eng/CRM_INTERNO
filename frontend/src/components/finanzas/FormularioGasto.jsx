@@ -17,12 +17,12 @@ import { AvisoError, Campo, Seccion } from './piezas';
 import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
 import {
   ACEPTA_COMPROBANTE, METODOS_PAGO, MONEDAS, MONEDA_BASE, OPCIONES_SWR_FINANZAS, categoriasCon, comprobanteMaxBytes, comprobanteMaxMegas,
-  esComprobanteValido, hoyClave, nombreMesAnio, puedeFinanzas,
+  esComprobanteValido, hoyClave, nombreMesAnio, opcionesCliente, puedeFinanzas,
 } from '../../utils/finanzas';
 
 const VACIO = {
   categoria: '', concepto: '', descripcion: '', monto: '', moneda: 'MXN', fecha: '', fechaLimite: '', estado: 'PENDIENTE', pagadoEn: '',
-  metodo: '', referencia: '', empresaId: '', proveedorNombre: '', cuentaId: '', notas: '',
+  metodo: '', referencia: '', empresaId: '', proveedorNombre: '', clienteId: '', cuentaId: '', notas: '',
 };
 
 const desdeGasto = (g) => Object.fromEntries(Object.keys(VACIO).map((k) => {
@@ -92,6 +92,7 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
     const datos = {
       ...form,
       empresaId: form.empresaId || null,
+      clienteId: form.clienteId || null,
       cuentaId: form.cuentaId || null,
       metodo: form.metodo || null,
       fechaLimite: form.fechaLimite || null,
@@ -136,6 +137,8 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
   const mesPresupuesto = presupuesto ? nombreMesAnio(presupuesto.anio, presupuesto.mes, locale) : '';
 
   const proveedores = catalogos?.proveedores || [];
+  // Para qué cliente es (aparece en su ficha); el que ya tenga, aunque esté inactivo.
+  const clientes = opcionesCliente(catalogos?.clientes, gasto?.cliente);
   const cuentas = (catalogos?.cuentas || []).filter((c) => c.activa || String(c.id) === form.cuentaId);
 
   return (
@@ -202,6 +205,11 @@ const FormularioGasto = ({ open, gasto, categoria, catalogos, onClose, onGuardad
           <Campo id="gasto-proveedor" label={tf('finProveedorNombre')} ancho={proveedores.length === 0}>
             <input id="gasto-proveedor" name="proveedorNombre" className="form-input" value={form.proveedorNombre} onChange={cambiar} maxLength={255} placeholder={tf('finProveedorNombrePh')} />
           </Campo>
+          {clientes.length > 0 && (
+            <Campo id="gasto-cliente" label={tf('finClienteDe')} ayuda={tf('finClienteDeAyuda')} ancho>
+              <SelectorSimple id="gasto-cliente" valor={form.clienteId} onCambio={elegir('clienteId')} opcionVacia={tf('finClienteNinguno')} opciones={clientes} />
+            </Campo>
+          )}
           {!editando && (
             <Campo id="gasto-estado" label={tf('finEstadoInicial')}>
               <SelectorSimple id="gasto-estado" valor={form.estado} onCambio={elegir('estado')} opciones={[{ valor: 'PENDIENTE', etiqueta: tf('finEstadoGastoPENDIENTE') }, { valor: 'PAGADO', etiqueta: tf('finEstadoGastoPAGADO') }]} />

@@ -10,13 +10,17 @@
 //   finanzas.tesoreria.{ver,editar}
 //   finanzas.gastos.<CATEGORIA>.{ver,crear,editar,eliminar}
 //   finanzas.informe.ver
-//   finanzas.cotizaciones.{ver,crear,editar,aprobar,eliminar}
+//   finanzas.cotizaciones.{ver,crear,editar,aprobar,eliminar,acceso}
 // En cotizaciones, crear es subir cotizaciones y versiones nuevas; editar es
-// corregir datos y aprobar, cambiar el estado. La version original nunca se
-// reemplaza. De fabrica nadie tiene nada: el administrador general (ADMIN del
-// area ADMINISTRACION) siempre puede todo. Se comprueba en el servidor:
-// ocultar el menu en el frontend no basta.
-const { puede: puedeClave, POR_CLAVE, CATEGORIAS_GASTO } = require('./permisosArea.utils');
+// corregir datos; aprobar, cambiar el estado; y acceso, elegir quien ve cada
+// una (accesoCotizaciones). La version original nunca se reemplaza. De
+// fabrica nadie tiene nada: el administrador general (ADMIN del area
+// ADMINISTRACION) siempre puede todo. Se comprueba en el servidor: ocultar el
+// menu en el frontend no basta.
+const {
+  puede: puedeClave, POR_CLAVE, CATEGORIAS_GASTO, esAdminGeneral,
+} = require('./permisosArea.utils');
+const { filasDe } = require('./accesoConocimiento.utils');
 const { partesDiaMexico } = require('./fechas.utils');
 
 // Para el Excel y la bitacora (las pantallas usan sus propios textos).
@@ -31,7 +35,7 @@ const NOMBRES_CATEGORIA = {
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const RECURSOS_BASE = ['ventas', 'tesoreria', 'informe', 'cotizaciones'];
 const RECURSOS = [...RECURSOS_BASE, ...CATEGORIAS_GASTO.map((c) => `gastos.${c}`)];
-const ACCIONES = ['ver', 'crear', 'editar', 'eliminar', 'aprobar'];
+const ACCIONES = ['ver', 'crear', 'editar', 'eliminar', 'aprobar', 'acceso'];
 
 const MONEDAS = ['MXN', 'USD', 'EUR'];
 // La tesoreria y el informe trabajan en esta moneda; los movimientos en otra
@@ -58,8 +62,8 @@ const REGEX_COLOR = /^#[0-9a-f]{6}$/i;
 /**
  * ¿Puede la accion sobre el recurso? recurso: 'ventas', 'tesoreria',
  * 'informe', 'cotizaciones' o 'gastos.FIJOS'; accion: ver, crear, editar,
- * eliminar o aprobar. Una combinacion que no existe (p. ej. eliminar en
- * tesoreria) es false.
+ * eliminar, aprobar o acceso. Una combinacion que no existe (p. ej. eliminar
+ * en tesoreria) es false.
  */
 const puedeFin = (usuario, recurso, accion = 'ver') => {
   const clave = `finanzas.${recurso}.${accion}`;
@@ -71,6 +75,19 @@ const categoriasCon = (usuario, accion = 'ver') => CATEGORIAS_GASTO.filter((c) =
 const categoriasVisibles = (usuario) => categoriasCon(usuario, 'ver');
 const tieneAccesoFinanzas = (usuario) => RECURSOS.some((r) => puedeVer(usuario, r));
 
+/**
+ * where de las cotizaciones que la persona ve (null = todas). Una sin
+ * restringir la ve quien tiene finanzas.cotizaciones.ver; una restringida,
+ * solo quienes esten en su lista de accesos (las mismas filas que la base de
+ * conocimiento), tengan o no ese permiso: elegir a alguien es compartirsela.
+ * Siempre: el administrador general (todas) y quien la registro.
+ */
+const accesoCotizaciones = (usuario) => {
+  if (esAdminGeneral(usuario)) return null;
+  const opciones = [{ creadoPorId: usuario.id }, { restringido: true, accesos: { some: filasDe(usuario) } }];
+  if (puedeVer(usuario, 'cotizaciones')) opciones.unshift({ restringido: false });
+  return { OR: opciones };
+};
 
 const sinPermiso = (res) => res.status(403).json({
   error: 'Tu cuenta no tiene permiso para esta sección de finanzas. Pídeselo al administrador.',
@@ -179,9 +196,38 @@ const selectUsuarioCorto = { id: true, nombre: true, email: true };
 const selectEmpresaCorta = { id: true, nombre: true, nombreComercial: true, tipo: true };
 const selectCuentaCorta = { id: true, nombre: true, tipo: true, banco: true, activa: true };
 const selectPartidaCorta = { id: true, nombre: true, color: true, activa: true };
+// De que archivo de tarea o proyecto es copia ("Mandar a finanzas").
+const selectOrigen = { adjuntoId: true, origen: true, origenTareaId: true, origenProyectoId: true };
 const selectComprobante = {
   id: true, nombreOriginal: true, mime: true, tamano: true, creadoEn: true,
   subidoPor: { select: selectUsuarioCorto },
+  ...selectOrigen,
+};
+
+/**
+ * Cliente para el que es un gasto o una cotizacion (`clienteId` del cuerpo):
+ * { clienteId } (null = ninguno), { error } o {} si no viene. Debe ser un
+ * cliente del directorio (tipo CLIENTE o AMBOS).
+ */
+const leerCliente = async (valor) => {
+  if (valor === undefined) return {};
+  if (valor === null || valor === '') return { clienteId: null };
+  const clienteId = leerId(valor);
+  if (!clienteId) return { error: 'Cliente no válido' };
+  // Require diferido: lib/prisma comprueba el proveedor al cargar.
+  const empresa = await require('../lib/prisma').empresa.findUnique({ where: { id: clienteId }, select: { tipo: true } });
+  if (!empresa) return { error: 'El cliente no existe en el directorio' };
+  if (empresa.tipo === 'PROVEEDOR') return { error: 'Esa empresa es solo proveedor: elige un cliente' };
+  return { clienteId };
+};
+
+/**
+ * where de lo relacionado con una empresa del directorio (?relacionadoCon=):
+ * como contraparte o proveedor (empresaId) o como cliente (clienteId).
+ */
+const relacionadoCon = (valor) => {
+  const id = leerId(valor);
+  return id ? { OR: [{ empresaId: id }, { clienteId: id }] } : null;
 };
 
 // ---------------------------------------------------------------------------
@@ -231,6 +277,7 @@ module.exports = {
   categoriasCon,
   categoriasVisibles,
   tieneAccesoFinanzas,
+  accesoCotizaciones,
   sinPermiso,
   textoOpcional,
   leerId,
@@ -251,6 +298,9 @@ module.exports = {
   selectEmpresaCorta,
   selectCuentaCorta,
   selectPartidaCorta,
+  selectOrigen,
   selectComprobante,
+  leerCliente,
+  relacionadoCon,
   registrarFinanzas,
 };

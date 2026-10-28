@@ -107,6 +107,8 @@ export const textosPermisos = {
     'perm.finanzas.cotizaciones.crear': 'Subir cotizaciones y versiones',
     'perm.finanzas.cotizaciones.editar': 'Corregir datos',
     'perm.finanzas.cotizaciones.eliminar': 'Eliminar la cotización completa',
+    'perm.finanzas.cotizaciones.acceso': 'Elegir quién ve cada cotización',
+    'perm.finanzas.cotizaciones.acceso.ayuda': 'Dejar cotizaciones solo para ciertas áreas, roles o personas, aunque no tengan el permiso de verlas. El administrador general siempre ve todo.',
     'acc.gastos.editar': 'Editar, pagar y anular',
     'acc.gastos.crear': 'Registrar y duplicar',
 
@@ -240,6 +242,8 @@ export const textosPermisos = {
     'perm.finanzas.cotizaciones.crear': 'Upload quotes and versions',
     'perm.finanzas.cotizaciones.editar': 'Correct details',
     'perm.finanzas.cotizaciones.eliminar': 'Delete the whole quote',
+    'perm.finanzas.cotizaciones.acceso': 'Choose who sees each quote',
+    'perm.finanzas.cotizaciones.acceso.ayuda': 'Keep quotes for certain areas, roles or people only, even if they lack the permission to see them. The general administrator always sees everything.',
     'acc.gastos.editar': 'Edit, pay and void',
     'acc.gastos.crear': 'Record and duplicate',
 

@@ -98,9 +98,13 @@ const guardar = async (cambios, usuarioId) => {
     create: { id: 1, datos: nueva, version: 1, actualizadoPorId: usuarioId },
     update: { datos: nueva, version: { increment: 1 }, actualizadoPorId: usuarioId },
   });
-  // Las reglas de acceso de la base de conocimiento de un area quitada ya no
-  // alcanzan a nadie; se borran para que no revivan si otra area toma la clave.
-  if (quitadas.length) await prisma.accesoConocimiento.deleteMany({ where: { area: { in: quitadas } } });
+  // Las reglas de acceso (base de conocimiento y cotizaciones) de un area
+  // quitada ya no alcanzan a nadie; se borran para que no revivan si otra area
+  // toma la clave.
+  if (quitadas.length) {
+    await prisma.accesoConocimiento.deleteMany({ where: { area: { in: quitadas } } });
+    await prisma.accesoCotizacion.deleteMany({ where: { area: { in: quitadas } } });
+  }
   invalidar();
   return obtener();
 };

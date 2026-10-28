@@ -112,6 +112,7 @@ model Usuario {
   comprobantesSubidos      ComprobanteFinanciero[] @relation("SubeComprobante")
   cotizacionesRegistradas  Cotizacion[]            @relation("CreadorCotizacion")
   versionesCotizacion      VersionCotizacion[]     @relation("SubeVersionCotizacion")
+  accesosCotizacion        AccesoCotizacion[]      @relation("AccesoCotizacionPersona")
   articulosEscritos        ArticuloConocimiento[]  @relation("AutorArticulo")
   articulosEditados        ArticuloConocimiento[]  @relation("EditorArticulo")
   archivosConocimiento     ArchivoConocimiento[]   @relation("SubeArchivoConocimiento")
@@ -216,32 +217,35 @@ model Contrato {
 
 // Directorio de clientes y proveedores (solo administradores).
 model Empresa {
-  id              Int               @id @default(autoincrement())
-  nombre          String            @db.VarChar(255) // razón social o nombre
-  nombreComercial String?           @map("nombre_comercial") @db.VarChar(255)
-  tipo            String            @default("CLIENTE") @db.VarChar(20) // CLIENTE | PROVEEDOR | AMBOS
-  estado          String            @default("ACTIVO") @db.VarChar(20) // ACTIVO | INACTIVO
-  rfc             String?           @db.VarChar(13)
-  sector          String?           @db.VarChar(80)
-  sitioWeb        String?           @map("sitio_web") @db.VarChar(255)
-  email           String?           @db.VarChar(191)
-  telefono        String?           @db.VarChar(40)
-  direccion       String?           @db.VarChar(500)
-  ciudad          String?           @db.VarChar(120)
-  notas           String?           @db.Text
-  creadoPorId     Int?              @map("creado_por_id")
-  creadoEn        DateTime          @default(now()) @map("creado_en")
-  actualizadoEn   DateTime          @updatedAt @map("actualizado_en")
-  creadoPor       Usuario?          @relation("CreadorEmpresa", fields: [creadoPorId], references: [id], onDelete: SetNull)
-  contactos       ContactoEmpresa[]
-  contratos       Contrato[]
-  proyectos       Proyecto[]
-  usuariosPortal  Usuario[]         @relation("UsuariosPortal")
-  invitaciones    Invitacion[]
-  reuniones       Evento[]
-  pagos           Pago[] // como cliente que paga
-  gastos          Gasto[] // como proveedor al que se le paga
-  cotizaciones    Cotizacion[] // proveedor que cotiza o cliente al que se cotiza
+  id                  Int               @id @default(autoincrement())
+  nombre              String            @db.VarChar(255) // razón social o nombre
+  nombreComercial     String?           @map("nombre_comercial") @db.VarChar(255)
+  tipo                String            @default("CLIENTE") @db.VarChar(20) // CLIENTE | PROVEEDOR | AMBOS
+  estado              String            @default("ACTIVO") @db.VarChar(20) // ACTIVO | INACTIVO
+  rfc                 String?           @db.VarChar(13)
+  sector              String?           @db.VarChar(80)
+  sitioWeb            String?           @map("sitio_web") @db.VarChar(255)
+  email               String?           @db.VarChar(191)
+  telefono            String?           @db.VarChar(40)
+  direccion           String?           @db.VarChar(500)
+  ciudad              String?           @db.VarChar(120)
+  notas               String?           @db.Text
+  creadoPorId         Int?              @map("creado_por_id")
+  creadoEn            DateTime          @default(now()) @map("creado_en")
+  actualizadoEn       DateTime          @updatedAt @map("actualizado_en")
+  creadoPor           Usuario?          @relation("CreadorEmpresa", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  contactos           ContactoEmpresa[]
+  contratos           Contrato[]
+  proyectos           Proyecto[]
+  usuariosPortal      Usuario[]         @relation("UsuariosPortal")
+  invitaciones        Invitacion[]
+  reuniones           Evento[]
+  pagos               Pago[] // como cliente que paga
+  gastos              Gasto[]           @relation("ProveedorGasto") // como proveedor al que se le paga
+  cotizaciones        Cotizacion[]      @relation("ContraparteCotizacion") // proveedor que cotiza o cliente al que se cotiza
+  // Para que cliente es el gasto o la cotizacion (p. ej. lo que se cotizo para su proyecto)
+  gastosCliente       Gasto[]           @relation("ClienteGasto")
+  cotizacionesCliente Cotizacion[]      @relation("ClienteCotizacion")
 
   @@index([tipo])
   @@index([nombre])
@@ -832,17 +836,20 @@ model Gasto {
   partidaId       Int?                    @map("partida_id")
   empresaId       Int?                    @map("empresa_id") // proveedor
   proveedorNombre String?                 @map("proveedor_nombre") @db.VarChar(255)
+  clienteId       Int?                    @map("cliente_id") // para que cliente es (opcional)
   cuentaId        Int?                    @map("cuenta_id")
   creadoPorId     Int?                    @map("creado_por_id")
   creadoEn        DateTime                @default(now()) @map("creado_en")
   actualizadoEn   DateTime                @updatedAt @map("actualizado_en")
   partida         Partida?                @relation(fields: [partidaId], references: [id], onDelete: SetNull)
-  empresa         Empresa?                @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  empresa         Empresa?                @relation("ProveedorGasto", fields: [empresaId], references: [id], onDelete: SetNull)
+  cliente         Empresa?                @relation("ClienteGasto", fields: [clienteId], references: [id], onDelete: SetNull)
   cuenta          CuentaFinanciera?       @relation(fields: [cuentaId], references: [id], onDelete: SetNull)
   creadoPor       Usuario?                @relation("CreadorGasto", fields: [creadoPorId], references: [id], onDelete: SetNull)
   comprobantes    ComprobanteFinanciero[]
 
   @@index([categoria])
+  @@index([clienteId])
   @@index([fecha])
   @@index([fechaLimite])
   @@index([estado])
@@ -853,23 +860,31 @@ model Gasto {
 // Comprobante de un pago (transferencia) o de un gasto (factura, ticket).
 // Vive en disco fuera de cualquier carpeta publica (COMPROBANTES_DIR) y solo
 // se sirve a quien puede ver ese pago o gasto. `archivo` es el nombre interno.
+// Si es la copia de un archivo de una tarea o de un proyecto ("Mandar a
+// finanzas"), `adjuntoId` y `origen*` dicen de cual: sin llave foranea, como
+// la bitacora, para que la copia no pierda su origen si aquel se borra.
 model ComprobanteFinanciero {
-  id             String   @id @default(uuid()) @db.VarChar(36)
-  pagoId         Int?     @map("pago_id")
-  gastoId        Int?     @map("gasto_id")
-  nombreOriginal String   @map("nombre_original") @db.VarChar(255)
-  archivo        String   @unique @db.VarChar(80)
-  mime           String   @db.VarChar(60)
-  tamano         Int
-  sha256         String   @db.VarChar(64)
-  subidoPorId    Int?     @map("subido_por_id")
-  creadoEn       DateTime @default(now()) @map("creado_en")
-  pago           Pago?    @relation(fields: [pagoId], references: [id], onDelete: Cascade)
-  gasto          Gasto?   @relation(fields: [gastoId], references: [id], onDelete: Cascade)
-  subidoPor      Usuario? @relation("SubeComprobante", fields: [subidoPorId], references: [id], onDelete: SetNull)
+  id               String   @id @default(uuid()) @db.VarChar(36)
+  pagoId           Int?     @map("pago_id")
+  gastoId          Int?     @map("gasto_id")
+  nombreOriginal   String   @map("nombre_original") @db.VarChar(255)
+  archivo          String   @unique @db.VarChar(80)
+  mime             String   @db.VarChar(60)
+  tamano           Int
+  sha256           String   @db.VarChar(64)
+  subidoPorId      Int?     @map("subido_por_id")
+  adjuntoId        Int?     @map("adjunto_id")
+  origenTareaId    Int?     @map("origen_tarea_id")
+  origenProyectoId Int?     @map("origen_proyecto_id")
+  origen           String?  @db.VarChar(255) // "Cotizar sillas · Oficina nueva"
+  creadoEn         DateTime @default(now()) @map("creado_en")
+  pago             Pago?    @relation(fields: [pagoId], references: [id], onDelete: Cascade)
+  gasto            Gasto?   @relation(fields: [gastoId], references: [id], onDelete: Cascade)
+  subidoPor        Usuario? @relation("SubeComprobante", fields: [subidoPorId], references: [id], onDelete: SetNull)
 
   @@index([pagoId])
   @@index([gastoId])
+  @@index([adjuntoId])
   @@map("comprobantes_financieros")
 }
 
@@ -896,6 +911,9 @@ model LogFinanzas {
 // original); los cambios se suben como versiones nuevas. Solo el
 // administrador global corrige los datos, cambia el estado o la elimina
 // completa. `contraparteNombre` guarda el nombre tal como estaba al registrar.
+// Con `restringido` solo la ven quienes esten en sus accesos (ademas del
+// administrador general y de quien la registro), tengan o no el permiso de
+// ver cotizaciones.
 model Cotizacion {
   id                Int                 @id @default(autoincrement())
   folio             String              @unique @db.VarChar(40) // COT-2026-0001
@@ -907,40 +925,70 @@ model Cotizacion {
   moneda            String              @default("MXN") @db.VarChar(3)
   fecha             DateTime            @db.Date
   estado            String              @default("PENDIENTE") @db.VarChar(20) // PENDIENTE | APROBADA | RECHAZADA
+  restringido       Boolean             @default(false)
+  clienteId         Int?                @map("cliente_id") // para que cliente es (en una enviada, la contraparte)
   creadoPorId       Int?                @map("creado_por_id")
   creadoEn          DateTime            @default(now()) @map("creado_en")
   actualizadoEn     DateTime            @updatedAt @map("actualizado_en")
-  empresa           Empresa?            @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  empresa           Empresa?            @relation("ContraparteCotizacion", fields: [empresaId], references: [id], onDelete: SetNull)
+  cliente           Empresa?            @relation("ClienteCotizacion", fields: [clienteId], references: [id], onDelete: SetNull)
   creadoPor         Usuario?            @relation("CreadorCotizacion", fields: [creadoPorId], references: [id], onDelete: SetNull)
   versiones         VersionCotizacion[]
+  accesos           AccesoCotizacion[]
 
   @@index([tipo])
   @@index([estado])
   @@index([fecha])
   @@index([empresaId])
+  @@index([clienteId])
   @@map("cotizaciones")
 }
 
 // Un archivo de una cotizacion, con el monto de esa version (para ver cuanto
 // cambio) y la nota de que cambio. En disco (COTIZACIONES_DIR), no se edita.
+// `adjuntoId` y `origen*`: archivo de tarea o proyecto del que es copia (como
+// en ComprobanteFinanciero, sin llave foranea).
 model VersionCotizacion {
-  id             Int        @id @default(autoincrement())
-  cotizacionId   Int        @map("cotizacion_id")
-  numero         Int // 1 = la original
-  monto          Decimal?   @db.Decimal(14, 2)
-  nota           String?    @db.Text
-  nombreOriginal String     @map("nombre_original") @db.VarChar(255)
-  archivo        String     @unique @db.VarChar(80)
-  mime           String     @db.VarChar(100)
-  tamano         Int
-  sha256         String     @db.VarChar(64)
-  subidoPorId    Int?       @map("subido_por_id")
-  creadoEn       DateTime   @default(now()) @map("creado_en")
-  cotizacion     Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
-  subidoPor      Usuario?   @relation("SubeVersionCotizacion", fields: [subidoPorId], references: [id], onDelete: SetNull)
+  id               Int        @id @default(autoincrement())
+  cotizacionId     Int        @map("cotizacion_id")
+  numero           Int // 1 = la original
+  monto            Decimal?   @db.Decimal(14, 2)
+  nota             String?    @db.Text
+  nombreOriginal   String     @map("nombre_original") @db.VarChar(255)
+  archivo          String     @unique @db.VarChar(80)
+  mime             String     @db.VarChar(100)
+  tamano           Int
+  sha256           String     @db.VarChar(64)
+  subidoPorId      Int?       @map("subido_por_id")
+  adjuntoId        Int?       @map("adjunto_id")
+  origenTareaId    Int?       @map("origen_tarea_id")
+  origenProyectoId Int?       @map("origen_proyecto_id")
+  origen           String?    @db.VarChar(255)
+  creadoEn         DateTime   @default(now()) @map("creado_en")
+  cotizacion       Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  subidoPor        Usuario?   @relation("SubeVersionCotizacion", fields: [subidoPorId], references: [id], onDelete: SetNull)
 
   @@unique([cotizacionId, numero])
+  @@index([adjuntoId])
   @@map("versiones_cotizacion")
+}
+
+// Quien puede ver una cotizacion restringida, con las mismas filas que
+// AccesoConocimiento: una persona (usuarioId), toda un area (area), solo los
+// administradores o solo los miembros de un area (area + rol) o de todas las
+// areas (rol sin area). rol: admin | miembro.
+model AccesoCotizacion {
+  id           Int        @id @default(autoincrement())
+  cotizacionId Int        @map("cotizacion_id")
+  area         String?    @db.VarChar(40)
+  rol          String?    @db.VarChar(10)
+  usuarioId    Int?       @map("usuario_id")
+  cotizacion   Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+  usuario      Usuario?   @relation("AccesoCotizacionPersona", fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@index([cotizacionId])
+  @@index([usuarioId])
+  @@map("accesos_cotizacion")
 }
 
 // Articulo de la base de conocimiento (procedimientos, guias, preguntas

@@ -27,7 +27,8 @@ const catalogos = async (req, res) => {
 
     const [cuentas, clientes, proveedores, contratos, proyectos] = await Promise.all([
       prisma.cuentaFinanciera.findMany({ orderBy: [{ orden: 'asc' }, { nombre: 'asc' }] }),
-      (editaVentas || editaCotizaciones) && hayClientes
+      // En gastos, para elegir de qué cliente es el gasto.
+      (editaVentas || editaCotizaciones || editaGastos) && hayClientes
         ? prisma.empresa.findMany({ where: { tipo: { in: ['CLIENTE', 'AMBOS'] }, estado: 'ACTIVO' }, select: F.selectEmpresaCorta, orderBy: { nombre: 'asc' } })
         : [],
       (editaGastos || editaCotizaciones) && hayClientes
@@ -178,8 +179,12 @@ const bitacora = async (req, res) => {
         const gasto = await prisma.gasto.findUnique({ where: { id: entidadId }, select: { categoria: true } });
         // Un gasto borrado ya no tiene categoria: su historial solo para el administrador global.
         permitido = gasto ? F.puedeGasto(req.usuario, gasto.categoria) : esAdminGlobal(req.usuario);
-      } else if (entidad === 'cotizacion') permitido = F.puedeVer(req.usuario, 'cotizaciones');
-      else if (entidad === 'cuenta') permitido = F.puedeVer(req.usuario, 'ventas') || F.puedeVer(req.usuario, 'tesoreria');
+      } else if (entidad === 'cotizacion') {
+        // La de una cotizacion, quien la ve (tambien si se la compartieron);
+        // la de una borrada, solo el administrador global.
+        const visible = await prisma.cotizacion.findFirst({ where: { AND: [{ id: entidadId }, F.accesoCotizaciones(req.usuario) || {}] }, select: { id: true } });
+        permitido = Boolean(visible) || esAdminGlobal(req.usuario);
+      } else if (entidad === 'cuenta') permitido = F.puedeVer(req.usuario, 'ventas') || F.puedeVer(req.usuario, 'tesoreria');
       else permitido = F.puedeVer(req.usuario, 'tesoreria'); // presupuesto, y partida o asignacion (historial)
       if (!permitido) return F.sinPermiso(res);
       where = { entidad, entidadId };

@@ -1,16 +1,20 @@
 // Cotizaciones (/cotizaciones): las que nos envían los proveedores y las que
 // enviamos a clientes. Cada una guarda su archivo original y los cambios como
 // versiones nuevas (nada se reemplaza). Permiso `cotizaciones` (ver / subir);
-// corregir, cambiar el estado o eliminar es del administrador general.
+// corregir, cambiar el estado, eliminar y elegir quién ve cada una son
+// casillas aparte (de fábrica, del administrador general). Sin el permiso de
+// ver, la página muestra las que le compartieron a la persona (el candado
+// marca las restringidas).
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Navigate, useSearchParams } from 'react-router-dom';
-import { ChevronRight, FileStack, Layers, Plus, Search, X } from 'lucide-react';
+import { ChevronRight, FileStack, Layers, Lock, Plus, Search, X } from 'lucide-react';
 import { finanzasService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { usePreferences } from '../context/PreferencesContext';
 import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
 import { useDebounce } from '../utils/useDebounce';
+import { useCotizacionesCompartidas } from '../hooks/useCotizacionesCompartidas';
 import { ListSkeleton } from '../components/Skeleton';
 import CampoFiltro from '../components/CampoFiltro';
 import { Button } from '../components/ui/button';
@@ -34,7 +38,10 @@ const CotizacionesPage = () => {
   const [formulario, setFormulario] = useState(null);
   const [detalleId, setDetalleId] = useState(() => Number(params.get('cotizacion')) || null);
   const q = useDebounce(busqueda, 300);
-  const puedeVer = puedeFinanzas(usuario, 'cotizaciones');
+  // Todas las que no están restringidas, o solo las que le compartieron.
+  const veTodas = puedeFinanzas(usuario, 'cotizaciones');
+  const compartidas = useCotizacionesCompartidas(!veTodas);
+  const puedeVer = veTodas || compartidas === true;
   // Subir cotizaciones y versiones nuevas = "crear". Corregir, cambiar el
   // estado y eliminar son casillas aparte (de fábrica, solo el administrador
   // general).
@@ -43,6 +50,7 @@ const CotizacionesPage = () => {
     editar: puedeFinanzas(usuario, 'cotizaciones', 'editar'),
     aprobar: puedeFinanzas(usuario, 'cotizaciones', 'aprobar'),
     eliminar: puedeFinanzas(usuario, 'cotizaciones', 'eliminar'),
+    acceso: puedeFinanzas(usuario, 'cotizaciones', 'acceso'),
   };
 
   const { data, error, isLoading, mutate } = useSWR(
@@ -52,6 +60,7 @@ const CotizacionesPage = () => {
   );
   const { data: catalogos } = useSWR(puedeSubir ? 'finanzas-catalogos' : null, () => finanzasService.catalogos(), OPCIONES_SWR_FINANZAS);
 
+  if (compartidas === null) return <div className="mx-auto max-w-7xl"><ListSkeleton rows={5} /></div>;
   if (!puedeVer) return <Navigate to="/dashboard" replace />;
 
   const cotizaciones = data?.cotizaciones || [];
@@ -142,7 +151,10 @@ const CotizacionesPage = () => {
                   {cotizaciones.map((c) => (
                     <tr key={c.id} onClick={() => setDetalleId(c.id)} className="group">
                       <td className="sticky left-0 z-[1] min-w-[220px] max-w-[320px] bg-[var(--color-surface)] group-hover:bg-[color-mix(in_srgb,var(--color-text)_3%,var(--color-surface))]">
-                        <button type="button" className="block max-w-full text-left text-[13.5px] font-medium leading-snug text-[var(--color-text)] hover:underline" onClick={(e) => { e.stopPropagation(); setDetalleId(c.id); }}>{c.titulo}</button>
+                        <button type="button" className="block max-w-full text-left text-[13.5px] font-medium leading-snug text-[var(--color-text)] hover:underline" onClick={(e) => { e.stopPropagation(); setDetalleId(c.id); }}>
+                          {c.restringido && <Lock size={12} className="mr-1 inline-block align-[-1px] text-[var(--color-text-muted)]" role="img" aria-label={tf('finCotAccRestringida')} />}
+                          {c.titulo}
+                        </button>
                         <div className="mt-0.5 truncate font-mono text-[12px] text-[var(--color-text-muted)]">{c.folio}</div>
                       </td>
                       <td className="whitespace-nowrap text-[13px]">{tf(`finCotTipo${c.tipo}`)}</td>
@@ -169,7 +181,10 @@ const CotizacionesPage = () => {
                   <button type="button" onClick={() => setDetalleId(c.id)} className="h-full w-full px-4 py-3.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--color-text)_3%,transparent)]">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-[14px] font-medium leading-snug text-[var(--color-text)]">{c.titulo}</div>
+                        <div className="text-[14px] font-medium leading-snug text-[var(--color-text)]">
+                          {c.restringido && <Lock size={12} className="mr-1 inline-block align-[-1px] text-[var(--color-text-muted)]" role="img" aria-label={tf('finCotAccRestringida')} />}
+                          {c.titulo}
+                        </div>
                         <div className="mt-0.5 truncate text-[12px] text-[var(--color-text-muted)]">{c.folio} · {tf(`finCotTipo${c.tipo}`)} · {c.contraparteNombre || c.empresa?.nombre || '—'}</div>
                       </div>
                       <span className={`shrink-0 ${BADGE_ESTADO_COTIZACION[c.estado] || 'badge-neutral'}`}>{tf(`finCotEstado${c.estado}`)}</span>
@@ -197,7 +212,7 @@ const CotizacionesPage = () => {
           cotizacion={formulario.cotizacion}
           catalogos={catalogos}
           onClose={() => setFormulario(null)}
-          onGuardado={(guardada) => { setFormulario(null); recargarFinanzas(); setDetalleId(guardada.id); }}
+          onGuardado={(guardada) => { setFormulario(null); recargarFinanzas(); setDetalleId(guardada?.id ?? null); }}
         />
       )}
       {detalleId && (

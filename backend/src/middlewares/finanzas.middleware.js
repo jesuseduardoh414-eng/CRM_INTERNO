@@ -1,10 +1,28 @@
 // Acceso al modulo de finanzas. Los permisos son las casillas finanzas.* de la
 // tabla por area y de los ajustes de cada persona (utils/finanzas.utils.js);
 // el administrador general siempre pasa.
-const { tieneAccesoFinanzas, puedeFin, puedeGasto, sinPermiso, leerId } = require('../utils/finanzas.utils');
+const {
+  tieneAccesoFinanzas, puedeFin, puedeGasto, sinPermiso, leerId, accesoCotizaciones,
+} = require('../utils/finanzas.utils');
 
 /** 403 si la cuenta no tiene ningun permiso de finanzas. */
 const requiereAccesoFinanzas = (req, res, next) => (tieneAccesoFinanzas(req.usuario) ? next() : sinPermiso(res));
+
+/**
+ * Cotizaciones: pasa quien tiene finanzas.cotizaciones.ver y tambien quien,
+ * sin ese permiso, ve alguna (se la compartieron o la registro). Lo que ve
+ * cada uno lo filtra el controlador.
+ */
+const requiereVerCotizaciones = async (req, res, next) => {
+  try {
+    if (puedeFin(req.usuario, 'cotizaciones', 'ver')) return next();
+    // eslint-disable-next-line global-require
+    const alguna = await require('../lib/prisma').cotizacion.findFirst({ where: accesoCotizaciones(req.usuario), select: { id: true } });
+    return alguna ? next() : sinPermiso(res);
+  } catch (error) {
+    return next(error);
+  }
+};
 
 /**
  * 403 si no puede la accion sobre el recurso ('ventas', 'tesoreria',
@@ -40,4 +58,6 @@ const requiereComprobanteGasto = async (req, res, next) => {
   }
 };
 
-module.exports = { requiereAccesoFinanzas, requiereFin, requiereAlgunaFin, requiereComprobanteGasto };
+module.exports = {
+  requiereAccesoFinanzas, requiereVerCotizaciones, requiereFin, requiereAlgunaFin, requiereComprobanteGasto,
+};

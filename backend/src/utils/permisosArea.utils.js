@@ -111,6 +111,8 @@ const CATALOGO = [
       bool('finanzas.cotizaciones.editar', false, false),
       bool('finanzas.cotizaciones.aprobar', false, false),
       bool('finanzas.cotizaciones.eliminar', false, false),
+      // Dejar cotizaciones solo para ciertas areas, roles o personas.
+      bool('finanzas.cotizaciones.acceso', false, false),
     ],
   },
 ];

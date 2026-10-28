@@ -362,6 +362,38 @@ Modulo agregado el 2026-10-12 a partir de la "Carta a Santa Claus":
   `finanzas.cotizaciones.*`: ver, crear (subir cotizaciones y versiones),
   editar (corregir datos), aprobar (cambiar el estado) y eliminar; de
   fabrica solo el administrador general corrige, aprueba y elimina.
+- **Quien ve cada cotizacion** (2026-10-28, permiso
+  `finanzas.cotizaciones.acceso`, de fabrica solo el administrador general):
+  el mismo selector de la base de conocimiento. Sin restringir la ven
+  quienes tienen `finanzas.cotizaciones.ver`; restringida, **solo** quienes
+  se elijan (personas, areas, solo administradores o solo miembros de un
+  area o de todas), **aunque no tengan ningun permiso de finanzas**: elegir
+  a alguien es compartirsela, y a esa persona le aparece Finanzas ›
+  Cotizaciones en el menu con solo esas (`GET .../cotizaciones/compartidas`).
+  Siempre la ven el administrador general y quien la registro. Se elige al
+  subirla, al corregir sus datos o desde su ficha ("Quien la ve", con cuantas
+  personas la ven y la lista de quienes y por que). Lo que no se
+  ve responde 404 (detalle, archivos, versiones, corregir, aprobar, borrar) y
+  no cuenta en la lista ni en los conteos; la bitacora de la cotizacion anota
+  cada cambio de acceso (`F.accesoCotizaciones` en `utils/finanzas.utils.js`,
+  tabla `accesos_cotizacion`, migracion `20261028120000_acceso_cotizaciones`).
+- **Mandar a finanzas** (2026-10-28): en los documentos de una tarea o de un
+  proyecto, un boton copia el archivo a **Cotizaciones** (nueva o version de
+  una existente) y/o a **Gastos variables** (gasto nuevo, pendiente de pago,
+  o comprobante de uno existente). Lo ve quien puede registrar ahi
+  (`finanzas.cotizaciones.crear`, `finanzas.gastos.VARIABLES.crear` o
+  `editar`); las validaciones son las de finanzas y se guarda todo o nada.
+  El archivo de la tarea no cambia: finanzas guarda su copia con
+  `adjunto_id` y `origen*` (sin llave foranea, como la bitacora), la ficha
+  dice "Desde «tarea · proyecto»" y el archivo de la tarea queda marcado con
+  el folio (solo para quien lo ve en finanzas). Archivos antiguos con URL de
+  Vercel Blob no se pueden copiar (se explica). `controllers/finanzasDesdeAdjunto.controller.js`.
+- **Para que cliente** (`cliente_id` en gastos y cotizaciones): se propone el
+  cliente del proyecto al mandar un archivo y se puede elegir o corregir en
+  los formularios (en una cotizacion enviada el cliente es la contraparte).
+  La ficha del cliente muestra sus cotizaciones y gastos, como contraparte o
+  proveedor y como cliente (`?relacionadoCon=` en las listas). Migracion
+  `20261028150000_finanzas_cliente_y_origen`.
 
 Migraciones: `20261012160000_finanzas` (tablas y una columna),
 `20261014120000_presupuestos_categoria` (tabla `presupuestos_categoria` y

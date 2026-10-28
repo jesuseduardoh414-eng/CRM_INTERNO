@@ -1,14 +1,21 @@
 // Ficha de una empresa del directorio (/clientes/:id): cabecera con acciones,
-// proyectos y contratos a la izquierda; datos generales y contactos a la
-// derecha. Se monta con `key` por empresa, así que siempre arranca limpia.
+// proyectos, contratos, cotizaciones y gastos a la izquierda; datos generales
+// y contactos a la derecha. Se monta con `key` por empresa, así que siempre
+// arranca limpia.
 import { useState } from 'react';
 import useSWR from 'swr';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, ArrowUpRight, Ban, FileText, Globe, Mail, MapPin, Pencil, Phone, Plus, RefreshCcw,
+  ArrowLeft, ArrowUpRight, Ban, FileStack, FileText, Globe, Mail, MapPin, Pencil, Phone, Plus, ReceiptText, RefreshCcw,
   RotateCcw, Star, Trash2, UserRound,
 } from 'lucide-react';
-import { empresasService } from '../../services/api';
+import { empresasService, finanzasService } from '../../services/api';
+import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
+import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
+import { useCotizacionesCompartidas } from '../../hooks/useCotizacionesCompartidas';
+import {
+  BADGE_ESTADO_COTIZACION, BADGE_ESTADO_GASTO, OPCIONES_SWR_FINANZAS, categoriasVisibles, estadoVisibleGasto, puedeVerFinanzas, rutaCategoria,
+} from '../../utils/finanzas';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useConfiguracion } from '../../context/ConfiguracionContext';
 import { useToast } from '../../context/ToastContext';
@@ -51,6 +58,90 @@ const Vacio = ({ texto, ayuda }) => (
     {ayuda && <p className="mt-1 text-[12px] text-[var(--color-text-muted)]">{ayuda}</p>}
   </div>
 );
+
+const MAX_FINANZAS = 10;
+
+/**
+ * Cotizaciones y gastos de la empresa: como contraparte o proveedor, o como el
+ * cliente para el que son (lo que se cotizó o gastó para sus proyectos, p. ej.
+ * desde "Mandar a finanzas"). Solo lo que la persona ve en finanzas; las más
+ * recientes primero.
+ */
+const FinanzasEmpresa = ({ empresaId }) => {
+  const { usuario } = useAuth();
+  const { moduloActivo } = useConfiguracion();
+  const tf = useTextoFinanzas();
+  const { monto, fecha } = useFormatoFinanzas();
+  const finanzas = moduloActivo('finanzas');
+  const veTodasCot = finanzas && puedeVerFinanzas(usuario, 'cotizaciones');
+  const compartidas = useCotizacionesCompartidas(finanzas && !veTodasCot);
+  const veCotizaciones = veTodasCot || compartidas === true;
+  const veGastos = finanzas && categoriasVisibles(usuario).length > 0;
+  const pedir = { relacionadoCon: empresaId, page: 1, limit: MAX_FINANZAS };
+  const { data: cot } = useSWR(veCotizaciones ? ['finanzas-cotizaciones-empresa', empresaId] : null, () => finanzasService.cotizaciones.listar(pedir), OPCIONES_SWR_FINANZAS);
+  const { data: gas } = useSWR(veGastos ? ['finanzas-gastos-empresa', empresaId] : null, () => finanzasService.gastos.listar(pedir), OPCIONES_SWR_FINANZAS);
+  const masDe = (meta) => meta && meta.total > MAX_FINANZAS && (
+    <p className="border-t border-[var(--color-border)] px-4 py-2 text-[12px] text-[var(--color-text-muted)]">{tf('finCliMostrando', { n: MAX_FINANZAS, total: meta.total })}</p>
+  );
+
+  return (
+    <>
+      {veCotizaciones && cot && (
+        <Panel titulo={tf('finCotizacionesTitulo')} conteo={cot.meta?.total ?? cot.cotizaciones.length}>
+          {cot.cotizaciones.length === 0 ? <Vacio texto={tf('finCliSinCotizaciones')} /> : (
+            <ul>
+              {cot.cotizaciones.map((c) => (
+                <li key={c.id}>
+                  <Link to={`/cotizaciones?cotizacion=${c.id}`} className="cli-fila">
+                    <FileStack size={16} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-medium text-[var(--color-text)]">{c.titulo}</span>
+                      <span className="mt-0.5 block truncate text-[12px] text-[var(--color-text-muted)]">
+                        <span className="font-mono">{c.folio}</span>{' · '}{tf(`finCotTipo${c.tipo}`)}{c.contraparteNombre ? ` · ${c.contraparteNombre}` : ''}{` · ${fecha(c.fecha)}`}
+                      </span>
+                    </span>
+                    <span className="hidden shrink-0 text-right text-[13px] font-medium tabular-nums text-[var(--color-text)] sm:block">
+                      {c.montoActual !== null ? monto(c.montoActual, c.moneda) : <span className="font-normal text-[var(--color-text-muted)]">{tf('finCotSinMonto')}</span>}
+                    </span>
+                    <span className={`${BADGE_ESTADO_COTIZACION[c.estado] || 'badge-neutral'} shrink-0`}>{tf(`finCotEstado${c.estado}`)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          {masDe(cot.meta)}
+        </Panel>
+      )}
+      {veGastos && gas && (
+        <Panel titulo={tf('finGastosTitulo')} conteo={gas.meta?.total ?? gas.gastos.length}>
+          {gas.gastos.length === 0 ? <Vacio texto={tf('finCliSinGastos')} /> : (
+            <ul>
+              {gas.gastos.map((g) => {
+                const est = estadoVisibleGasto(g);
+                return (
+                  <li key={g.id}>
+                    <Link to={`${rutaCategoria(g.categoria)}?gasto=${g.id}`} className="cli-fila">
+                      <ReceiptText size={16} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13.5px] font-medium text-[var(--color-text)]">{g.concepto}</span>
+                        <span className="mt-0.5 block truncate text-[12px] text-[var(--color-text-muted)]">
+                          <span className="font-mono">{g.folio}</span>{' · '}{tf(`finCat${g.categoria}Corta`)}{g.proveedorNombre ? ` · ${g.proveedorNombre}` : ''}{` · ${fecha(g.fecha)}`}
+                        </span>
+                      </span>
+                      <span className="hidden shrink-0 text-right text-[13px] font-medium tabular-nums text-[var(--color-text)] sm:block">{monto(g.monto, g.moneda)}</span>
+                      <span className={`${BADGE_ESTADO_GASTO[est] || 'badge-neutral'} shrink-0`}>{tf(`finEstadoGasto${est}`)}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {masDe(gas.meta)}
+        </Panel>
+      )}
+    </>
+  );
+};
 
 const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
   const { t, locale } = usePreferences();
@@ -302,6 +393,8 @@ const DetalleEmpresa = ({ empresaId, onVolver, onCambio }) => {
               )}
             </Panel>
           )}
+
+          <FinanzasEmpresa empresaId={empresa.id} />
         </div>
 
         <aside className="grid min-w-0 grid-cols-1 items-start gap-5 md:grid-cols-2 xl:flex xl:flex-col xl:items-stretch">

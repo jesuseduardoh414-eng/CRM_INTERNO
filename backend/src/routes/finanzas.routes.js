@@ -14,20 +14,56 @@ const tesoreria = require('../controllers/finanzasTesoreria.controller');
 const { informe } = require('../controllers/finanzasInforme.controller');
 const comprobantes = require('../controllers/finanzasComprobantes.controller');
 const cotizaciones = require('../controllers/finanzasCotizaciones.controller');
+const desdeAdjunto = require('../controllers/finanzasDesdeAdjunto.controller');
 const { verificarToken } = require('../middlewares/auth.middleware');
 const { requiereModulo } = require('../middlewares/modulos.middleware');
-const { requiereAccesoFinanzas, requiereFin, requiereAlgunaFin, requiereComprobanteGasto } = require('../middlewares/finanzas.middleware');
+const {
+  requiereAccesoFinanzas, requiereVerCotizaciones, requiereFin, requiereAlgunaFin, requiereComprobanteGasto,
+} = require('../middlewares/finanzas.middleware');
 const uploadComprobante = require('../middlewares/uploadComprobante.middleware');
 const { subirCotizacion } = require('../middlewares/uploadDocumento.middleware');
 
 const router = express.Router();
 
-router.use(verificarToken, requiereModulo('finanzas'), requiereAccesoFinanzas);
+router.use(verificarToken, requiereModulo('finanzas'));
 // Datos confidenciales: que no queden en caches.
 router.use((_req, res, next) => { res.set('Cache-Control', 'private, no-store'); next(); });
 
-router.get('/catalogos', catalogos.catalogos);
+// Cotizaciones. Van antes del filtro general de finanzas: una cotizacion
+// restringida la ven quienes esten en su lista aunque no tengan ningun permiso
+// de finanzas (requiereVerCotizaciones; el controlador filtra cuales).
+// Subir (cotizacion o version) pide `crear`; corregir datos, `editar`;
+// cambiar el estado, `aprobar`; borrar la cotizacion completa, `eliminar`;
+// y elegir quien la ve, `acceso`. La version original nunca se reemplaza.
+// El permiso va antes de multer: sin el, cualquiera mandaba archivos grandes.
+// /compartidas (cuantas ve) no pide permiso: el menu pregunta con ella.
+router.get('/cotizaciones/compartidas', cotizaciones.compartidas);
+router.get('/cotizaciones/con-permiso', requiereFin('cotizaciones', 'acceso'), cotizaciones.conPermiso);
+router.get('/cotizaciones', requiereVerCotizaciones, cotizaciones.listar);
+router.get('/cotizaciones/versiones/:id/archivo', requiereVerCotizaciones, cotizaciones.verArchivo);
+router.get('/cotizaciones/:id', requiereVerCotizaciones, cotizaciones.obtener);
+router.post('/cotizaciones', requiereFin('cotizaciones', 'crear'), subirCotizacion('archivo'), cotizaciones.crear);
+router.post('/cotizaciones/:id/versiones', requiereFin('cotizaciones', 'crear'), subirCotizacion('archivo'), cotizaciones.nuevaVersion);
+router.put('/cotizaciones/:id', requiereFin('cotizaciones', 'editar'), cotizaciones.editar);
+router.put('/cotizaciones/:id/acceso', requiereFin('cotizaciones', 'acceso'), cotizaciones.cambiarAcceso);
+router.post('/cotizaciones/:id/estado', requiereFin('cotizaciones', 'aprobar'), cotizaciones.cambiarEstado);
+router.delete('/cotizaciones/:id', requiereFin('cotizaciones', 'eliminar'), cotizaciones.eliminar);
+// La bitacora revisa el permiso del registro al que pertenece (la de una
+// cotizacion, que la persona la vea); sin registro, solo el administrador general.
 router.get('/bitacora', catalogos.bitacora);
+
+// "Mandar a finanzas" un archivo de una tarea o de un proyecto: a
+// cotizaciones y/o gastos variables (cada destino revisa su permiso en el
+// controlador). Sin registro: a donde ya se mandó cada archivo, filtrado por
+// lo que la persona ve.
+const mandaAFinanzas = requiereAlgunaFin([['cotizaciones', 'crear'], ['gastos.VARIABLES', 'crear'], ['gastos.VARIABLES', 'editar']]);
+router.get('/desde-adjunto', desdeAdjunto.copias);
+router.get('/desde-adjunto/:adjuntoId', mandaAFinanzas, desdeAdjunto.contexto);
+router.post('/desde-adjunto/:adjuntoId', mandaAFinanzas, desdeAdjunto.mandar);
+
+router.use(requiereAccesoFinanzas);
+
+router.get('/catalogos', catalogos.catalogos);
 
 // Cuentas: las usan Ventas (destino) y Gastos (origen).
 const gestionaCuentas = requiereAlgunaFin([['ventas', 'editar'], ['tesoreria', 'editar']]);
@@ -66,19 +102,6 @@ router.put('/tesoreria/presupuestos', requiereFin('tesoreria', 'editar'), tesore
 
 // Informe de gastos (JSON o ?formato=excel).
 router.get('/informe', requiereFin('informe'), informe);
-
-// Cotizaciones. Subir (cotizacion o version) pide `crear`; corregir datos,
-// `editar`; cambiar el estado, `aprobar`; y borrar la cotizacion completa,
-// `eliminar`. La version original nunca se reemplaza.
-// El permiso va antes de multer: sin el, cualquiera mandaba archivos grandes.
-router.get('/cotizaciones', requiereFin('cotizaciones'), cotizaciones.listar);
-router.get('/cotizaciones/versiones/:id/archivo', requiereFin('cotizaciones'), cotizaciones.verArchivo);
-router.get('/cotizaciones/:id', requiereFin('cotizaciones'), cotizaciones.obtener);
-router.post('/cotizaciones', requiereFin('cotizaciones', 'crear'), subirCotizacion('archivo'), cotizaciones.crear);
-router.post('/cotizaciones/:id/versiones', requiereFin('cotizaciones', 'crear'), subirCotizacion('archivo'), cotizaciones.nuevaVersion);
-router.put('/cotizaciones/:id', requiereFin('cotizaciones', 'editar'), cotizaciones.editar);
-router.post('/cotizaciones/:id/estado', requiereFin('cotizaciones', 'aprobar'), cotizaciones.cambiarEstado);
-router.delete('/cotizaciones/:id', requiereFin('cotizaciones', 'eliminar'), cotizaciones.eliminar);
 
 // Comprobantes (el permiso depende del pago o gasto dueño).
 router.get('/comprobantes/:id', comprobantes.ver);

@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
-import { adjuntosService, getPublicAssetUrl, portalEquipoService } from '../services/api';
+import {
+  adjuntosService, finanzasService, getPublicAssetUrl, portalEquipoService,
+} from '../services/api';
 import { useTextoPortal } from '../hooks/useTextoPortal';
 import { useTextoProyectos } from '../hooks/useTextoProyectos';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { useAuth } from '../context/AuthContext';
 import { puede } from '../utils/permisos';
+import { puedeFinanzas, tieneAccesoFinanzas } from '../utils/finanzas';
+import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
+import MandarAFinanzas, { CopiasEnFinanzas } from './finanzas/MandarAFinanzas';
 import { usePreferences } from '../context/PreferencesContext';
 import { useToast } from '../context/ToastContext';
 import Tooltip from './Tooltip';
@@ -18,6 +23,7 @@ import {
   FileSpreadsheet,
   FileText,
   Image as ImageIcon,
+  Landmark,
   Paperclip,
   Trash2,
   Building2,
@@ -149,9 +155,10 @@ const descargarDesdeUrl = async (url, nombre) => {
  * fecha, y las acciones como iconos. Antes era una tarjeta de 220px de alto
  * con la vista previa incrustada; en la columna lateral cabian dos.
  */
-const FilaAdjunto = ({ item, isPending = false, canDelete = false, onDelete, onCompartir }) => {
+const FilaAdjunto = ({ item, isPending = false, canDelete = false, onDelete, onCompartir, onMandar, copias }) => {
   const { t, locale } = usePreferences();
   const tp = useTextoPortal();
+  const tf = useTextoFinanzas();
   const kind = getPreviewKind(item.tipo, item.nombre);
   // Los adjuntos traen su URL publica (servidor o Vercel Blob); los pendientes,
   // una URL local temporal. Un adjunto antiguo con solo un nombre de archivo ya
@@ -175,6 +182,8 @@ const FilaAdjunto = ({ item, isPending = false, canDelete = false, onDelete, onC
           {formatSize(item.tamano || item.size)}{item.creadoEn ? ` · ${new Date(item.creadoEn).toLocaleDateString(locale)}` : ''}
           {item.visibleCliente && onCompartir && <span className="ptl-chip-cliente" title={tp('ptlCompartido')}>{tp('ptlClienteBadge')}</span>}
         </span>
+        {/* A dónde se mandó en finanzas (solo lo que la persona ve allá). */}
+        {copias?.length > 0 && <span className="mt-1 block"><CopiasEnFinanzas copias={copias} /></span>}
       </span>
       <span className="flex shrink-0 items-center">
         {previewUrl && (
@@ -188,6 +197,13 @@ const FilaAdjunto = ({ item, isPending = false, canDelete = false, onDelete, onC
           <Tooltip label={t('attachmentDownload')}>
             <button type="button" onClick={() => descargarDesdeUrl(urlRemota, item.nombre)} className="dash-icono">
               <Download size={15} />
+            </button>
+          </Tooltip>
+        )}
+        {onMandar && !isPending && (
+          <Tooltip label={tf('finManBoton')}>
+            <button type="button" onClick={onMandar} aria-label={tf('finManBoton')} className="dash-icono">
+              <Landmark size={15} />
             </button>
           </Tooltip>
         )}
@@ -240,10 +256,16 @@ const TaskAttachments = ({
   const tx = useTextoProyectos();
   const { usuario } = useAuth();
   const { t } = usePreferences();
-  const { config } = useConfiguracion();
+  const { config, moduloActivo } = useConfiguracion();
   const { showToast } = useToast();
   const { confirmar, dialogo } = useConfirmacion();
   const [subiendo, setSubiendo] = useState(false);
+  // "Mandar a finanzas" (cotizaciones y/o gastos variables): archivos de
+  // tareas y de proyectos, para quien puede registrar ahí.
+  const [mandando, setMandando] = useState(null);
+  const conFinanzas = moduloActivo('finanzas') && (type === 'tareas' || type === 'proyectos');
+  const mandaAFinanzas = conFinanzas && (puedeFinanzas(usuario, 'cotizaciones', 'crear')
+    || puedeFinanzas(usuario, 'gastos.VARIABLES', 'crear') || puedeFinanzas(usuario, 'gastos.VARIABLES', 'editar'));
   const inputRef = useRef(null);
   const reglas = useMemo(() => reglasSubida(config?.subidas ?? undefined), [config?.subidas]);
   const tiposTexto = reglas.categorias.map((clave) => tx(`adj_tipo_${clave}`)).join(', ');
@@ -257,6 +279,14 @@ const TaskAttachments = ({
       return respuesta.adjuntos || [];
     },
     { onSuccess: (lista) => onAttachmentsChange?.(lista) },
+  );
+
+  // A dónde se mandó cada archivo (clave "finanzas-…": se recarga al mandar).
+  const idsGuardados = (adjuntos || []).map((a) => a.id).filter(Boolean);
+  const { data: copias, mutate: recargarCopias } = useSWR(
+    (mandaAFinanzas || (conFinanzas && tieneAccesoFinanzas(usuario))) && idsGuardados.length ? ['finanzas-copias-adjuntos', idsGuardados.join(',')] : null,
+    () => finanzasService.desdeAdjunto.copias(idsGuardados),
+    { revalidateOnFocus: false },
   );
 
   const actualizarAdjuntos = (siguiente) => {
@@ -423,10 +453,20 @@ const TaskAttachments = ({
             canDelete={canDelete}
             onDelete={() => (item.isPending ? removePendingFile(item.id) : handleEliminar(item))}
             onCompartir={compartirCliente ? () => handleCompartir(item) : undefined}
+            onMandar={mandaAFinanzas ? () => setMandando(item.id) : undefined}
+            copias={item.isPending ? null : copias?.copias?.[item.id]}
           />
         );
       })}
     </ul>
+  );
+
+  const ventanaFinanzas = mandando && (
+    <MandarAFinanzas
+      adjuntoId={mandando}
+      onClose={() => setMandando(null)}
+      onListo={() => { setMandando(null); recargarCopias(); }}
+    />
   );
 
   // Columna lateral: panel con cabecera en versalitas, como las secciones de
@@ -447,6 +487,7 @@ const TaskAttachments = ({
           {lista}
         </div>
         {dialogo}
+        {ventanaFinanzas}
       </section>
     );
   }
@@ -471,6 +512,7 @@ const TaskAttachments = ({
       {lista}
 
       {dialogo}
+      {ventanaFinanzas}
     </div>
   );
 };

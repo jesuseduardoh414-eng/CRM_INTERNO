@@ -1,17 +1,22 @@
 // Ficha de una cotización: datos, versiones (la 1 es la original y ninguna se
 // reemplaza ni se borra), subida de una versión nueva, comparación lado a
-// lado con la original y bitácora. Corregir datos, cambiar el estado o
-// eliminar es solo del administrador general.
+// lado con la original y bitácora. Corregir datos, cambiar el estado,
+// eliminar y elegir quién la ve son permisos aparte (de fábrica, solo del
+// administrador general).
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Columns2, Download, Edit2, Eye, FileUp, History, Loader2, RotateCcw, Save, Trash2, XCircle } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CheckCircle2, Columns2, Download, Edit2, Eye, FileUp, History, Loader2, Lock, RotateCcw, Save, Trash2, XCircle } from 'lucide-react';
 import Modal from '../Modal';
 import { Button } from '../ui/button';
 import ActionMenu from '../ActionMenu';
 import { ListSkeleton } from '../Skeleton';
 import Bitacora from './Bitacora';
-import { AvisoError, Campo, Dato, Panel, Seccion } from './piezas';
+import {
+  AvisoError, Campo, Dato, OrigenArchivo, Panel, Seccion,
+} from './piezas';
 import { ZonaArchivo } from './FormularioCotizacion';
 import { PanelArchivo } from '../ArchivoPrivado';
+import { ModalAccesoCotizacion, ResumenAccesoCotizacion } from './AccesoCotizacion';
 import { useVerArchivo } from '../../hooks/useVerArchivo';
 import { useFormatoFinanzas } from '../../hooks/useFormatoFinanzas';
 import { finanzasService } from '../../services/api';
@@ -19,7 +24,8 @@ import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
 import { useConfirmacion } from '../ConfirmDialog';
-import { BADGE_ESTADO_COTIZACION, formatearTamano } from '../../utils/finanzas';
+import { BADGE_ESTADO_COTIZACION, etiquetaEmpresa, formatearTamano } from '../../utils/finanzas';
+import { accesoDe } from '../../utils/accesoConocimiento';
 
 const servicio = finanzasService.cotizaciones;
 
@@ -98,6 +104,7 @@ const DetalleCotizacion = ({ cotizacionId, puedeSubir, permisos = {}, onClose, o
   const [subiendoVersion, setSubiendoVersion] = useState(false);
   const [comparando, setComparando] = useState(null);
   const [verBitacora, setVerBitacora] = useState(false);
+  const [cambiandoAcceso, setCambiandoAcceso] = useState(false);
   const textosArchivo = { soloDescarga: tf('finCotSoloDescarga'), descargar: tf('finCotDescargar'), abrir: tf('finCotVer') };
   const cargarArchivo = useCallback((id) => servicio.urlArchivo(id), []);
   const { ver, descargar, visor } = useVerArchivo({ cargar: cargarArchivo, descargarArchivo: servicio.descargarArchivo, textos: textosArchivo });
@@ -124,6 +131,19 @@ const DetalleCotizacion = ({ cotizacionId, puedeSubir, permisos = {}, onClose, o
     } catch (err) {
       showToast(err.message, 'error');
     }
+  };
+
+  // Si la persona se quitó a sí misma de la lista, ya no la ve: se cierra.
+  const guardarAcceso = async (valor) => {
+    const res = await servicio.cambiarAcceso(cotizacion.id, valor);
+    onCambio();
+    if (res.sinAcceso) {
+      showToast(tf('finCotAccSinAcceso'), 'success');
+      onClose();
+      return;
+    }
+    setCotizacion(res.cotizacion);
+    showToast(tf('finCotAccGuardado'), 'success');
   };
 
   const eliminar = async () => {
@@ -198,11 +218,20 @@ const DetalleCotizacion = ({ cotizacionId, puedeSubir, permisos = {}, onClose, o
             </div>
             <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
               <Dato etiqueta={tf(`finCotContraparte${cotizacion.tipo}`)}>{cotizacion.contraparteNombre || cotizacion.empresa?.nombre}</Dato>
+              {cotizacion.cliente && cotizacion.tipo === 'RECIBIDA' && <Dato etiqueta={tf('finClienteDe')}><Link to={`/clientes/${cotizacion.cliente.id}`} className="hover:underline">{etiquetaEmpresa(cotizacion.cliente)}</Link></Dato>}
               <Dato etiqueta={tf('finCotFecha')}>{fecha(cotizacion.fecha)}</Dato>
               <Dato etiqueta={tf('finRegistradoPor')}>{cotizacion.creadoPor?.nombre}</Dato>
               <Dato etiqueta={tf('finRegistradoEl')}>{fechaHora(cotizacion.creadoEn)}</Dato>
               {cotizacion.descripcion && <Dato etiqueta={tf('finDescripcion')} ancho><span className="whitespace-pre-wrap">{cotizacion.descripcion}</span></Dato>}
             </dl>
+            {permisos.acceso && (
+              <Panel titulo={tf('finCotAccQuienVe')} extra={<Button variant="ghost" size="sm" onClick={() => setCambiandoAcceso(true)}>{tf('finCotAccCambiar')}</Button>}>
+                <div className="px-4 pb-4 pt-1"><ResumenAccesoCotizacion acceso={accesoDe(cotizacion)} creadorId={cotizacion.creadoPorId} /></div>
+              </Panel>
+            )}
+            {!permisos.acceso && cotizacion.restringido && (
+              <p className="flex items-center gap-1.5 text-[12.5px] text-[var(--color-text-muted)]"><Lock size={13} className="shrink-0" aria-hidden="true" />{tf('finCotAccRestringida')}</p>
+            )}
             {!gestiona && <p className="text-[12px] text-[var(--color-text-muted)]">{tf('finCotSoloAdmin')}</p>}
             <div>
               <Button variant="ghost" size="sm" className="text-[var(--color-text-dim)]" onClick={() => setVerBitacora((v) => !v)}>
@@ -234,6 +263,7 @@ const DetalleCotizacion = ({ cotizacionId, puedeSubir, permisos = {}, onClose, o
                       <div className={`mt-0.5 text-right text-[12px] ${difAnterior > 0 ? 'text-[var(--color-error)]' : 'text-[var(--color-success)]'}`}>{tf('finCotVsAnterior', { dif: conSigno(difAnterior, monto, cotizacion.moneda) })}</div>
                     )}
                     {v.nota && <p className="mt-1.5 whitespace-pre-wrap text-[13px] text-[var(--color-text)]">{v.nota}</p>}
+                    <OrigenArchivo item={v} texto={tf('finOrigenDesde')} />
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                       <button type="button" className="min-w-0 max-w-full truncate text-left text-[12.5px] font-medium text-[var(--color-text)] hover:underline" onClick={() => ver(v)}>{v.nombreOriginal}</button>
                       <span className="text-[12px] text-[var(--color-text-muted)]">{formatearTamano(v.tamano)} · {tf('finCotSubidaPor', { nombre: v.subidoPor?.nombre || '—', fecha: new Date(v.creadoEn).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) })}</span>
@@ -258,6 +288,17 @@ const DetalleCotizacion = ({ cotizacionId, puedeSubir, permisos = {}, onClose, o
           cotizacion={cotizacion}
           onClose={() => setSubiendoVersion(false)}
           onGuardado={async () => { setSubiendoVersion(false); await recargar(); onCambio(); }}
+        />
+      )}
+
+      {cotizacion && (
+        <ModalAccesoCotizacion
+          abierto={cambiandoAcceso}
+          titulo={tf('finCotAccTitulo', { folio: cotizacion.folio })}
+          inicial={accesoDe(cotizacion)}
+          creadorId={cotizacion.creadoPorId}
+          onCerrar={() => setCambiandoAcceso(false)}
+          onGuardar={guardarAcceso}
         />
       )}
 

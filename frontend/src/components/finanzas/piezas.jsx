@@ -2,7 +2,8 @@
 // Gastos): secciones y campos de formulario, cifras de cabecera, paneles y
 // estados vacíos. El formato de montos y fechas está en
 // hooks/useFormatoFinanzas.js.
-import { Inbox, RefreshCcw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { CornerDownRight, Inbox, RefreshCcw } from 'lucide-react';
 import { Button } from '../ui/button';
 
 export const Seccion = ({ titulo, children, columnas = 2 }) => (
@@ -167,3 +168,24 @@ export const SelectorAnio = ({ anio, anios, onCambio, etiqueta }) => (
     ))}
   </div>
 );
+
+/**
+ * "Desde «Cotizar sillas · Oficina nueva»": de qué tarea o proyecto es copia
+ * un archivo de finanzas ("Mandar a finanzas"), con enlace a la tarea. `item`
+ * trae origen, origenTareaId y origenProyectoId; sin origen no pinta nada.
+ */
+export const OrigenArchivo = ({ item, texto }) => {
+  if (!item?.origen) return null;
+  const ruta = item.origenProyectoId
+    ? `/proyectos/${item.origenProyectoId}${item.origenTareaId ? `?tarea=${item.origenTareaId}` : ''}`
+    : null;
+  const contenido = <>{texto} «{item.origen}»</>;
+  return (
+    <span className="mt-0.5 flex min-w-0 items-center gap-1 text-[12px] text-[var(--color-text-muted)]">
+      <CornerDownRight size={12} className="shrink-0" aria-hidden="true" />
+      {ruta
+        ? <Link to={ruta} className="min-w-0 truncate hover:text-[var(--color-text)] hover:underline" onClick={(e) => e.stopPropagation()}>{contenido}</Link>
+        : <span className="min-w-0 truncate">{contenido}</span>}
+    </span>
+  );
+};

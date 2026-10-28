@@ -1,6 +1,7 @@
 // Ficha de un gasto: datos, comprobantes, bitácora y acciones (marcar
 // pagado, volver a pendiente, replicar en los meses siguientes, anular, eliminar).
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { Ban, CalendarClock, CheckCircle2, Copy, Edit2, History, RotateCcw, Trash2 } from 'lucide-react';
 import Modal from '../Modal';
 import { Button } from '../ui/button';
@@ -17,7 +18,7 @@ import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
 import { useConfirmacion } from '../ConfirmDialog';
-import { BADGE_ESTADO_GASTO, estadoVisibleGasto, puedeFinanzas } from '../../utils/finanzas';
+import { BADGE_ESTADO_GASTO, estadoVisibleGasto, etiquetaEmpresa, puedeFinanzas } from '../../utils/finanzas';
 
 const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado }) => {
   const { usuario } = useAuth();
@@ -146,6 +147,7 @@ const DetalleGasto = ({ open, gastoId, onClose, onEditar, onCambio, onDuplicado 
             <dl className="grid grid-cols-1 gap-x-4 gap-y-4 sm:grid-cols-2">
               {gasto.partida && <Dato etiqueta={tf('finPartidaAnterior')}><span className="inline-flex items-center gap-2"><PuntoPartida color={gasto.partida.color} />{gasto.partida.nombre}</span></Dato>}
               <Dato etiqueta={tf('finProveedor')}>{gasto.proveedorNombre || gasto.empresa?.nombre}</Dato>
+              {gasto.cliente && <Dato etiqueta={tf('finClienteDe')}><Link to={`/clientes/${gasto.cliente.id}`} className="hover:underline">{etiquetaEmpresa(gasto.cliente)}</Link></Dato>}
               <Dato etiqueta={tf('finCuentaOrigen')}>{gasto.cuenta ? (gasto.cuenta.banco ? `${gasto.cuenta.nombre} · ${gasto.cuenta.banco}` : gasto.cuenta.nombre) : null}</Dato>
               <Dato etiqueta={tf('finMetodo')}>{gasto.metodo ? tf(`finMetodo${gasto.metodo}`) : null}{gasto.referencia ? ` · ${gasto.referencia}` : ''}</Dato>
               <Dato etiqueta={tf('finRegistradoPor')}>{gasto.creadoPor?.nombre}</Dato>

@@ -16,6 +16,7 @@ const papelera = require('../services/papelera.service');
 
 const incluirListado = {
   empresa: { select: F.selectEmpresaCorta },
+  cliente: { select: F.selectEmpresaCorta },
   cuenta: { select: F.selectCuentaCorta },
   creadoPor: { select: F.selectUsuarioCorto },
   _count: { select: { comprobantes: true } },
@@ -24,6 +25,7 @@ const incluirListado = {
 const incluirDetalle = {
   partida: { select: F.selectPartidaCorta },
   empresa: { select: F.selectEmpresaCorta },
+  cliente: { select: F.selectEmpresaCorta },
   cuenta: { select: F.selectCuentaCorta },
   creadoPor: { select: F.selectUsuarioCorto },
   comprobantes: { orderBy: { creadoEn: 'desc' }, select: F.selectComprobante },
@@ -130,6 +132,10 @@ const normalizar = async (body = {}, { parcial = false, usuario } = {}) => {
   }
   if (viene('proveedorNombre')) data.proveedorNombre = F.textoOpcional(body.proveedorNombre, 255);
   if (empresa && !data.proveedorNombre) data.proveedorNombre = empresa.nombreComercial || empresa.nombre;
+  // Para que cliente es (p. ej. lo que se compro para su proyecto).
+  const cliente = await F.leerCliente(body.clienteId);
+  if (cliente.error) errores.push(cliente.error);
+  else if (cliente.clienteId !== undefined) data.clienteId = cliente.clienteId;
 
   if (viene('cuentaId')) {
     const cuentaId = body.cuentaId === null || body.cuentaId === '' ? null : F.leerId(body.cuentaId);
@@ -164,6 +170,7 @@ const responderError = (res, error) => (error === 404 ? res.status(404).json({ e
 // GET /api/finanzas/gastos
 // ?categoria= &estado=(PENDIENTE|PAGADO|ANULADO|VENCIDO) &empresaId=
 // &desde= &hasta= &anio= &q= &page= &limit=
+// &relacionadoCon= (empresa como proveedor o como cliente: ficha del cliente)
 // Sin categoria: todas las que el usuario puede ver.
 // ---------------------------------------------------------------------------
 const listar = async (req, res) => {
@@ -192,6 +199,7 @@ const listar = async (req, res) => {
       F.ESTADOS_GASTO.includes(estado) ? { estado } : null,
       estado === 'VENCIDO' ? { estado: 'PENDIENTE', fechaLimite: { lt: F.hoyFecha() } } : null,
       empresaId ? { empresaId } : null,
+      F.relacionadoCon(req.query.relacionadoCon),
       desde ? { fecha: { gte: desde } } : null,
       hasta ? { fecha: { lte: hasta } } : null,
       periodo ? { fecha: { gte: periodo.inicio, lt: periodo.fin } } : null,
@@ -507,6 +515,11 @@ const eliminar = async (req, res) => {
 };
 
 module.exports = {
+  // Para "Mandar a finanzas" (finanzasDesdeAdjunto.controller.js).
+  normalizar,
+  validarCoherencia,
+  incluirDetalle,
+  serializar,
   listar,
   resumen,
   presupuesto,

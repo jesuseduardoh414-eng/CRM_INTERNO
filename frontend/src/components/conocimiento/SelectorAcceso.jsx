@@ -3,7 +3,9 @@
 // área (toda, solo administradores o solo miembros), por rol en todas las
 // áreas y persona por persona. Debajo, quiénes lo verán con esa elección.
 // Lo usan el editor, la ventana de acceso y la subida de documentos; el valor
-// es { restringido, reglas } (utils/accesoConocimiento.js).
+// es { restringido, reglas } (utils/accesoConocimiento.js). Las cotizaciones
+// lo reutilizan con sus propios textos (`textos`) y su propia regla de quién
+// lo ve (`motivo`): components/finanzas/AccesoCotizacion.jsx.
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, Globe, Lock, Users, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -20,35 +22,96 @@ const MOTIVOS = {
   general: 'accMotivoGeneral', autor: 'accMotivoAutor', subio: 'accMotivoSubio', regla: 'accMotivoRegla', articulo: 'accMotivoArticulo', equipo: 'accMotivoEquipo',
 };
 
-/** Resumen de solo lectura: "Todo el equipo" o las reglas como etiquetas. */
-export const ResumenAcceso = ({ acceso, contexto = 'articulo' }) => {
+/**
+ * Textos de la base de conocimiento o, para las claves que quien lo usa
+ * cambie con `textos(clave, vars)` (devuelve undefined para las demás), los suyos.
+ */
+const useTexto = (textos) => {
   const tc = useTextoConocimiento();
+  return (clave, vars) => textos?.(clave, vars) ?? tc(clave, vars);
+};
+
+/**
+ * "Lo verán N personas" con la lista desplegable de quiénes y por qué.
+ * motivo(persona) -> clave de MOTIVOS o null; `todos`: sin restringir (otro
+ * texto del total).
+ */
+const ListaQuienes = ({ motivo, todos, tc }) => {
+  const personas = usePersonas();
+  const [verLista, setVerLista] = useState(false);
+  const quienes = personas.map((u) => ({ u, m: motivo(u) })).filter((x) => x.m);
+  const resumen = todos
+    ? tc('accLoVenTodos', { n: quienes.length })
+    : (quienes.length === 1 ? tc('accLoVeranUno') : tc('accLoVeran', { n: quienes.length }));
+  return (
+    <div className="rounded-lg bg-[var(--color-surface-2)] px-3 py-2.5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[12.5px] font-medium text-[var(--color-text)]">{resumen}</p>
+        {quienes.length > 0 && (
+          <button type="button" className="inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--color-primary)] hover:underline" aria-expanded={verLista} onClick={() => setVerLista((v) => !v)}>
+            {verLista ? tc('accOcultarQuienes') : tc('accVerQuienes')}
+            <ChevronDown size={14} className={`transition-transform ${verLista ? 'rotate-180' : ''}`} aria-hidden="true" />
+          </button>
+        )}
+      </div>
+      {verLista && (
+        <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
+          {quienes.map(({ u, m }) => (
+            <li key={u.id} className="flex items-center gap-2">
+              <UserAvatar usuario={u} size={24} radius={8} fontSize="0.65rem" />
+              <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-text)]">{u.nombre}</span>
+              <span className="shrink-0 text-[11.5px] text-[var(--color-text-muted)]">{tc(MOTIVOS[m])}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">{tc('accPrevisionNota')}</p>
+    </div>
+  );
+};
+
+/**
+ * Resumen de solo lectura: "Todo el equipo" o las reglas como etiquetas. Con
+ * `motivo(valor, persona)` agrega debajo cuántas personas lo ven y quiénes.
+ */
+export const ResumenAcceso = ({
+  acceso, contexto = 'articulo', textos, motivo,
+}) => {
+  const tc = useTexto(textos);
   const describir = useDescribirRegla();
+  let resumen;
   if (!acceso.restringido) {
-    return (
+    resumen = (
       <p className="flex items-center gap-2 text-[13px] text-[var(--color-text)]">
         <Globe size={15} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
         {contexto === 'archivo' ? tc('accIgualArticulo') : tc('accTodoEquipo')}
       </p>
     );
-  }
-  if (acceso.reglas.length === 0) {
-    return (
+  } else if (acceso.reglas.length === 0) {
+    resumen = (
       <p className="flex items-start gap-2 text-[13px] text-[var(--color-text)]">
         <Lock size={15} className="mt-0.5 shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />
         {contexto === 'archivo' ? tc('accNadieMasArchivo') : tc('accNadieMas')}
       </p>
     );
+  } else {
+    resumen = (
+      <ul className="flex flex-wrap gap-1.5" aria-label={tc('accQuienVe')}>
+        {acceso.reglas.map((r) => (
+          <li key={claveRegla(r)} className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[12px] text-[var(--color-text)]">
+            {r.usuarioId ? <Users size={12} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" /> : <Lock size={12} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />}
+            <span className="truncate">{describir(r)}</span>
+          </li>
+        ))}
+      </ul>
+    );
   }
+  if (!motivo) return resumen;
   return (
-    <ul className="flex flex-wrap gap-1.5" aria-label={tc('accQuienVe')}>
-      {acceso.reglas.map((r) => (
-        <li key={claveRegla(r)} className="inline-flex max-w-full items-center gap-1 rounded-full border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2.5 py-1 text-[12px] text-[var(--color-text)]">
-          {r.usuarioId ? <Users size={12} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" /> : <Lock size={12} className="shrink-0 text-[var(--color-text-muted)]" aria-hidden="true" />}
-          <span className="truncate">{describir(r)}</span>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-3">
+      {resumen}
+      <ListaQuienes motivo={(u) => motivo(acceso, u)} todos={!acceso.restringido && contexto !== 'archivo'} tc={tc} />
+    </div>
   );
 };
 
@@ -65,15 +128,18 @@ const Opcion = ({ nombre, elegida, onElegir, Icono, titulo, ayuda }) => (
 /**
  * Props: valor { restringido, reglas }, onCambio(valor), contexto
  * ('articulo' | 'archivo'), autorId (quien escribió o escribirá el artículo)
- * y, en un archivo, accesoArticulo y subidoPorId para la vista previa.
+ * y, en un archivo, accesoArticulo y subidoPorId para la vista previa. Para
+ * usarlo fuera de la base: textos(clave, vars) y motivo(valor, persona), que
+ * reemplaza a motivoArticulo / motivoArchivo.
  */
-const SelectorAcceso = ({ valor, onCambio, contexto = 'articulo', autorId, accesoArticulo, subidoPorId, nombre = 'acceso' }) => {
-  const tc = useTextoConocimiento();
+const SelectorAcceso = ({
+  valor, onCambio, contexto = 'articulo', autorId, accesoArticulo, subidoPorId, nombre = 'acceso', textos, motivo: motivoDe,
+}) => {
+  const tc = useTexto(textos);
   const { areas, nombreArea } = useConfiguracion();
   const { usuario: yo } = useAuth();
   const personas = usePersonas();
   const describir = useDescribirRegla();
-  const [verLista, setVerLista] = useState(false);
   const esArchivo = contexto === 'archivo';
   const { reglas } = valor;
 
@@ -97,10 +163,12 @@ const SelectorAcceso = ({ valor, onCambio, contexto = 'articulo', autorId, acces
     ? reglas.filter((x) => x.usuarioId !== id)
     : [...reglas, { area: null, rol: null, usuarioId: id }]);
 
-  const motivo = (u) => (esArchivo
-    ? motivoArchivo(valor, u, { accesoArticulo, autorId, subidoPorId })
-    : motivoArticulo(valor, u, autorId));
-  const quienes = personas.map((u) => ({ u, m: motivo(u) })).filter((x) => x.m);
+  const motivo = (u) => {
+    if (motivoDe) return motivoDe(valor, u);
+    return esArchivo
+      ? motivoArchivo(valor, u, { accesoArticulo, autorId, subidoPorId })
+      : motivoArticulo(valor, u, autorId);
+  };
   const yoFuera = Boolean(yo) && valor.restringido && !motivo(yo);
 
   const opcionesNivel = [
@@ -118,10 +186,6 @@ const SelectorAcceso = ({ valor, onCambio, contexto = 'articulo', autorId, acces
       || nombreArea(a.area).localeCompare(nombreArea(b.area), 'es')
       || a.nombre.localeCompare(b.nombre, 'es'))
     .map((u) => ({ valor: u.id, etiqueta: u.nombre, grupo: nombreArea(u.area) }));
-
-  const resumen = !valor.restringido && !esArchivo
-    ? tc('accLoVenTodos', { n: quienes.length })
-    : (quienes.length === 1 ? tc('accLoVeranUno') : tc('accLoVeran', { n: quienes.length }));
 
   return (
     <div className="space-y-3">
@@ -186,29 +250,7 @@ const SelectorAcceso = ({ valor, onCambio, contexto = 'articulo', autorId, acces
         </>
       )}
 
-      <div className="rounded-lg bg-[var(--color-surface-2)] px-3 py-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[12.5px] font-medium text-[var(--color-text)]">{resumen}</p>
-          {quienes.length > 0 && (
-            <button type="button" className="inline-flex items-center gap-1 text-[12.5px] font-medium text-[var(--color-primary)] hover:underline" aria-expanded={verLista} onClick={() => setVerLista((v) => !v)}>
-              {verLista ? tc('accOcultarQuienes') : tc('accVerQuienes')}
-              <ChevronDown size={14} className={`transition-transform ${verLista ? 'rotate-180' : ''}`} aria-hidden="true" />
-            </button>
-          )}
-        </div>
-        {verLista && (
-          <ul className="mt-2 max-h-56 space-y-1.5 overflow-y-auto">
-            {quienes.map(({ u, m }) => (
-              <li key={u.id} className="flex items-center gap-2">
-                <UserAvatar usuario={u} size={24} radius={8} fontSize="0.65rem" />
-                <span className="min-w-0 flex-1 truncate text-[12.5px] text-[var(--color-text)]">{u.nombre}</span>
-                <span className="shrink-0 text-[11.5px] text-[var(--color-text-muted)]">{tc(MOTIVOS[m])}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="mt-1 text-[11.5px] text-[var(--color-text-muted)]">{tc('accPrevisionNota')}</p>
-      </div>
+      <ListaQuienes motivo={motivo} todos={!valor.restringido && !esArchivo} tc={tc} />
 
       {yoFuera && (
         <p className="flex items-start gap-2 rounded-lg border border-[color:color-mix(in_srgb,var(--badge-warning-fg)_30%,transparent)] bg-[var(--badge-warning-bg)] px-3 py-2 text-[12.5px] text-[var(--badge-warning-fg)]" role="status">

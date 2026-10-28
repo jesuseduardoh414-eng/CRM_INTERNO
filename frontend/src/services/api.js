@@ -927,14 +927,32 @@ export const finanzasService = {
   cotizaciones: {
     listar: (params = {}) => pedirFinanzas(`/cotizaciones${construirQuery(params)}`),
     obtener: (id) => pedirFinanzas(`/cotizaciones/${id}`),
-    // datos: { tipo, titulo, descripcion, empresaId, contraparteNombre, moneda, fecha, monto, nota }
-    crear: (archivo, datos) => pedirFinanzas('/cotizaciones', { metodo: 'POST', formData: formularioConArchivo(archivo, datos) }),
+    // { total }: cuántas ve la persona (el menú pregunta si no tiene el permiso de verlas).
+    compartidas: () => pedirFinanzas('/cotizaciones/compartidas'),
+    // { ids }: personas con el permiso de ver cotizaciones (quienes ven una sin restringir).
+    conPermiso: () => pedirFinanzas('/cotizaciones/con-permiso'),
+    // datos: { tipo, titulo, descripcion, empresaId, contraparteNombre, moneda, fecha, monto, nota, acceso? }
+    // (acceso: { restringido, reglas }, viaja como JSON)
+    crear: (archivo, { acceso, ...datos }) => pedirFinanzas('/cotizaciones', {
+      metodo: 'POST', formData: formularioConArchivo(archivo, { ...datos, acceso: acceso ? JSON.stringify(acceso) : undefined }),
+    }),
     nuevaVersion: (id, archivo, datos) => pedirFinanzas(`/cotizaciones/${id}/versiones`, { metodo: 'POST', formData: formularioConArchivo(archivo, datos) }),
     editar: (id, datos) => pedirFinanzas(`/cotizaciones/${id}`, { metodo: 'PUT', cuerpo: datos }),
+    // acceso: { restringido, reglas: [{ area, rol, usuarioId }] }
+    cambiarAcceso: (id, acceso) => pedirFinanzas(`/cotizaciones/${id}/acceso`, { metodo: 'PUT', cuerpo: acceso }),
     cambiarEstado: (id, estado) => pedirFinanzas(`/cotizaciones/${id}/estado`, { metodo: 'POST', cuerpo: { estado } }),
     eliminar: (id) => pedirFinanzas(`/cotizaciones/${id}`, { metodo: 'DELETE' }),
     urlArchivo: (versionId) => urlBlob(`${API_URL}/finanzas/cotizaciones/versiones/${versionId}/archivo`),
     descargarArchivo: (versionId, nombre) => descargarArchivo(`${API_URL}/finanzas/cotizaciones/versiones/${versionId}/archivo?descargar=1`, nombre),
+  },
+  // "Mandar a finanzas" un archivo de una tarea o de un proyecto.
+  desdeAdjunto: {
+    // { copias: { [adjuntoId]: [{ tipo: 'cotizacion' | 'gasto', id, folio, numero? }] } }
+    copias: (ids) => pedirFinanzas(`/desde-adjunto${construirQuery({ ids: ids.join(',') })}`),
+    // Archivo, tarea, proyecto (con su cliente), destinos posibles y copias.
+    contexto: (adjuntoId) => pedirFinanzas(`/desde-adjunto/${adjuntoId}`),
+    // { cotizacion?: { modo: 'nueva' | 'version', ... }, gasto?: { modo: 'nuevo' | 'existente', ... } }
+    mandar: (adjuntoId, datos) => pedirFinanzas(`/desde-adjunto/${adjuntoId}`, { metodo: 'POST', cuerpo: datos }),
   },
   informe: (params = {}) => pedirFinanzas(`/informe${construirQuery(params)}`),
   descargarInforme: (params = {}) => descargarArchivo(

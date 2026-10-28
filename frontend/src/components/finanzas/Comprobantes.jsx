@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Download, Eye, FileText, FileUp, Image as ImageIcon, Loader2, Trash2 } from 'lucide-react';
 import Modal from '../Modal';
-import { Panel } from './piezas';
+import { OrigenArchivo, Panel } from './piezas';
 import { useToast } from '../../context/ToastContext';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
@@ -118,12 +118,15 @@ const Comprobantes = ({ comprobantes = [], puedeEditar, onSubir, onCambio, titul
                 <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${esImagen(c.mime) ? 'bg-[var(--badge-info-bg)] text-[var(--badge-info-fg)]' : 'bg-[var(--badge-danger-bg)] text-[var(--badge-danger-fg)]'}`} aria-hidden="true">
                   {esImagen(c.mime) ? <ImageIcon size={17} /> : <FileText size={17} />}
                 </span>
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => ver(c)}>
-                  <span className="block truncate text-[13px] font-medium text-[var(--color-text)] hover:underline">{c.nombreOriginal}</span>
-                  <span className="block truncate text-[12px] text-[var(--color-text-muted)]">
-                    {formatearTamano(c.tamano)} · {tf('finCompSubidoPor', { nombre: c.subidoPor?.nombre || '—', fecha: new Date(c.creadoEn).toLocaleDateString(locale) })}
-                  </span>
-                </button>
+                <div className="min-w-0 flex-1">
+                  <button type="button" className="block w-full min-w-0 text-left" onClick={() => ver(c)}>
+                    <span className="block truncate text-[13px] font-medium text-[var(--color-text)] hover:underline">{c.nombreOriginal}</span>
+                    <span className="block truncate text-[12px] text-[var(--color-text-muted)]">
+                      {formatearTamano(c.tamano)} · {tf('finCompSubidoPor', { nombre: c.subidoPor?.nombre || '—', fecha: new Date(c.creadoEn).toLocaleDateString(locale) })}
+                    </span>
+                  </button>
+                  <OrigenArchivo item={c} texto={tf('finOrigenDesde')} />
+                </div>
                 <div className="flex shrink-0 items-center">
                   <button type="button" className="dash-icono max-md:!h-10 max-md:!w-10" title={tf('finCompVer')} aria-label={tf('finCompVer')} onClick={() => ver(c)} disabled={abriendo === c.id}>
                     {abriendo === c.id ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />}

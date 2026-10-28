@@ -102,4 +102,4 @@ const ver = async (req, res) => {
   }
 };
 
-module.exports = { ver };
+module.exports = { ver, puedeVerAdjunto };

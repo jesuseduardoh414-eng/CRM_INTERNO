@@ -11,6 +11,7 @@ import LogoMarca from './LogoMarca';
 import { useConfiguracion } from '../context/ConfiguracionContext';
 import { agendaService } from '../services/api';
 import { useMisTareas } from '../hooks/useMisTareas';
+import { useCotizacionesCompartidas } from '../hooks/useCotizacionesCompartidas';
 import { useTextoFinanzas } from '../hooks/useTextoFinanzas';
 import { getEstadoProyecto } from '../utils/estadosProyecto';
 import { RUTA_INFORME, categoriasVisibles, puedeVerFinanzas, rutaCategoria, tieneAccesoFinanzas } from '../utils/finanzas';
@@ -82,6 +83,12 @@ const Layout = ({ children }) => {
   const finanzasActivas = moduloActivo('finanzas') && tieneAccesoFinanzas(usuario);
   const categoriasGasto = finanzasActivas ? categoriasVisibles(usuario) : [];
   const veInforme = finanzasActivas && puedeVerFinanzas(usuario, 'informe');
+  // Cotizaciones: también quien no tiene el permiso de verlas pero le
+  // compartieron alguna (se pregunta al servidor).
+  const veCotizaciones = finanzasActivas && puedeVerFinanzas(usuario, 'cotizaciones');
+  const cotizacionesCompartidas = useCotizacionesCompartidas(
+    moduloActivo('finanzas') && ['ADMIN', 'MIEMBRO'].includes(usuario?.rol) && !puedeVerFinanzas(usuario, 'cotizaciones'),
+  );
   const subGastos = [
     ...categoriasGasto.map((c) => ({ to: rutaCategoria(c), etiqueta: tf(`finCat${c}`), corta: tf(`finCat${c}Corta`) })),
     ...(veInforme ? [{ to: RUTA_INFORME, etiqueta: tf('finInformeTitulo'), corta: tf('finInformeTitulo') }] : []),
@@ -91,7 +98,7 @@ const Layout = ({ children }) => {
     finanzasActivas && puedeVerFinanzas(usuario, 'tesoreria') && { to: '/tesoreria', etiqueta: tf('finTesoreriaTitulo'), Icono: PiggyBank },
     // /gastos lleva a la primera categoría visible (colapsado, el icono es un enlace directo).
     subGastos.length > 0 && { to: '/gastos', etiqueta: tf('finGastosTitulo'), Icono: ReceiptText, sub: subGastos, raiz: '/gastos' },
-    finanzasActivas && puedeVerFinanzas(usuario, 'cotizaciones') && { to: '/cotizaciones', etiqueta: tf('finCotizacionesTitulo'), Icono: FileStack },
+    (veCotizaciones || cotizacionesCompartidas) && { to: '/cotizaciones', etiqueta: tf('finCotizacionesTitulo'), Icono: FileStack },
   ].filter(Boolean);
   // Accesos a sus proyectos. El Layout siempre está montado, así que es quien
   // recarga cuando otra pantalla cambia una tarea.

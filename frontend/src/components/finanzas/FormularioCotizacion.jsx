@@ -1,19 +1,27 @@
 // Ventana para subir una cotización nueva (datos + archivo original + monto)
 // o, solo el administrador general, corregir sus datos. Al corregir no se
-// tocan los archivos: las versiones nunca se reemplazan.
+// tocan los archivos: las versiones nunca se reemplazan. Quien puede elegir
+// quién ve las cotizaciones lo elige aquí (al subirla o al corregirla) o
+// desde su ficha.
 import { useState } from 'react';
 import { FileUp, Loader2, Lock, Save, X } from 'lucide-react';
 import Modal from '../Modal';
 import { Button } from '../ui/button';
 import SelectorSimple from '../SelectorSimple';
+import { SelectorAccesoCotizacion } from './AccesoCotizacion';
 import { finanzasService } from '../../services/api';
+import { useAuth } from '../../context/AuthContext';
 import { usePreferences } from '../../context/PreferencesContext';
 import { useToast } from '../../context/ToastContext';
 import { useTextoFinanzas } from '../../hooks/useTextoFinanzas';
 import { AvisoError, Campo, Seccion } from './piezas';
 import {
-  ACEPTA_DOCUMENTO, MONEDAS, TIPOS_COTIZACION, comprobanteMaxBytes, comprobanteMaxMegas, esDocumentoValido, hoyClave,
+  ACEPTA_DOCUMENTO, MONEDAS, TIPOS_COTIZACION, comprobanteMaxBytes, comprobanteMaxMegas, esDocumentoValido, hoyClave, opcionesCliente, puedeFinanzas,
 } from '../../utils/finanzas';
+import { ACCESO_ABIERTO, accesoDe, claveRegla } from '../../utils/accesoConocimiento';
+
+/** Huella de un acceso para saber si cambió (como en el editor de la base de conocimiento). */
+const huellaAcceso = (a) => JSON.stringify([a.restringido, a.restringido ? a.reglas.map(claveRegla).sort() : []]);
 
 const desdeCotizacion = (c) => ({
   tipo: c?.tipo || 'RECIBIDA',
@@ -21,6 +29,7 @@ const desdeCotizacion = (c) => ({
   descripcion: c?.descripcion || '',
   empresaId: c?.empresaId ? String(c.empresaId) : '',
   contraparteNombre: c?.contraparteNombre || '',
+  clienteId: c?.clienteId ? String(c.clienteId) : '',
   moneda: c?.moneda || 'MXN',
   fecha: c?.fecha || hoyClave(),
   monto: '',
@@ -68,8 +77,14 @@ const FormularioCotizacion = ({ open, cotizacion, catalogos, onClose, onGuardado
   const { t } = usePreferences();
   const tf = useTextoFinanzas();
   const { showToast } = useToast();
+  const { usuario } = useAuth();
   const editando = Boolean(cotizacion?.id);
+  const eligeAcceso = puedeFinanzas(usuario, 'cotizaciones', 'acceso');
   const [form, setForm] = useState(() => desdeCotizacion(cotizacion));
+  const accesoInicial = editando ? accesoDe(cotizacion) : ACCESO_ABIERTO;
+  const [acceso, setAcceso] = useState(accesoInicial);
+  // Al corregir, el acceso solo viaja si cambió (el orden de las reglas no importa).
+  const cambioAcceso = eligeAcceso && huellaAcceso(acceso) !== huellaAcceso(accesoInicial);
   const [archivo, setArchivo] = useState(null);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState(null);
@@ -89,6 +104,8 @@ const FormularioCotizacion = ({ open, cotizacion, catalogos, onClose, onGuardado
     });
     setError(null);
   };
+  // Para qué cliente es una recibida (aparece en su ficha).
+  const clientes = opcionesCliente(catalogos?.clientes, cotizacion?.cliente);
   // Al cambiar de tipo, la ficha elegida ya no es del directorio que toca.
   const elegirTipo = (tipo) => setForm((p) => ({ ...p, tipo, empresaId: '' }));
 
@@ -103,13 +120,23 @@ const FormularioCotizacion = ({ open, cotizacion, catalogos, onClose, onGuardado
       descripcion: form.descripcion,
       empresaId: form.empresaId || null,
       contraparteNombre: form.contraparteNombre,
+      // En una enviada el cliente es la contraparte.
+      clienteId: form.tipo === 'RECIBIDA' ? form.clienteId || null : null,
       moneda: form.moneda,
       fecha: form.fecha,
     };
     try {
       const data = editando
-        ? await finanzasService.cotizaciones.editar(cotizacion.id, datos)
-        : await finanzasService.cotizaciones.crear(archivo, { ...datos, empresaId: datos.empresaId || '', monto: form.monto, nota: form.nota });
+        ? await finanzasService.cotizaciones.editar(cotizacion.id, cambioAcceso ? { ...datos, acceso } : datos)
+        : await finanzasService.cotizaciones.crear(archivo, {
+          ...datos, empresaId: datos.empresaId || '', clienteId: datos.clienteId || '', monto: form.monto, nota: form.nota, acceso: eligeAcceso && acceso.restringido ? acceso : undefined,
+        });
+      if (data.sinAcceso) {
+        // Se quitó a sí mismo de la lista: ya no la ve.
+        showToast(tf('finCotAccSinAcceso'), 'success');
+        onGuardado(null);
+        return;
+      }
       showToast(editando ? tf('finCotActualizada') : tf('finCotCreada', { folio: data.cotizacion.folio }), 'success');
       onGuardado(data.cotizacion);
     } catch (err) {
@@ -167,6 +194,11 @@ const FormularioCotizacion = ({ open, cotizacion, catalogos, onClose, onGuardado
           <Campo id="cot-contraparte" label={directorio.length > 0 ? tf('finCotNombreContraparte') : tf(`finCotContraparte${form.tipo}`)} requerido ancho={directorio.length === 0}>
             <input id="cot-contraparte" name="contraparteNombre" className="form-input" value={form.contraparteNombre} onChange={cambiar} maxLength={255} placeholder={tf('finCotNombreContrapartePh')} />
           </Campo>
+          {form.tipo === 'RECIBIDA' && clientes.length > 0 && (
+            <Campo id="cot-cliente" label={tf('finClienteDe')} ayuda={tf('finClienteDeAyuda')} ancho>
+              <SelectorSimple id="cot-cliente" valor={form.clienteId} onCambio={elegir('clienteId')} opcionVacia={tf('finClienteNinguno')} opciones={clientes} />
+            </Campo>
+          )}
           <Campo id="cot-fecha" label={tf('finCotFecha')} requerido>
             <input id="cot-fecha" name="fecha" type="date" className="form-input" value={form.fecha} onChange={cambiar} required />
           </Campo>
@@ -190,6 +222,14 @@ const FormularioCotizacion = ({ open, cotizacion, catalogos, onClose, onGuardado
             <Campo id="cot-nota" label={tf('finCotNotaOriginal')}>
               <input id="cot-nota" name="nota" className="form-input" value={form.nota} onChange={cambiar} maxLength={2000} />
             </Campo>
+          </Seccion>
+        )}
+
+        {eligeAcceso && (
+          <Seccion titulo={tf('finCotAccQuienVe')}>
+            <div className="sm:col-span-2">
+              <SelectorAccesoCotizacion valor={acceso} onCambio={setAcceso} creadorId={editando ? cotizacion.creadoPorId : usuario?.id} nombre="cot-acceso" />
+            </div>
           </Seccion>
         )}
       </form>
